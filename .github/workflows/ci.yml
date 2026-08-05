@@ -1,0 +1,35 @@
+name: CI Build & Test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker environment
+        run: |
+          docker build -t thermal-env .
+
+      - name: Build C++ Project inside Docker
+        run: |
+          docker run --rm -v ${{ github.workspace }:/workspace heat-env bash -c "
+            cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && \
+            cmake --build build
+          "
+
+      - name: Run Executable
+        run: |
+          docker run --rm -v ${{ github.workspace }:/workspace thermal-env bash -c "
+            ./build/thermal_solver
+          "
