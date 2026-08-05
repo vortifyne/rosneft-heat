@@ -23,13 +23,13 @@ jobs:
 
       - name: Build C++ Project inside Docker
         run: |
-          docker run --rm -v ${{ github.workspace }:/workspace heat-env bash -c "
+          docker run --rm -v ${{ github.workspace }}:/workspace thermal-env bash -c "
             cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && \
             cmake --build build
           "
 
       - name: Run Executable
         run: |
-          docker run --rm -v ${{ github.workspace }:/workspace thermal-env bash -c "
+          docker run --rm -v ${{ github.workspace }}:/workspace thermal-env bash -c "
             ./build/thermal_solver
           "
