@@ -1,6 +1,6 @@
-#include <iostream>
-#include <format>
 #include <fmt/core.h>
+#include <format>
+#include <iostream>
 
 int main() {
 #if __cplusplus >= 202002L
@@ -9,6 +9,6 @@ int main() {
     std::cout << std::format("Default standard: {}\n", __cplusplus);
 #endif
 
-    fmt::print("Hello World from fmt version {}.{}.{}!\n",
-               FMT_VERSION / 10000, (FMT_VERSION % 10000) / 100, FMT_VERSION % 100);
+    fmt::print("Hello World from fmt version {}.{}.{}!\n", FMT_VERSION / 10000,
+               (FMT_VERSION % 10000) / 100, FMT_VERSION % 100);
 }

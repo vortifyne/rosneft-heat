@@ -3,6 +3,6 @@
 #include <vector>
 
 struct ModelHeatState {
-    double time;                            
+    double time;
     std::vector<double> temperature;
 };
