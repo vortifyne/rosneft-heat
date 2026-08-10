@@ -4,6 +4,8 @@
   "version-string": "0.1.0",
   "dependencies": [
     "fmt",
-    "gtest"
+    "gtest",
+    "eigen3",
+    "suitesparse-umfpack"
   ]
 }

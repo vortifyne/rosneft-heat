@@ -19,13 +19,19 @@ jobs:
 
       - name: Build C++ Project inside Docker
         run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace heat-env bash -c "
+          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} heat-env bash -c "
             cmake --preset release && \
             cmake --build --preset release
           "
 
+      - name: Run Tests inside Docker
+        run: |
+          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} heat-env bash -c "
+            ctest --test-dir build/release --output-on-failure
+          "
+
       - name: Run Executable
         run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace heat-env bash -c "
+          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} heat-env bash -c "
             ./build/release/heat_solver
           "
