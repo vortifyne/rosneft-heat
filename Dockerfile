@@ -7,7 +7,8 @@ ENV PATH="${VCPKG_ROOT}:${PATH}"
 RUN apt-get update && apt-get install -y \
     build-essential g++ clang cmake ninja-build \
     git curl zip unzip tar pkg-config gfortran \
-    liblapack-dev libblas-dev \
+    liblapack-dev libblas-dev autoconf autoconf-archive \
+    automake libtool \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/microsoft/vcpkg.git /opt/vcpkg && \
