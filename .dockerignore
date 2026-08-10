@@ -1,0 +1,8 @@
+.git
+.github
+build/
+.vcpkg/
+vcpkg_installed/
+.vscode
+.idea
+compile_commands.json

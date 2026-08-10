@@ -1,7 +1,7 @@
 .PHONY: docker-build build-debug build-release run clean test
 
 docker-build:
-	docker build -t heat-env .
+	DOCKER_BUILDKIT=1 docker build -t heat-env .
 
 build-debug:
 	docker run --rm -v $(shell pwd):/workspace heat-env bash -c "cmake --preset debug && cmake --build --preset debug"
