@@ -5,6 +5,7 @@
 #include "time/time_history.hpp"
 
 #include <memory>
+#include <optional>
 
 class SemiDiscreteSystem;
 class TimeScheme;
@@ -19,6 +20,10 @@ struct TimeIntegrationResult {
     TimeIntegrationStatus status;
     int accepted_steps;
     int rejected_steps;
+    int nonlinear_iterations = 0;
+    int linear_iterations = 0;
+    std::optional<NonlinearSolveStatus> last_nonlinear_status;
+    std::optional<LinearSolveStatus> last_linear_status;
 
     bool completed() const noexcept {
         return status == TimeIntegrationStatus::completed;

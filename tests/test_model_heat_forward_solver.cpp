@@ -1,5 +1,6 @@
 #include "forward/model_heat_forward_solver.hpp"
 
+#include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
 #include <stdexcept>
@@ -72,6 +73,10 @@ TEST(ModelHeatForwardSolverTest,
     ASSERT_TRUE(result.completed());
     EXPECT_EQ(result.integration.accepted_steps, 3);
     EXPECT_EQ(result.integration.rejected_steps, 0);
+    EXPECT_EQ(result.integration.nonlinear_iterations, 3);
+    EXPECT_EQ(result.integration.linear_iterations, 3);
+    EXPECT_TRUE(std::isfinite(result.elapsed_time_seconds));
+    EXPECT_GE(result.elapsed_time_seconds, 0.0);
     EXPECT_DOUBLE_EQ(result.final_state.time, 0.3);
     EXPECT_EQ(result.final_state.temperature.size(), grid.cell_count());
     ASSERT_EQ(result.calculated_temperature.size(), 7);

@@ -89,6 +89,12 @@ TEST(TimeIntegratorTest, AdvancesWithFixedStepsAndMatchesFinalTimeExactly) {
     EXPECT_TRUE(result.completed());
     EXPECT_EQ(result.accepted_steps, 3);
     EXPECT_EQ(result.rejected_steps, 0);
+    EXPECT_EQ(result.nonlinear_iterations, 3);
+    EXPECT_EQ(result.linear_iterations, 3);
+    ASSERT_TRUE(result.last_nonlinear_status.has_value());
+    EXPECT_EQ(*result.last_nonlinear_status, NonlinearSolveStatus::converged_residual_absolute);
+    ASSERT_TRUE(result.last_linear_status.has_value());
+    EXPECT_EQ(*result.last_linear_status, LinearSolveStatus::converged);
     EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 1.0);
     ASSERT_EQ(integrator.current_snapshot().solution.size(), 1);
     EXPECT_NEAR(integrator.current_snapshot().solution[0], 1.0 / (1.4 * 1.4 * 1.2), 1e-12);
@@ -107,6 +113,10 @@ TEST(TimeIntegratorTest, ReturnsImmediatelyWhenAlreadyAtFinalTime) {
 
     EXPECT_TRUE(result.completed());
     EXPECT_EQ(result.accepted_steps, 0);
+    EXPECT_EQ(result.nonlinear_iterations, 0);
+    EXPECT_EQ(result.linear_iterations, 0);
+    EXPECT_FALSE(result.last_nonlinear_status.has_value());
+    EXPECT_FALSE(result.last_linear_status.has_value());
     EXPECT_TRUE(system.evaluated_times().empty());
     EXPECT_DOUBLE_EQ(integrator.current_snapshot().solution[0], 3.0);
 }
@@ -143,6 +153,12 @@ TEST(TimeIntegratorTest, StopsAtFirstNonlinearFailureAndKeepsAcceptedState) {
     EXPECT_FALSE(result.completed());
     EXPECT_EQ(result.accepted_steps, 0);
     EXPECT_EQ(result.rejected_steps, 1);
+    EXPECT_EQ(result.nonlinear_iterations, 0);
+    EXPECT_EQ(result.linear_iterations, 0);
+    ASSERT_TRUE(result.last_nonlinear_status.has_value());
+    EXPECT_EQ(*result.last_nonlinear_status, NonlinearSolveStatus::linear_solve_failed);
+    ASSERT_TRUE(result.last_linear_status.has_value());
+    EXPECT_EQ(*result.last_linear_status, LinearSolveStatus::factorization_failed);
     EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 0.0);
     EXPECT_DOUBLE_EQ(integrator.current_snapshot().solution[0], 2.0);
 }

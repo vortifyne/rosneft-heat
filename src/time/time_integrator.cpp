@@ -64,6 +64,10 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
 
     int accepted_steps = 0;
     int rejected_steps = 0;
+    int nonlinear_iterations = 0;
+    int linear_iterations = 0;
+    std::optional<NonlinearSolveStatus> last_nonlinear_status;
+    std::optional<LinearSolveStatus> last_linear_status;
 
     while (time_history_.current().time < final_time) {
         const double current_time = time_history_.current().time;
@@ -77,6 +81,10 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
                 .status = TimeIntegrationStatus::time_step_too_small,
                 .accepted_steps = accepted_steps,
                 .rejected_steps = rejected_steps,
+                .nonlinear_iterations = nonlinear_iterations,
+                .linear_iterations = linear_iterations,
+                .last_nonlinear_status = last_nonlinear_status,
+                .last_linear_status = last_linear_status,
             };
         }
 
@@ -85,6 +93,12 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
             time_scheme_->make_nonlinear_system(semi_discrete_system, time_history_, step_end_time);
         const NonlinearSolveResult nonlinear_result = nonlinear_solver_->solve(
             *nonlinear_system, solution, nonlinear_request, linear_request);
+        nonlinear_iterations += nonlinear_result.iterations;
+        linear_iterations += nonlinear_result.linear_iterations;
+        last_nonlinear_status = nonlinear_result.status;
+        if (nonlinear_result.last_linear_status.has_value()) {
+            last_linear_status = nonlinear_result.last_linear_status;
+        }
 
         if (!nonlinear_result.converged()) {
             ++rejected_steps;
@@ -92,6 +106,10 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
                 .status = TimeIntegrationStatus::nonlinear_solve_failed,
                 .accepted_steps = accepted_steps,
                 .rejected_steps = rejected_steps,
+                .nonlinear_iterations = nonlinear_iterations,
+                .linear_iterations = linear_iterations,
+                .last_nonlinear_status = last_nonlinear_status,
+                .last_linear_status = last_linear_status,
             };
         }
 
@@ -104,5 +122,9 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
         .status = TimeIntegrationStatus::completed,
         .accepted_steps = accepted_steps,
         .rejected_steps = rejected_steps,
+        .nonlinear_iterations = nonlinear_iterations,
+        .linear_iterations = linear_iterations,
+        .last_nonlinear_status = last_nonlinear_status,
+        .last_linear_status = last_linear_status,
     };
 }

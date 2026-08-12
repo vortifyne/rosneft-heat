@@ -23,6 +23,7 @@ struct ModelHeatForwardResult {
     TimeIntegrationResult integration;
     ModelHeatState final_state;
     Vector calculated_temperature;
+    double elapsed_time_seconds = 0.0;
 
     bool completed() const noexcept {
         return integration.completed();

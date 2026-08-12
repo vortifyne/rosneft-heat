@@ -99,6 +99,8 @@ TEST(NonlinearSolverTest, ConvergesWithoutIterationWhenInitialResidualIsSmall) {
     EXPECT_EQ(result.status, NonlinearSolveStatus::converged_residual_absolute);
     EXPECT_TRUE(result.converged());
     EXPECT_EQ(result.iterations, 0);
+    EXPECT_EQ(result.linear_iterations, 0);
+    EXPECT_FALSE(result.last_linear_status.has_value());
     EXPECT_EQ(system.newton_assemblies, 0);
     EXPECT_DOUBLE_EQ(x[0], 1.0);
 }
@@ -114,6 +116,9 @@ TEST(NonlinearSolverTest, NewtonMethodConvergesAndBuildsCscMatrices) {
     EXPECT_TRUE(result.converged());
     EXPECT_EQ(result.status, NonlinearSolveStatus::converged_residual_absolute);
     EXPECT_GT(result.iterations, 1);
+    EXPECT_EQ(result.linear_iterations, result.iterations);
+    ASSERT_TRUE(result.last_linear_status.has_value());
+    EXPECT_EQ(*result.last_linear_status, LinearSolveStatus::converged);
     EXPECT_NEAR(x[0], 1.4142135623730951, 1e-12);
     EXPECT_EQ(system.picard_assemblies, 0);
     EXPECT_EQ(system.newton_assemblies, result.iterations);
@@ -222,6 +227,9 @@ TEST(NonlinearSolverTest, ReportsLinearSolveFailure) {
 
     EXPECT_EQ(result.status, NonlinearSolveStatus::linear_solve_failed);
     EXPECT_EQ(result.iterations, 0);
+    EXPECT_EQ(result.linear_iterations, 0);
+    ASSERT_TRUE(result.last_linear_status.has_value());
+    EXPECT_EQ(*result.last_linear_status, LinearSolveStatus::factorization_failed);
     EXPECT_DOUBLE_EQ(x[0], 0.0);
 }
 

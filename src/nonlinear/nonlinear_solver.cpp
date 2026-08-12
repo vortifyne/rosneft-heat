@@ -26,6 +26,8 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
             .status = NonlinearSolveStatus::nonfinite_residual,
             .iterations = 0,
             .final_residual_norm = std::numeric_limits<double>::infinity(),
+            .linear_iterations = 0,
+            .last_linear_status = std::nullopt,
         };
     }
 
@@ -35,9 +37,13 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
             .status = NonlinearSolveStatus::converged_residual_absolute,
             .iterations = 0,
             .final_residual_norm = initial_residual_norm,
+            .linear_iterations = 0,
+            .last_linear_status = std::nullopt,
         };
     }
 
+    int linear_iterations = 0;
+    std::optional<LinearSolveStatus> last_linear_status;
     for (int iteration = 0; iteration < nonlinear_request.max_iterations; ++iteration) {
         SparseMatrix matrix(x.size(), x.size(), linear_solver_->required_storage_order());
         nonlinear_system.assemble_matrix(nonlinear_request.nonlinear_method, x, matrix);
@@ -47,12 +53,16 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
         LinearSolveRequest current_linear_request = linear_request;
         const LinearSolveResult linear_result =
             linear_solver_->solve(matrix, b, delta_x, current_linear_request);
+        linear_iterations += linear_result.iterations;
+        last_linear_status = linear_result.status;
 
         if (linear_result.status != LinearSolveStatus::converged) {
             return {
                 .status = NonlinearSolveStatus::linear_solve_failed,
                 .iterations = iteration,
                 .final_residual_norm = residual.norm(),
+                .linear_iterations = linear_iterations,
+                .last_linear_status = last_linear_status,
             };
         }
 
@@ -65,6 +75,8 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .status = NonlinearSolveStatus::nonfinite_residual,
                 .iterations = iteration + 1,
                 .final_residual_norm = std::numeric_limits<double>::infinity(),
+                .linear_iterations = linear_iterations,
+                .last_linear_status = last_linear_status,
             };
         }
 
@@ -81,6 +93,8 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .status = NonlinearSolveStatus::converged_residual_absolute,
                 .iterations = completed_iterations,
                 .final_residual_norm = residual_norm,
+                .linear_iterations = linear_iterations,
+                .last_linear_status = last_linear_status,
             };
         }
 
@@ -89,6 +103,8 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .status = NonlinearSolveStatus::converged_residual_relative,
                 .iterations = completed_iterations,
                 .final_residual_norm = residual_norm,
+                .linear_iterations = linear_iterations,
+                .last_linear_status = last_linear_status,
             };
         }
 
@@ -97,6 +113,8 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .status = NonlinearSolveStatus::converged_step,
                 .iterations = completed_iterations,
                 .final_residual_norm = residual_norm,
+                .linear_iterations = linear_iterations,
+                .last_linear_status = last_linear_status,
             };
         }
     }
@@ -105,6 +123,8 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
         .status = NonlinearSolveStatus::max_iterations,
         .iterations = nonlinear_request.max_iterations,
         .final_residual_norm = residual.norm(),
+        .linear_iterations = linear_iterations,
+        .last_linear_status = last_linear_status,
     };
 }
 

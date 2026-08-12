@@ -3,6 +3,7 @@
 #include "discretization/model_heat_system.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
@@ -86,6 +87,7 @@ const ModelHeatParameters& ModelHeatForwardSolver::parameters() const noexcept {
 }
 
 ModelHeatForwardResult ModelHeatForwardSolver::solve() const {
+    const auto start_time = std::chrono::steady_clock::now();
     const ModelHeatSystem system(grid_, problem_.lithotype, parameters_);
     TimeIntegrator integrator;
     integrator.set_initial_solution(settings_.initial_time, initial_temperature_);
@@ -96,11 +98,15 @@ ModelHeatForwardResult ModelHeatForwardSolver::solve() const {
         integrator.advance_to(system, settings_.final_time, settings_.nonlinear, settings_.linear);
     const TimeSnapshot& snapshot = integrator.current_snapshot();
 
-    return {
+    ModelHeatForwardResult result{
         .integration = integration,
         .final_state = {.time = snapshot.time, .temperature = snapshot.solution},
         .calculated_temperature = interpolate_observations(snapshot.solution),
+        .elapsed_time_seconds = 0.0,
     };
+    const auto end_time = std::chrono::steady_clock::now();
+    result.elapsed_time_seconds = std::chrono::duration<double>(end_time - start_time).count();
+    return result;
 }
 
 ModelHeatForwardSolver::ObservationStencil

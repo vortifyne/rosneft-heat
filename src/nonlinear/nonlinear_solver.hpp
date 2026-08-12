@@ -5,6 +5,7 @@
 #include "nonlinear/nonlinear_system.hpp"
 
 #include <memory>
+#include <optional>
 
 struct NonlinearSolveRequest {
     NonlinearMethod nonlinear_method;
@@ -27,6 +28,8 @@ struct NonlinearSolveResult {
     NonlinearSolveStatus status;
     int iterations;
     double final_residual_norm;
+    int linear_iterations = 0;
+    std::optional<LinearSolveStatus> last_linear_status;
 
     bool converged() const noexcept {
         return status == NonlinearSolveStatus::converged_residual_absolute ||
