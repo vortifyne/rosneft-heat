@@ -20,23 +20,21 @@ void check_finite(double value, const char* message) {
 
 } // namespace
 
-ModelHeatSystem::ModelHeatSystem(const RegularGrid& grid, const ModelHeatProblem& problem)
-    : grid_(grid), thermal_conductivity_(problem.lithotype.thermal_conductivity),
-      volumetric_heat_capacity_(problem.lithotype.density * problem.lithotype.specific_heat),
-      heat_production_(problem.lithotype.heat_production),
-      surface_temperature_(problem.initial_boundary_conditions.surface_temperature),
-      basal_heat_flux_(problem.initial_boundary_conditions.basal_heat_flux) {
-    check_positive_finite(problem.lithotype.thermal_conductivity,
+ModelHeatSystem::ModelHeatSystem(const RegularGrid& grid, const Lithotype& lithotype,
+                                 const ModelHeatParameters& parameters)
+    : grid_(grid), thermal_conductivity_(lithotype.thermal_conductivity),
+      volumetric_heat_capacity_(lithotype.density * lithotype.specific_heat),
+      heat_production_(lithotype.heat_production),
+      surface_temperature_(parameters.surface_temperature),
+      basal_heat_flux_(parameters.basal_heat_flux) {
+    check_positive_finite(lithotype.thermal_conductivity,
                           "Thermal conductivity must be finite and positive");
-    check_positive_finite(problem.lithotype.density, "Density must be finite and positive");
-    check_positive_finite(problem.lithotype.specific_heat,
-                          "Specific heat must be finite and positive");
+    check_positive_finite(lithotype.density, "Density must be finite and positive");
+    check_positive_finite(lithotype.specific_heat, "Specific heat must be finite and positive");
     check_finite(volumetric_heat_capacity_, "Volumetric heat capacity must be finite");
-    check_finite(problem.lithotype.heat_production, "Heat production must be finite");
-    check_finite(problem.initial_boundary_conditions.surface_temperature,
-                 "Surface temperature must be finite");
-    check_finite(problem.initial_boundary_conditions.basal_heat_flux,
-                 "Basal heat flux must be finite");
+    check_finite(lithotype.heat_production, "Heat production must be finite");
+    check_finite(parameters.surface_temperature, "Surface temperature must be finite");
+    check_finite(parameters.basal_heat_flux, "Basal heat flux must be finite");
 }
 
 Vector::Index ModelHeatSystem::size() const noexcept {

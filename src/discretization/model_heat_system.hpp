@@ -6,7 +6,8 @@
 
 class ModelHeatSystem final : public SemiDiscreteSystem {
 public:
-    ModelHeatSystem(const RegularGrid& grid, const ModelHeatProblem& problem);
+    ModelHeatSystem(const RegularGrid& grid, const Lithotype& lithotype,
+                    const ModelHeatParameters& parameters);
 
     Vector::Index size() const noexcept;
 

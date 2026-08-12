@@ -9,12 +9,14 @@ struct Lithotype {
     double heat_production;      // Объёмное тепловыделение, Вт/м³.
 };
 
-struct InitialBoundaryConditions {
+struct InitialCondition {
     double initial_temperature; // Начальная температура во всей области, К.
+};
+
+struct ModelHeatParameters {
     double surface_temperature; // Температура на верхней границе, К.
     // Базальный тепловой поток, Вт/м²: lambda * dT/dz = basal_heat_flux.
     double basal_heat_flux;
-    // На боковых границах задано условие непротекания: dT/dn = 0.
 };
 
 struct ObservationPoint {
@@ -24,6 +26,6 @@ struct ObservationPoint {
 
 struct ModelHeatProblem {
     Lithotype lithotype;
-    InitialBoundaryConditions initial_boundary_conditions;
+    InitialCondition initial_condition;
     std::vector<ObservationPoint> observation_points;
 };

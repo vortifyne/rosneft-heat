@@ -9,25 +9,19 @@
 
 namespace {
 
-ModelHeatProblem make_problem(double thermal_conductivity = 2.0, double density = 2.0,
-                              double specific_heat = 3.0, double heat_production = 5.0,
-                              double surface_temperature = 10.0, double basal_heat_flux = 3.0) {
+Lithotype make_lithotype(double thermal_conductivity = 2.0, double density = 2.0,
+                         double specific_heat = 3.0, double heat_production = 5.0) {
     return {
-        .lithotype =
-            {
-                .thermal_conductivity = thermal_conductivity,
-                .density = density,
-                .specific_heat = specific_heat,
-                .heat_production = heat_production,
-            },
-        .initial_boundary_conditions =
-            {
-                .initial_temperature = surface_temperature,
-                .surface_temperature = surface_temperature,
-                .basal_heat_flux = basal_heat_flux,
-            },
-        .observation_points = {},
+        .thermal_conductivity = thermal_conductivity,
+        .density = density,
+        .specific_heat = specific_heat,
+        .heat_production = heat_production,
     };
+}
+
+ModelHeatParameters make_parameters(double surface_temperature = 10.0,
+                                    double basal_heat_flux = 3.0) {
+    return {.surface_temperature = surface_temperature, .basal_heat_flux = basal_heat_flux};
 }
 
 void expect_vector_near(const Vector& actual, const Vector& expected, double tolerance = 1e-14) {
@@ -50,9 +44,9 @@ double realistically_scaled_steady_profile_error(int cell_count) {
     constexpr double kSurfaceTemperature = 288.15;
     constexpr double kBasalHeatFlux = 0.06;
     const RegularGrid grid(1, cell_count, 1000.0, 0.0, kDepth);
-    const ModelHeatSystem system(grid,
-                                 make_problem(kThermalConductivity, 2500.0, 800.0, kHeatProduction,
-                                              kSurfaceTemperature, kBasalHeatFlux));
+    const ModelHeatSystem system(
+        grid, make_lithotype(kThermalConductivity, 2500.0, 800.0, kHeatProduction),
+        make_parameters(kSurfaceTemperature, kBasalHeatFlux));
     Vector zero(system.size());
     zero.set_zero();
     Vector residual;
@@ -102,7 +96,7 @@ TEST(RegularGridTest, RejectsInvalidGeometry) {
 
 TEST(ModelHeatSystemTest, AssemblesConservativeFaceResidualAndBoundaryTerms) {
     const RegularGrid grid(2, 2, 2.0, 0.0, 2.0);
-    const ModelHeatSystem system(grid, make_problem());
+    const ModelHeatSystem system(grid, make_lithotype(), make_parameters());
     const Vector solution{11.0, 13.0, 17.0, 19.0};
     const Vector solution_derivative{1.0, 2.0, 3.0, 4.0};
     Vector residual;
@@ -114,7 +108,8 @@ TEST(ModelHeatSystemTest, AssemblesConservativeFaceResidualAndBoundaryTerms) {
 
 TEST(ModelHeatSystemTest, KeepsConstantTemperatureAtSteadyStateWithoutSourcesOrFluxes) {
     const RegularGrid grid(3, 2, 6.0, 0.0, 4.0);
-    const ModelHeatSystem system(grid, make_problem(2.0, 2500.0, 800.0, 0.0, 300.0, 0.0));
+    const ModelHeatSystem system(grid, make_lithotype(2.0, 2500.0, 800.0, 0.0),
+                                 make_parameters(300.0, 0.0));
     Vector solution(system.size());
     solution.set_constant(300.0);
     Vector solution_derivative(system.size());
@@ -128,7 +123,7 @@ TEST(ModelHeatSystemTest, KeepsConstantTemperatureAtSteadyStateWithoutSourcesOrF
 
 TEST(ModelHeatSystemTest, AssemblesExpectedMatrixDirectlyInEitherStorageOrder) {
     const RegularGrid grid(2, 2, 2.0, 0.0, 2.0);
-    const ModelHeatSystem system(grid, make_problem());
+    const ModelHeatSystem system(grid, make_lithotype(), make_parameters());
     const Vector solution{11.0, 13.0, 17.0, 19.0};
     const Vector solution_derivative{1.0, 2.0, 3.0, 4.0};
 
@@ -158,7 +153,7 @@ TEST(ModelHeatSystemTest, AssemblesExpectedMatrixDirectlyInEitherStorageOrder) {
 
 TEST(ModelHeatSystemTest, PicardAndNewtonMatricesCoincideForConstantCoefficients) {
     const RegularGrid grid(2, 1, 2.0, 0.0, 1.0);
-    const ModelHeatSystem system(grid, make_problem());
+    const ModelHeatSystem system(grid, make_lithotype(), make_parameters());
     const Vector solution{11.0, 13.0};
     const Vector solution_derivative{1.0, 2.0};
     SparseMatrix picard(0, 0, SparseStorageOrder::csc);
@@ -193,14 +188,18 @@ TEST(ModelHeatSystemTest, HasSecondOrderSpatialConvergenceWithNeumannBoundaryFlu
 
 TEST(ModelHeatSystemTest, RejectsInvalidMaterialAndVectorData) {
     const RegularGrid grid(1, 1, 1.0, 0.0, 1.0);
-    EXPECT_THROW(ModelHeatSystem(grid, make_problem(0.0)), std::invalid_argument);
-    EXPECT_THROW(ModelHeatSystem(grid, make_problem(1.0, 0.0)), std::invalid_argument);
-    EXPECT_THROW(ModelHeatSystem(grid, make_problem(1.0, 1.0, 0.0)), std::invalid_argument);
-    EXPECT_THROW(
-        ModelHeatSystem(grid, make_problem(1.0, 1.0, 1.0, std::numeric_limits<double>::infinity())),
-        std::invalid_argument);
+    EXPECT_THROW(ModelHeatSystem(grid, make_lithotype(0.0), make_parameters()),
+                 std::invalid_argument);
+    EXPECT_THROW(ModelHeatSystem(grid, make_lithotype(1.0, 0.0), make_parameters()),
+                 std::invalid_argument);
+    EXPECT_THROW(ModelHeatSystem(grid, make_lithotype(1.0, 1.0, 0.0), make_parameters()),
+                 std::invalid_argument);
+    EXPECT_THROW(ModelHeatSystem(
+                     grid, make_lithotype(1.0, 1.0, 1.0, std::numeric_limits<double>::infinity()),
+                     make_parameters()),
+                 std::invalid_argument);
 
-    const ModelHeatSystem system(grid, make_problem());
+    const ModelHeatSystem system(grid, make_lithotype(), make_parameters());
     Vector residual;
     EXPECT_THROW(system.assemble_residual(0.0, Vector{}, Vector{}, residual),
                  std::invalid_argument);

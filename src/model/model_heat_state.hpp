@@ -1,8 +1,8 @@
 #pragma once
 
-#include <vector>
+#include "linear/vector.hpp"
 
 struct ModelHeatState {
     double time;
-    std::vector<double> temperature;
+    Vector temperature;
 };
