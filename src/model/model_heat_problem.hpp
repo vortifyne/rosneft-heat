@@ -3,18 +3,20 @@
 #include <vector>
 
 struct Lithotype {
-    double thermal_conductivity; // Теплопроводность, Вт/(м·К).
-    double density;              // Плотность, кг/м³.
-    double specific_heat;        // Удельная теплоёмкость, Дж/(кг·К).
-    double heat_production;      // Объёмное тепловыделение, Вт/м³.
+    double thermal_conductivity; // Thermal conductivity, W/(m*K).
+    double density;              // Density, kg/m^3.
+    double specific_heat;        // Specific heat capacity, J/(kg*K).
+    double heat_production;      // Volumetric heat production, W/m^3.
 };
 
-struct InitialBoundaryConditions {
-    double initial_temperature; // Начальная температура во всей области, К.
-    double surface_temperature; // Температура на верхней границе, К.
-    // Базальный тепловой поток, Вт/м²: lambda * dT/dz = basal_heat_flux.
+struct InitialCondition {
+    double initial_temperature; // Initial temperature throughout the domain, K.
+};
+
+struct ModelHeatParameters {
+    double surface_temperature; // Temperature at the upper boundary, K.
+    // Basal heat flux, W/m^2: lambda * dT/dz = basal_heat_flux.
     double basal_heat_flux;
-    // На боковых границах задано условие непротекания: dT/dn = 0.
 };
 
 struct ObservationPoint {
@@ -24,6 +26,6 @@ struct ObservationPoint {
 
 struct ModelHeatProblem {
     Lithotype lithotype;
-    InitialBoundaryConditions initial_boundary_conditions;
+    InitialCondition initial_condition;
     std::vector<ObservationPoint> observation_points;
 };

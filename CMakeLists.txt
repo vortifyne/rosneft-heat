@@ -12,9 +12,26 @@ find_package(Eigen3 CONFIG REQUIRED)
 find_package(UMFPACK CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
+add_library(heat_core STATIC
+    src/discretization/model_heat_system.cpp
+    src/forward/model_heat_forward_solver.cpp
+    src/linear/umfpack_linear_solver.cpp
+    src/nonlinear/nonlinear_solver.cpp
+    src/time/bdf1.cpp
+    src/time/time_integrator.cpp
+)
+
+target_include_directories(heat_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(heat_core PUBLIC Eigen3::Eigen PRIVATE SuiteSparse::UMFPACK_static)
+
+if (MSVC)
+    target_compile_options(heat_core PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(heat_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
 add_executable(heat_solver src/main.cpp)
-target_include_directories(heat_solver PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(heat_solver PRIVATE fmt::fmt Eigen3::Eigen)
+target_link_libraries(heat_solver PRIVATE heat_core fmt::fmt)
 
 if (MSVC)
     target_compile_options(heat_solver PRIVATE /W4 /permissive-)
@@ -26,11 +43,19 @@ enable_testing()
 include(GoogleTest)
 
 add_executable(unit_tests
-    tests/test_umfpack.cpp
+    tests/test_bdf1.cpp
+    tests/test_model_heat_forward_solver.cpp
+    tests/test_model_heat_system.cpp
+    tests/test_nonlinear_solver.cpp
+    tests/test_sparse_matrix.cpp
+    tests/test_time_integrator.cpp
+    tests/test_umfpack_linear_solver.cpp
+    tests/test_umfpack_smoke.cpp
+    tests/test_vector.cpp
 )
 
 target_link_libraries(unit_tests PRIVATE
-    Eigen3::Eigen
+    heat_core
     SuiteSparse::UMFPACK_static
     GTest::gtest_main
 )

@@ -4,4 +4,6 @@
 
 ## Документы
 
+- [adaptive-time-integration.md](adaptive-time-integration.md) — выбор шага и порядка BDF,
+  обработка отказов и точное попадание во времена событий по мотивам COMSOL и PETSc TS.
 - [heat-architecture_v1.4.md](heat-architecture_v1.4.md) — черновой обзор архитектуры и численных методов для задачи теплопереноса.

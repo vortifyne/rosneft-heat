@@ -27,6 +27,13 @@ public:
     std::size_t size() const {
         return snapshots_.size();
     }
+    bool empty() const {
+        return snapshots_.empty();
+    }
+
+    void clear() {
+        snapshots_.clear();
+    }
 
     void accept(TimeSnapshot&& snapshot) {
         snapshots_.push_front(std::move(snapshot));
