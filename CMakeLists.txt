@@ -26,8 +26,12 @@ enable_testing()
 include(GoogleTest)
 
 add_executable(unit_tests
-    tests/test_umfpack.cpp
+    tests/test_sparse_matrix.cpp
+    tests/test_umfpack_smoke.cpp
+    tests/test_vector.cpp
 )
+
+target_include_directories(unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_link_libraries(unit_tests PRIVATE
     Eigen3::Eigen
