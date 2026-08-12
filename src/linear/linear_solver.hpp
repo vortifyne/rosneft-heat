@@ -29,6 +29,10 @@ enum class LinearSolverType {
     iterative,
 };
 
+enum class LinearSolverKind {
+    umfpack_lu,
+};
+
 class LinearSolver {
 public:
     virtual ~LinearSolver() = default;
@@ -36,6 +40,8 @@ public:
     LinearSolverType type() const noexcept {
         return type_;
     }
+
+    virtual SparseStorageOrder required_storage_order() const noexcept = 0;
 
     virtual LinearSolveResult solve(const SparseMatrix& A, const Vector& b, Vector& x,
                                     const LinearSolveRequest& request) = 0;

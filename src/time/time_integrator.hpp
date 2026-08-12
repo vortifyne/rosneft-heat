@@ -24,7 +24,8 @@ public:
     }
 
     void advance_to(const SemiDiscreteSystem& semi_discrete_system, double t_final,
-                    const NonlinearSolveRequest& nonlinear_request) {
+                    const NonlinearSolveRequest& nonlinear_request,
+                    const LinearSolveRequest& linear_request) {
         while (time_history_.current().time < t_final) {
             const double t_current = time_history_.current().time;
             const double dt_trial = std::min(dt_, t_final - t_current);
@@ -34,11 +35,11 @@ public:
 
             auto nonlinear_system =
                 time_scheme_->make_nonlinear_system(semi_discrete_system, time_history_, dt_trial);
-            auto nonlinear_result =
-                nonlinear_solver_->solve(*nonlinear_system, solution, nonlinear_request);
+            auto nonlinear_result = nonlinear_solver_->solve(*nonlinear_system, solution,
+                                                             nonlinear_request, linear_request);
 
             // TODO логика адаптивного шага: точность решения + затраты на вычисления
-            const bool step_accepted = (nonlinear_result.status == NonlinearSolveStatus::converged);
+            const bool step_accepted = nonlinear_result.converged();
             if (step_accepted) {
                 time_history_.accept(
                     {.time = t_current + dt_trial, .solution = std::move(solution)});

@@ -10,11 +10,14 @@ struct NonlinearSolveRequest {
     NonlinearMethod nonlinear_method;
     double relative_tolerance;
     double absolute_tolerance;
+    double step_relative_tolerance;
     int max_iterations;
 };
 
 enum class NonlinearSolveStatus {
-    converged,
+    converged_residual_absolute,
+    converged_residual_relative,
+    converged_step,
     max_iterations,
     linear_solve_failed,
     nonfinite_residual,
@@ -24,32 +27,35 @@ struct NonlinearSolveResult {
     NonlinearSolveStatus status;
     int iterations;
     double final_residual_norm;
+
+    bool converged() const noexcept {
+        return status == NonlinearSolveStatus::converged_residual_absolute ||
+               status == NonlinearSolveStatus::converged_residual_relative ||
+               status == NonlinearSolveStatus::converged_step;
+    }
 };
 
 class NonlinearSolver {
 public:
-    explicit NonlinearSolver() {
-        // TODO реализовать линейный решатель (LIN-001)
-        // linear_solver_ = std::make_unique<UmfpackLU>();
+    NonlinearSolver();
+
+    void set_linear_solver(LinearSolverKind kind);
+
+    LinearSolverKind linear_solver_kind() const noexcept {
+        return linear_solver_kind_;
+    }
+
+    LinearSolverType linear_solver_type() const noexcept {
+        return linear_solver_->type();
     }
 
     NonlinearSolveResult solve(const NonlinearSystem& nonlinear_system, Vector& x,
-                               const NonlinearSolveRequest& request) {
-        /*
-        r = F(x₀)
-        r0_norm = ||r||
-
-        пока критерий не выполнен:
-        A = линеаризация в x
-
-        решить A · delta_x = -r
-        x += delta_x
-
-        r = F(x)
-        */
-        return NonlinearSolveResult(NonlinearSolveStatus::converged, 1, 0.0);
-    }
+                               const NonlinearSolveRequest& nonlinear_request,
+                               const LinearSolveRequest& linear_request);
 
 private:
+    static std::unique_ptr<LinearSolver> make_linear_solver(LinearSolverKind kind);
+
+    LinearSolverKind linear_solver_kind_ = LinearSolverKind::umfpack_lu;
     std::unique_ptr<LinearSolver> linear_solver_;
 };

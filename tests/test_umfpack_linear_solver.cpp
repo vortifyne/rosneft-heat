@@ -27,6 +27,7 @@ TEST(UmfpackLinearSolverTest, IsDirectSolver) {
     const UmfpackLinearSolver solver;
 
     EXPECT_EQ(solver.type(), LinearSolverType::direct);
+    EXPECT_EQ(solver.required_storage_order(), SparseStorageOrder::csc);
 }
 
 TEST(UmfpackLinearSolverTest, SolvesCscSystemAndReportsResidual) {
