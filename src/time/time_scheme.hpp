@@ -14,5 +14,5 @@ public:
 
     virtual std::unique_ptr<NonlinearSystem>
     make_nonlinear_system(const SemiDiscreteSystem& semi_discrete_system,
-                          const TimeHistory& time_history, double dt) const = 0;
+                          const TimeHistory& time_history, double step_end_time) const = 0;
 };

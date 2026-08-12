@@ -15,6 +15,8 @@ find_package(GTest CONFIG REQUIRED)
 add_library(heat_core STATIC
     src/linear/umfpack_linear_solver.cpp
     src/nonlinear/nonlinear_solver.cpp
+    src/time/bdf1.cpp
+    src/time/time_integrator.cpp
 )
 
 target_include_directories(heat_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -39,8 +41,10 @@ enable_testing()
 include(GoogleTest)
 
 add_executable(unit_tests
+    tests/test_bdf1.cpp
     tests/test_nonlinear_solver.cpp
     tests/test_sparse_matrix.cpp
+    tests/test_time_integrator.cpp
     tests/test_umfpack_linear_solver.cpp
     tests/test_umfpack_smoke.cpp
     tests/test_vector.cpp
