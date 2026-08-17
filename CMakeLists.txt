@@ -13,6 +13,11 @@ find_package(UMFPACK CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
 
+# Find petsc via pkg-config
+find_package(PkgConfig REQUIRED)
+pkg_search_module(PETSc REQUIRED IMPORTED_TARGET PETSc petsc)
+find_package(MPI REQUIRED)
+
 add_library(heat_core STATIC
     src/discretization/model_heat_system.cpp
     src/forward/model_heat_forward_solver.cpp
@@ -59,12 +64,15 @@ add_executable(unit_tests
     tests/test_umfpack_linear_solver.cpp
     tests/test_umfpack_smoke.cpp
     tests/test_vector.cpp
+    tests/test_petsc_tao_punders.cpp
 )
 
 target_link_libraries(unit_tests PRIVATE
     heat_core
     SuiteSparse::UMFPACK_static
     GTest::gtest_main
+    PkgConfig::PETSc
+    MPI::MPI_CXX
 )
 
 if(NOT MSVC)

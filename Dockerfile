@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
   build-essential g++ clang ninja-build \
   git curl zip unzip tar pkg-config gfortran \
   liblapack-dev libblas-dev autoconf autoconf-archive \
-  automake libtool ca-certificates \
+  automake libtool ca-certificates petsc-dev \
   && rm -rf /var/lib/apt/lists/*
 
 RUN CMAKE_VERSION=3.31.5 && \
