@@ -1,22 +1,48 @@
-.PHONY: docker-build build-debug build-release run run-debug test clean
+.PHONY: all help \
+        docker-image docker-debug docker-release docker-run docker-bench docker-test \
+        local-debug local-release local-run local-bench local-test clean
 
-docker-build:
-	docker build -t heat-env .
+DOCKER_IMAGE = heat-env
 
-build-debug:
-	docker run --rm -v $(shell pwd):$(shell pwd) -w $(shell pwd) heat-env bash -c "cmake --preset debug && cmake --build --preset debug"
+DOCKER_RUN = docker run --rm \
+	--user $(shell id -u):$(shell id -g) \
+	-v $(shell pwd):$(shell pwd) \
+	-v vcpkg-cache:/var/cache/vcpkg \
+	-w $(shell pwd) \
+	$(DOCKER_IMAGE)
 
-build-release:
-	docker run --rm -v $(shell pwd):$(shell pwd) -w $(shell pwd) heat-env bash -c "cmake --preset release && cmake --build --preset release"
+# Docker (single runnable and benchmarkable)
+docker-image:
+	docker build -t $(DOCKER_IMAGE) .
 
-run:
-	docker run --rm -v $(shell pwd):$(shell pwd) -w $(shell pwd) heat-env ./build/release/heat_solver
+docker-debug:
+	$(DOCKER_RUN) bash -c "cmake --preset debug -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed && cmake --build --preset debug"
 
-run-debug:
-	docker run --rm -v $(shell pwd):$(shell pwd) -w $(shell pwd) heat-env ./build/debug/heat_solver
+docker-release:
+	$(DOCKER_RUN) bash -c "cmake --preset release -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed && cmake --build --preset release"
 
-test:
-	docker run --rm -v $(shell pwd):$(shell pwd) -w $(shell pwd) heat-env bash -c "ctest --test-dir build/debug --output-on-failure"
+docker-run:
+	$(DOCKER_RUN) ./build/release/heat_solver
 
+docker-test:
+	$(DOCKER_RUN) bash -c "ctest --test-dir build/release --output-on-failure"
+
+
+# Local (resolve problems & testing)
+local-debug:
+	cmake --preset debug -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed
+	cmake --build --preset debug
+
+local-release:
+	cmake --preset release -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed
+	cmake --build --preset release
+
+local-run:
+	./build/release/heat_solver
+
+local-test:
+	ctest --test-dir build/release --output-on-failure
+
+# General
 clean:
-	rm -rf build/
+	rm -rf build/ vcpkg_installed/ compile_commands.json
