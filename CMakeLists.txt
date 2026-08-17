@@ -11,6 +11,7 @@ find_package(fmt CONFIG REQUIRED)
 find_package(Eigen3 CONFIG REQUIRED)
 find_package(UMFPACK CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
+find_package(benchmark CONFIG REQUIRED)
 
 add_library(heat_core STATIC
     src/discretization/model_heat_system.cpp
@@ -22,21 +23,27 @@ add_library(heat_core STATIC
 )
 
 target_include_directories(heat_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(heat_core PUBLIC Eigen3::Eigen PRIVATE SuiteSparse::UMFPACK_static)
+target_link_libraries(
+  heat_core PUBLIC Eigen3::Eigen PRIVATE SuiteSparse::UMFPACK_static
+)
 
-if (MSVC)
-    target_compile_options(heat_core PRIVATE /W4 /permissive-)
+if(MSVC)
+  target_compile_options(heat_core PRIVATE /W4 /permissive-)
 else()
-    target_compile_options(heat_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+  target_compile_options(
+  heat_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion
+  )
 endif()
 
 add_executable(heat_solver src/main.cpp)
 target_link_libraries(heat_solver PRIVATE heat_core fmt::fmt)
 
-if (MSVC)
-    target_compile_options(heat_solver PRIVATE /W4 /permissive-)
+if(MSVC)
+  target_compile_options(heat_solver PRIVATE /W4 /permissive-)
 else()
-    target_compile_options(heat_solver PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+  target_compile_options(
+  heat_solver PRIVATE -Wall -Wextra -Wpedantic -Wconversion
+)
 endif()
 
 enable_testing()
@@ -60,8 +67,21 @@ target_link_libraries(unit_tests PRIVATE
     GTest::gtest_main
 )
 
-if (NOT MSVC)
-    target_compile_options(unit_tests PRIVATE -Wall -Wextra -Wpedantic)
+if(NOT MSVC)
+  target_compile_options(unit_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 gtest_discover_tests(unit_tests)
+
+add_executable(benchmarks
+  benchmarks/linear_search.cpp
+)
+
+target_link_libraries(benchmarks PRIVATE
+  benchmark::benchmark
+  benchmark::benchmark_main
+)
+
+if(NOT MSVC)
+  target_compile_options(benchmarks PRIVATE -Wall -Wextra -Wpedantic)
+endif()

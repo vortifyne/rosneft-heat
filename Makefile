@@ -24,6 +24,9 @@ docker-release:
 docker-run:
 	$(DOCKER_RUN) ./build/release/heat_solver
 
+docker-bench: docker-release
+	$(DOCKER_RUN) ./build/release/benchmarks
+
 docker-test:
 	$(DOCKER_RUN) bash -c "ctest --test-dir build/release --output-on-failure"
 
@@ -39,6 +42,9 @@ local-release:
 
 local-run:
 	./build/release/heat_solver
+
+local-bench: local-release
+	./build/release/benchmarks
 
 local-test:
 	ctest --test-dir build/release --output-on-failure
