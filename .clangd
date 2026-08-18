@@ -1,2 +1,8 @@
 CompileFlags:
   CompilationDatabase: build/debug
+  # Temporary until we migrate to C++ 20 modules
+  Remove:
+    - "-fmodules-ts"
+    - "-fmodule-mapper=*"
+    - "-fdeps-format=*"
+    - "-fdeps-file=*"

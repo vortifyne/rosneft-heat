@@ -12,6 +12,7 @@ CTestTestfile.cmake
 DartConfiguration.tcl
 Testing/
 install_manifest.txt
+.cache/
 
 # Local CMake presets
 CMakeUserPresets.json
