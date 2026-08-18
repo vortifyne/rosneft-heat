@@ -40,6 +40,24 @@ else()
   )
 endif()
 
+add_library(heat_core STATIC
+    src/discretization/model_heat_system.cpp
+    src/forward/model_heat_forward_solver.cpp
+    src/linear/umfpack_linear_solver.cpp
+    src/nonlinear/nonlinear_solver.cpp
+    src/time/bdf1.cpp
+    src/time/time_integrator.cpp
+)
+
+target_include_directories(heat_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(heat_core PUBLIC Eigen3::Eigen PRIVATE SuiteSparse::UMFPACK_static)
+
+if (MSVC)
+    target_compile_options(heat_core PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(heat_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
 add_executable(heat_solver src/main.cpp)
 target_link_libraries(heat_solver PRIVATE heat_core fmt::fmt)
 
