@@ -18,15 +18,6 @@ find_package(PkgConfig REQUIRED)
 pkg_search_module(PETSc REQUIRED IMPORTED_TARGET PETSc petsc)
 find_package(MPI REQUIRED)
 
-add_library(heat_core STATIC
-    src/discretization/model_heat_system.cpp
-    src/forward/model_heat_forward_solver.cpp
-    src/linear/umfpack_linear_solver.cpp
-    src/nonlinear/nonlinear_solver.cpp
-    src/time/bdf1.cpp
-    src/time/time_integrator.cpp
-)
-
 target_include_directories(heat_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(
   heat_core PUBLIC Eigen3::Eigen PRIVATE SuiteSparse::UMFPACK_static
