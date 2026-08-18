@@ -13,7 +13,7 @@ find_package(UMFPACK CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
 
-// Find PETSc via PkgConfig
+# Find PETSc via PkgConfig
 find_package(PkgConfig REQUIRED)
 pkg_search_module(PETSc REQUIRED IMPORTED_TARGET PETSc petsc)
 find_package(MPI REQUIRED)
