@@ -83,6 +83,7 @@ include(GoogleTest)
 add_executable(unit_tests
   tests/test_bdf1.cpp
   tests/test_model_heat_forward_solver.cpp
+  tests/test_model_heat_inverse_recovery.cpp
   tests/test_model_heat_inverse_solver.cpp
   tests/test_model_heat_observation_data.cpp
   tests/test_model_heat_parameter_space.cpp
