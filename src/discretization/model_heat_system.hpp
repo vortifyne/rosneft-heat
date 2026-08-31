@@ -2,6 +2,7 @@
 
 #include "discretization/semi_discrete_system.hpp"
 #include "mesh/regular_grid.hpp"
+#include "model/model_heat_parameters.hpp"
 #include "model/model_heat_problem.hpp"
 
 class ModelHeatSystem final : public SemiDiscreteSystem {

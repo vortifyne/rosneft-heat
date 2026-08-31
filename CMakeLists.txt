@@ -21,6 +21,7 @@ find_package(MPI REQUIRED)
 add_library(heat_core STATIC
   src/discretization/model_heat_system.cpp
   src/forward/model_heat_forward_solver.cpp
+  src/inverse/model_heat_parameter_space.cpp
   src/linear/umfpack_linear_solver.cpp
   src/nonlinear/nonlinear_solver.cpp
   src/time/bdf1.cpp
@@ -51,6 +52,7 @@ include(GoogleTest)
 add_executable(unit_tests
   tests/test_bdf1.cpp
   tests/test_model_heat_forward_solver.cpp
+  tests/test_model_heat_parameter_space.cpp
   tests/test_model_heat_system.cpp
   tests/test_nonlinear_solver.cpp
   tests/test_sparse_matrix.cpp

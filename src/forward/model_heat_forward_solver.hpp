@@ -2,6 +2,7 @@
 
 #include "linear/linear_solver.hpp"
 #include "mesh/regular_grid.hpp"
+#include "model/model_heat_parameters.hpp"
 #include "model/model_heat_problem.hpp"
 #include "model/model_heat_state.hpp"
 #include "nonlinear/nonlinear_solver.hpp"
