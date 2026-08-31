@@ -1,4 +1,4 @@
-#include "petscsys.h"
+#include "petsc_test_session.hpp"
 
 #include <gtest/gtest.h>
 #include <petscsystypes.h>
@@ -35,12 +35,7 @@ static PetscErrorCode evaluate_residual(Tao tao, Vec x, Vec f, void* ctx) {
 }
 
 TEST(PetscTaoOptimization, PoundersLeastSquaresToyProblem) {
-    // Инициализация
-    PetscBool is_initialized = PETSC_FALSE;
-    PetscInitialized(&is_initialized);
-    if (!is_initialized) {
-        PetscInitializeNoArguments();
-    }
+    ensure_petsc_test_session();
 
     // Создание вектора параметров x = (a, b) размера 2
     Vec x = nullptr;
