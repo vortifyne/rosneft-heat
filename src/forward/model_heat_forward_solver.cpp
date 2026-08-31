@@ -86,6 +86,10 @@ const ModelHeatParameters& ModelHeatForwardSolver::parameters() const noexcept {
     return parameters_;
 }
 
+std::size_t ModelHeatForwardSolver::observation_count() const noexcept {
+    return observation_stencils_.size();
+}
+
 ModelHeatForwardResult ModelHeatForwardSolver::solve() const {
     const auto start_time = std::chrono::steady_clock::now();
     const ModelHeatSystem system(grid_, problem_.lithotype, parameters_);

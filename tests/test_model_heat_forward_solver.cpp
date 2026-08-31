@@ -68,6 +68,7 @@ TEST(ModelHeatForwardSolverTest,
     ModelHeatForwardSolver solver(grid, make_problem(make_well_observations()), make_settings(),
                                   {.surface_temperature = 10.0, .basal_heat_flux = 0.2});
 
+    EXPECT_EQ(solver.observation_count(), 7);
     const ModelHeatForwardResult result = solver.solve();
 
     ASSERT_TRUE(result.completed());

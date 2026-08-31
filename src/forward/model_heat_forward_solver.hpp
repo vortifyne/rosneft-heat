@@ -9,6 +9,7 @@
 #include "time/time_integrator.hpp"
 
 #include <array>
+#include <cstddef>
 #include <vector>
 
 struct ModelHeatForwardSettings {
@@ -42,6 +43,7 @@ public:
     void set_parameters(const ModelHeatParameters& parameters);
 
     const ModelHeatParameters& parameters() const noexcept;
+    std::size_t observation_count() const noexcept;
 
     ModelHeatForwardResult solve() const;
 
