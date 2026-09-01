@@ -24,10 +24,10 @@ public:
     const TimeSnapshot& previous(std::size_t offset = 1) const {
         return snapshots_[offset];
     }
-    std::size_t size() const {
+    std::size_t size() const noexcept {
         return snapshots_.size();
     }
-    bool empty() const {
+    bool empty() const noexcept {
         return snapshots_.empty();
     }
 

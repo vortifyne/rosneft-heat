@@ -18,7 +18,7 @@ enum class LinearSolveStatus {
     nonfinite_solution,
 };
 
-struct LinearSolveResult {
+struct [[nodiscard]] LinearSolveResult {
     LinearSolveStatus status;
     int iterations;
     double final_residual_norm;

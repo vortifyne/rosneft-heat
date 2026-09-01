@@ -16,7 +16,7 @@ enum class TimeIntegrationStatus {
     time_step_too_small,
 };
 
-struct TimeIntegrationResult {
+struct [[nodiscard]] TimeIntegrationResult {
     TimeIntegrationStatus status;
     int accepted_steps;
     int rejected_steps;
@@ -25,7 +25,7 @@ struct TimeIntegrationResult {
     std::optional<NonlinearSolveStatus> last_nonlinear_status;
     std::optional<LinearSolveStatus> last_linear_status;
 
-    bool completed() const noexcept {
+    [[nodiscard]] constexpr bool completed() const noexcept {
         return status == TimeIntegrationStatus::completed;
     }
 };
@@ -44,6 +44,9 @@ public:
     void set_timestep(double dt);
     void set_linear_solver(LinearSolverKind kind);
 
+    NonlinearSolver& nonlinear_solver() noexcept;
+    const NonlinearSolver& nonlinear_solver() const noexcept;
+
     const TimeSnapshot& current_snapshot() const;
 
     TimeIntegrationResult advance_to(const SemiDiscreteSystem& semi_discrete_system,
@@ -55,5 +58,5 @@ private:
     double dt_ = 0.0;
     TimeHistory time_history_;
     std::unique_ptr<TimeScheme> time_scheme_;
-    std::unique_ptr<NonlinearSolver> nonlinear_solver_;
+    NonlinearSolver nonlinear_solver_;
 };

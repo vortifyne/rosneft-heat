@@ -6,9 +6,9 @@
 struct RegularGrid {
     const int nx;
     const int nz;
-    const double W;
-    const double z_surf;
-    const double L;
+    const double width;
+    const double surface_depth;
+    const double bottom_depth;
 
     const double dx;
     const double dz;
@@ -17,23 +17,45 @@ struct RegularGrid {
     const double cell_area;
     const double inv_cell_area;
 
-    RegularGrid(int nx, int nz, double W, double z_surf, double L)
-        : nx(nx), nz(nz), W(W), z_surf(z_surf), L(L), dx(W / static_cast<double>(nx)),
-          dz((L - z_surf) / static_cast<double>(nz)), inv_dx(1.0 / dx), inv_dz(1.0 / dz),
-          cell_area(dx * dz), inv_cell_area(inv_dx * inv_dz) {
-        if (nx <= 0 || nz <= 0) {
+    RegularGrid(int nx, int nz, double width, double surface_depth, double bottom_depth)
+        : nx(validate_cell_count(nx)), nz(validate_cell_count(nz)), width(validate_width(width)),
+          surface_depth(validate_surface_depth(surface_depth)),
+          bottom_depth(validate_bottom_depth(bottom_depth, this->surface_depth)),
+          dx(this->width / static_cast<double>(this->nx)),
+          dz((this->bottom_depth - this->surface_depth) / static_cast<double>(this->nz)),
+          inv_dx(1.0 / dx), inv_dz(1.0 / dz), cell_area(dx * dz), inv_cell_area(inv_dx * inv_dz) {}
+
+    constexpr int cell_count() const noexcept {
+        return nx * nz;
+    }
+
+private:
+    static int validate_cell_count(int value) {
+        if (value <= 0) {
             throw std::invalid_argument("Regular grid dimensions must be positive");
         }
-        if (!std::isfinite(W) || !(W > 0.0)) {
+        return value;
+    }
+
+    static double validate_width(double value) {
+        if (!(value > 0.0) || !std::isfinite(value)) {
             throw std::invalid_argument("Regular grid width must be finite and positive");
         }
-        if (!std::isfinite(z_surf) || !std::isfinite(L) || !(L > z_surf)) {
+        return value;
+    }
+
+    static double validate_surface_depth(double value) {
+        if (!std::isfinite(value)) {
+            throw std::invalid_argument("Regular grid surface depth must be finite");
+        }
+        return value;
+    }
+
+    static double validate_bottom_depth(double value, double surface_depth) {
+        if (!std::isfinite(value) || !(value > surface_depth)) {
             throw std::invalid_argument(
                 "Regular grid bottom must be finite and below the finite surface");
         }
-    }
-
-    int cell_count() const noexcept {
-        return nx * nz;
+        return value;
     }
 };

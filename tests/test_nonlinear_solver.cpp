@@ -80,11 +80,13 @@ TEST(NonlinearSolverTest, UsesUmfpackByDefaultAndCanSelectItAtRuntime) {
 
     EXPECT_EQ(solver.linear_solver_kind(), LinearSolverKind::umfpack_lu);
     EXPECT_EQ(solver.linear_solver_type(), LinearSolverType::direct);
+    EXPECT_EQ(solver.linear_solver().type(), LinearSolverType::direct);
 
     solver.set_linear_solver(LinearSolverKind::umfpack_lu);
 
     EXPECT_EQ(solver.linear_solver_kind(), LinearSolverKind::umfpack_lu);
     EXPECT_EQ(solver.linear_solver_type(), LinearSolverType::direct);
+    EXPECT_EQ(solver.linear_solver().required_storage_order(), SparseStorageOrder::csc);
 }
 
 TEST(NonlinearSolverTest, ConvergesWithoutIterationWhenInitialResidualIsSmall) {

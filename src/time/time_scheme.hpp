@@ -10,7 +10,7 @@ class TimeScheme {
 public:
     virtual ~TimeScheme() = default;
 
-    virtual std::size_t required_snapshot_count() const = 0;
+    virtual std::size_t required_snapshot_count() const noexcept = 0;
 
     virtual std::unique_ptr<NonlinearSystem>
     make_nonlinear_system(const SemiDiscreteSystem& semi_discrete_system,

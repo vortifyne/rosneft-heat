@@ -184,13 +184,15 @@ TEST(TimeIntegratorTest, RejectsInvalidConfigurationAndTimeDirection) {
     EXPECT_THROW(
         integrator.set_initial_solution(std::numeric_limits<double>::quiet_NaN(), Vector{1.0}),
         std::invalid_argument);
-    EXPECT_THROW(integrator.advance_to(system, 1.0, kNewtonRequest, kDirectLinearRequest),
-                 std::logic_error);
+    EXPECT_THROW(
+        static_cast<void>(integrator.advance_to(system, 1.0, kNewtonRequest, kDirectLinearRequest)),
+        std::logic_error);
 
     integrator.set_initial_solution(2.0, Vector{1.0});
     integrator.set_timestep(0.5);
-    EXPECT_THROW(integrator.advance_to(system, 1.0, kNewtonRequest, kDirectLinearRequest),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        static_cast<void>(integrator.advance_to(system, 1.0, kNewtonRequest, kDirectLinearRequest)),
+        std::invalid_argument);
 }
 
 TEST(TimeIntegratorTest, ReportsWhenTimeStepCannotAdvanceFloatingPointTime) {
@@ -212,6 +214,8 @@ TEST(TimeIntegratorTest, DelegatesLinearSolverSelection) {
     TimeIntegrator integrator;
 
     EXPECT_NO_THROW(integrator.set_linear_solver(LinearSolverKind::umfpack_lu));
+    EXPECT_EQ(integrator.nonlinear_solver().linear_solver_kind(), LinearSolverKind::umfpack_lu);
+    EXPECT_EQ(integrator.nonlinear_solver().linear_solver().type(), LinearSolverType::direct);
 }
 
 } // namespace

@@ -2,12 +2,14 @@
 
 #include "linear/linear_solver.hpp"
 #include "mesh/regular_grid.hpp"
+#include "model/model_heat_parameters.hpp"
 #include "model/model_heat_problem.hpp"
 #include "model/model_heat_state.hpp"
 #include "nonlinear/nonlinear_solver.hpp"
 #include "time/time_integrator.hpp"
 
 #include <array>
+#include <cstddef>
 #include <vector>
 
 struct ModelHeatForwardSettings {
@@ -19,13 +21,13 @@ struct ModelHeatForwardSettings {
     LinearSolverKind linear_solver = LinearSolverKind::umfpack_lu;
 };
 
-struct ModelHeatForwardResult {
+struct [[nodiscard]] ModelHeatForwardResult {
     TimeIntegrationResult integration;
     ModelHeatState final_state;
     Vector calculated_temperature;
     double elapsed_time_seconds = 0.0;
 
-    bool completed() const noexcept {
+    [[nodiscard]] constexpr bool completed() const noexcept {
         return integration.completed();
     }
 };
@@ -33,16 +35,11 @@ struct ModelHeatForwardResult {
 class ModelHeatForwardSolver {
 public:
     ModelHeatForwardSolver(RegularGrid grid, ModelHeatProblem problem,
-                           ModelHeatForwardSettings settings,
-                           ModelHeatParameters initial_parameters);
+                           ModelHeatForwardSettings settings);
 
-    void set_surface_temperature(double value);
-    void set_basal_heat_flux(double value);
-    void set_parameters(const ModelHeatParameters& parameters);
+    std::size_t observation_count() const noexcept;
 
-    const ModelHeatParameters& parameters() const noexcept;
-
-    ModelHeatForwardResult solve() const;
+    ModelHeatForwardResult solve(const ModelHeatParameters& parameters) const;
 
 private:
     struct ObservationStencil {
@@ -56,7 +53,6 @@ private:
     RegularGrid grid_;
     ModelHeatProblem problem_;
     ModelHeatForwardSettings settings_;
-    ModelHeatParameters parameters_;
     Vector initial_temperature_;
     std::vector<ObservationStencil> observation_stencils_;
 };

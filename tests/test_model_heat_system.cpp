@@ -78,6 +78,11 @@ double realistically_scaled_steady_profile_error(int cell_count) {
 TEST(RegularGridTest, ProvidesCellGeometryForFiniteVolumeAssembly) {
     const RegularGrid grid(4, 5, 8.0, 2.0, 12.0);
 
+    EXPECT_EQ(grid.nx, 4);
+    EXPECT_EQ(grid.nz, 5);
+    EXPECT_DOUBLE_EQ(grid.width, 8.0);
+    EXPECT_DOUBLE_EQ(grid.surface_depth, 2.0);
+    EXPECT_DOUBLE_EQ(grid.bottom_depth, 12.0);
     EXPECT_EQ(grid.cell_count(), 20);
     EXPECT_DOUBLE_EQ(grid.dx, 2.0);
     EXPECT_DOUBLE_EQ(grid.dz, 2.0);
@@ -89,6 +94,8 @@ TEST(RegularGridTest, RejectsInvalidGeometry) {
     EXPECT_THROW(RegularGrid(0, 1, 1.0, 0.0, 1.0), std::invalid_argument);
     EXPECT_THROW(RegularGrid(1, -1, 1.0, 0.0, 1.0), std::invalid_argument);
     EXPECT_THROW(RegularGrid(1, 1, 0.0, 0.0, 1.0), std::invalid_argument);
+    EXPECT_THROW(RegularGrid(1, 1, 1.0, std::numeric_limits<double>::infinity(), 1.0),
+                 std::invalid_argument);
     EXPECT_THROW(RegularGrid(1, 1, 1.0, 1.0, 1.0), std::invalid_argument);
     EXPECT_THROW(RegularGrid(1, 1, 1.0, 0.0, std::numeric_limits<double>::infinity()),
                  std::invalid_argument);

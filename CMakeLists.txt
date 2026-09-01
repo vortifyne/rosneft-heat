@@ -21,6 +21,9 @@ find_package(MPI REQUIRED)
 add_library(heat_core STATIC
   src/discretization/model_heat_system.cpp
   src/forward/model_heat_forward_solver.cpp
+  src/inverse/model_heat_observation_data.cpp
+  src/inverse/model_heat_parameter_space.cpp
+  src/inverse/model_heat_residual_evaluator.cpp
   src/linear/umfpack_linear_solver.cpp
   src/nonlinear/nonlinear_solver.cpp
   src/time/bdf1.cpp
@@ -34,6 +37,35 @@ if(MSVC)
   target_compile_options(heat_core PRIVATE /W4 /permissive-)
 else()
   target_compile_options(heat_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
+add_library(heat_optimization STATIC
+  src/optimization/pounders_optimizer.cpp
+)
+
+target_include_directories(heat_optimization PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(heat_optimization
+  PUBLIC Eigen3::Eigen
+  PRIVATE PkgConfig::PETSc MPI::MPI_CXX
+)
+
+if(MSVC)
+  target_compile_options(heat_optimization PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(heat_optimization PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
+add_library(heat_inverse STATIC
+  src/inverse/model_heat_inverse_solver.cpp
+)
+
+target_include_directories(heat_inverse PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(heat_inverse PUBLIC heat_core heat_optimization)
+
+if(MSVC)
+  target_compile_options(heat_inverse PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(heat_inverse PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
 add_executable(heat_solver src/main.cpp)
@@ -51,6 +83,11 @@ include(GoogleTest)
 add_executable(unit_tests
   tests/test_bdf1.cpp
   tests/test_model_heat_forward_solver.cpp
+  tests/test_model_heat_inverse_recovery.cpp
+  tests/test_model_heat_inverse_solver.cpp
+  tests/test_model_heat_observation_data.cpp
+  tests/test_model_heat_parameter_space.cpp
+  tests/test_model_heat_residual_evaluator.cpp
   tests/test_model_heat_system.cpp
   tests/test_nonlinear_solver.cpp
   tests/test_sparse_matrix.cpp
@@ -59,10 +96,13 @@ add_executable(unit_tests
   tests/test_umfpack_smoke.cpp
   tests/test_vector.cpp
   tests/test_petsc_tao_punders.cpp
+  tests/test_pounders_optimizer.cpp
 )
 
 target_link_libraries(unit_tests PRIVATE
   heat_core
+  heat_inverse
+  heat_optimization
   SuiteSparse::UMFPACK_static
   GTest::gtest_main
   PkgConfig::PETSc

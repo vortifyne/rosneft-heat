@@ -24,14 +24,14 @@ enum class NonlinearSolveStatus {
     nonfinite_residual,
 };
 
-struct NonlinearSolveResult {
+struct [[nodiscard]] NonlinearSolveResult {
     NonlinearSolveStatus status;
     int iterations;
     double final_residual_norm;
     int linear_iterations = 0;
     std::optional<LinearSolveStatus> last_linear_status;
 
-    bool converged() const noexcept {
+    [[nodiscard]] constexpr bool converged() const noexcept {
         return status == NonlinearSolveStatus::converged_residual_absolute ||
                status == NonlinearSolveStatus::converged_residual_relative ||
                status == NonlinearSolveStatus::converged_step;
@@ -43,6 +43,14 @@ public:
     NonlinearSolver();
 
     void set_linear_solver(LinearSolverKind kind);
+
+    LinearSolver& linear_solver() noexcept {
+        return *linear_solver_;
+    }
+
+    const LinearSolver& linear_solver() const noexcept {
+        return *linear_solver_;
+    }
 
     LinearSolverKind linear_solver_kind() const noexcept {
         return linear_solver_kind_;
