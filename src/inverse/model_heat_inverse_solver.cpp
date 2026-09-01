@@ -24,10 +24,6 @@ void require_completed(const ModelHeatResidualResult& evaluation) {
 
 } // namespace
 
-bool ModelHeatInverseResult::converged() const noexcept {
-    return is_pounders_converged(status);
-}
-
 ModelHeatInverseSolver::ModelHeatInverseSolver(ModelHeatResidualEvaluator residual_evaluator)
     : residual_evaluator_(std::move(residual_evaluator)) {}
 

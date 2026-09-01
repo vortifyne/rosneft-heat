@@ -59,7 +59,7 @@ double validate_step_end_time(double previous_time, double step_end_time) {
 
 } // namespace
 
-std::size_t BDF1::required_snapshot_count() const {
+std::size_t BDF1::required_snapshot_count() const noexcept {
     return 1;
 }
 

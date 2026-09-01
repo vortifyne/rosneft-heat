@@ -14,11 +14,11 @@ public:
 
     explicit ModelHeatParameterSpace(ModelHeatParameterBounds bounds);
 
-    Vector to_normalized(const ModelHeatParameters& parameters) const;
-    ModelHeatParameters to_physical(const Vector& normalized) const;
+    [[nodiscard]] Vector to_normalized(const ModelHeatParameters& parameters) const;
+    [[nodiscard]] ModelHeatParameters to_physical(const Vector& normalized) const;
 
-    Vector normalized_lower_bounds() const;
-    Vector normalized_upper_bounds() const;
+    [[nodiscard]] Vector normalized_lower_bounds() const;
+    [[nodiscard]] Vector normalized_upper_bounds() const;
 
     const ModelHeatParameterBounds& physical_bounds() const noexcept;
 

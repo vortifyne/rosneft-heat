@@ -4,7 +4,7 @@
 
 class BDF1 final : public TimeScheme {
 public:
-    std::size_t required_snapshot_count() const override;
+    std::size_t required_snapshot_count() const noexcept override;
 
     std::unique_ptr<NonlinearSystem>
     make_nonlinear_system(const SemiDiscreteSystem& semi_discrete_system,

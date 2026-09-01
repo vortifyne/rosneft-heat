@@ -169,8 +169,9 @@ TEST(ModelHeatForwardSolverTest, ValidatesParametersSettingsAndObservationDomain
                  std::invalid_argument);
 
     ModelHeatForwardSolver solver(grid, make_problem({}), make_settings());
-    EXPECT_THROW(solver.solve({.surface_temperature = std::numeric_limits<double>::infinity(),
-                               .basal_heat_flux = 0.2}),
+    EXPECT_THROW(static_cast<void>(
+                     solver.solve({.surface_temperature = std::numeric_limits<double>::infinity(),
+                                   .basal_heat_flux = 0.2})),
                  std::invalid_argument);
 }
 

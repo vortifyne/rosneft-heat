@@ -65,20 +65,22 @@ TEST(ModelHeatObservationDataTest, RejectsInvalidTemperatureErrorBounds) {
 TEST(ModelHeatObservationDataTest, RejectsInvalidCalculatedTemperatures) {
     const ModelHeatObservationData observations(Vector{300.0, 320.0}, Vector{2.0, 5.0});
 
-    EXPECT_THROW(observations.normalized_residuals(Vector{300.0}), std::invalid_argument);
-    EXPECT_THROW(
-        observations.normalized_residuals(Vector{300.0, std::numeric_limits<double>::quiet_NaN()}),
-        std::invalid_argument);
-    EXPECT_THROW(
-        observations.normalized_residuals(Vector{300.0, std::numeric_limits<double>::infinity()}),
-        std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(observations.normalized_residuals(Vector{300.0})),
+                 std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(observations.normalized_residuals(
+                     Vector{300.0, std::numeric_limits<double>::quiet_NaN()})),
+                 std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(observations.normalized_residuals(
+                     Vector{300.0, std::numeric_limits<double>::infinity()})),
+                 std::invalid_argument);
 }
 
 TEST(ModelHeatObservationDataTest, RejectsOverflowingNormalizedResidual) {
     const ModelHeatObservationData observations(Vector{-std::numeric_limits<double>::max()},
                                                 Vector{1.0});
 
-    EXPECT_THROW(observations.normalized_residuals(Vector{std::numeric_limits<double>::max()}),
+    EXPECT_THROW(static_cast<void>(
+                     observations.normalized_residuals(Vector{std::numeric_limits<double>::max()})),
                  std::overflow_error);
 }
 

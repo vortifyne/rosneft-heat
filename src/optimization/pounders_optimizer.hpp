@@ -26,9 +26,21 @@ enum class PoundersSolveStatus {
     unknown,
 };
 
-bool is_pounders_converged(PoundersSolveStatus status) noexcept;
+[[nodiscard]] constexpr bool is_pounders_converged(PoundersSolveStatus status) noexcept {
+    switch (status) {
+    case PoundersSolveStatus::converged_gradient_absolute:
+    case PoundersSolveStatus::converged_gradient_relative:
+    case PoundersSolveStatus::converged_gradient_reduction:
+    case PoundersSolveStatus::converged_step:
+    case PoundersSolveStatus::converged_objective:
+    case PoundersSolveStatus::converged_user:
+        return true;
+    default:
+        return false;
+    }
+}
 
-struct PoundersSolveResult {
+struct [[nodiscard]] PoundersSolveResult {
     PoundersSolveStatus status;
     Vector parameters;
     Vector residuals;
@@ -36,7 +48,9 @@ struct PoundersSolveResult {
     int iterations;
     int function_evaluations;
 
-    bool converged() const noexcept;
+    [[nodiscard]] constexpr bool converged() const noexcept {
+        return is_pounders_converged(status);
+    }
 };
 
 class PoundersOptimizer {

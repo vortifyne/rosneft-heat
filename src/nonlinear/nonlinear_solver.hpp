@@ -24,14 +24,14 @@ enum class NonlinearSolveStatus {
     nonfinite_residual,
 };
 
-struct NonlinearSolveResult {
+struct [[nodiscard]] NonlinearSolveResult {
     NonlinearSolveStatus status;
     int iterations;
     double final_residual_norm;
     int linear_iterations = 0;
     std::optional<LinearSolveStatus> last_linear_status;
 
-    bool converged() const noexcept {
+    [[nodiscard]] constexpr bool converged() const noexcept {
         return status == NonlinearSolveStatus::converged_residual_absolute ||
                status == NonlinearSolveStatus::converged_residual_relative ||
                status == NonlinearSolveStatus::converged_step;

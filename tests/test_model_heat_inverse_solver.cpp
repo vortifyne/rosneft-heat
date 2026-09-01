@@ -74,10 +74,10 @@ TEST(ModelHeatInverseSolverTest, ValidatesPhysicalInitialParameters) {
     ModelHeatInverseSolver solver = make_inverse_solver(
         ModelHeatObservationData(Vector{10.0, 10.0, 10.0}, Vector{0.1, 0.1, 0.1}));
 
-    EXPECT_THROW(solver.solve({
+    EXPECT_THROW(static_cast<void>(solver.solve({
                      .initial_parameters = {.surface_temperature = 21.0, .basal_heat_flux = 0.5},
                      .optimization = kOptimizationRequest,
-                 }),
+                 })),
                  std::invalid_argument);
 }
 
@@ -89,10 +89,10 @@ TEST(ModelHeatInverseSolverTest, PropagatesForwardFailureUntilPenaltyPolicyIsImp
         ModelHeatObservationData(Vector{10.0, 10.0, 10.0}, Vector{0.1, 0.1, 0.1}),
         failing_settings);
 
-    EXPECT_THROW(solver.solve({
+    EXPECT_THROW(static_cast<void>(solver.solve({
                      .initial_parameters = {.surface_temperature = 12.0, .basal_heat_flux = 0.3},
                      .optimization = kOptimizationRequest,
-                 }),
+                 })),
                  std::runtime_error);
 }
 

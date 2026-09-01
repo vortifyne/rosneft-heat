@@ -25,7 +25,7 @@ struct RegularGrid {
           dz((this->bottom_depth - this->surface_depth) / static_cast<double>(this->nz)),
           inv_dx(1.0 / dx), inv_dz(1.0 / dz), cell_area(dx * dz), inv_cell_area(inv_dx * inv_dz) {}
 
-    int cell_count() const noexcept {
+    constexpr int cell_count() const noexcept {
         return nx * nz;
     }
 

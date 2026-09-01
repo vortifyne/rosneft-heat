@@ -184,13 +184,15 @@ TEST(TimeIntegratorTest, RejectsInvalidConfigurationAndTimeDirection) {
     EXPECT_THROW(
         integrator.set_initial_solution(std::numeric_limits<double>::quiet_NaN(), Vector{1.0}),
         std::invalid_argument);
-    EXPECT_THROW(integrator.advance_to(system, 1.0, kNewtonRequest, kDirectLinearRequest),
-                 std::logic_error);
+    EXPECT_THROW(
+        static_cast<void>(integrator.advance_to(system, 1.0, kNewtonRequest, kDirectLinearRequest)),
+        std::logic_error);
 
     integrator.set_initial_solution(2.0, Vector{1.0});
     integrator.set_timestep(0.5);
-    EXPECT_THROW(integrator.advance_to(system, 1.0, kNewtonRequest, kDirectLinearRequest),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        static_cast<void>(integrator.advance_to(system, 1.0, kNewtonRequest, kDirectLinearRequest)),
+        std::invalid_argument);
 }
 
 TEST(TimeIntegratorTest, ReportsWhenTimeStepCannotAdvanceFloatingPointTime) {

@@ -4,14 +4,14 @@
 #include "inverse/model_heat_observation_data.hpp"
 #include "inverse/model_heat_parameter_space.hpp"
 
-struct ModelHeatResidualResult {
+struct [[nodiscard]] ModelHeatResidualResult {
     TimeIntegrationResult time_integration;
     Vector calculated_temperatures;
     Vector normalized_residuals;
     double objective;
     double forward_elapsed_time_seconds;
 
-    bool completed() const noexcept {
+    [[nodiscard]] constexpr bool completed() const noexcept {
         return time_integration.completed();
     }
 };

@@ -16,7 +16,7 @@ enum class TimeIntegrationStatus {
     time_step_too_small,
 };
 
-struct TimeIntegrationResult {
+struct [[nodiscard]] TimeIntegrationResult {
     TimeIntegrationStatus status;
     int accepted_steps;
     int rejected_steps;
@@ -25,7 +25,7 @@ struct TimeIntegrationResult {
     std::optional<NonlinearSolveStatus> last_nonlinear_status;
     std::optional<LinearSolveStatus> last_linear_status;
 
-    bool completed() const noexcept {
+    [[nodiscard]] constexpr bool completed() const noexcept {
         return status == TimeIntegrationStatus::completed;
     }
 };

@@ -145,8 +145,8 @@ TEST(ModelHeatResidualEvaluatorTest, ValidatesObservationCountAndNormalizedParam
                                          make_observations());
     EXPECT_EQ(evaluator.parameter_count(), 2);
     EXPECT_EQ(evaluator.residual_count(), 3);
-    EXPECT_THROW(evaluator.evaluate(Vector{0.5}), std::invalid_argument);
-    EXPECT_THROW(evaluator.evaluate(Vector{0.5, 1.1}), std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(evaluator.evaluate(Vector{0.5})), std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(evaluator.evaluate(Vector{0.5, 1.1})), std::invalid_argument);
 }
 
 } // namespace

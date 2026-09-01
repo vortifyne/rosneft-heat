@@ -21,13 +21,13 @@ struct ModelHeatForwardSettings {
     LinearSolverKind linear_solver = LinearSolverKind::umfpack_lu;
 };
 
-struct ModelHeatForwardResult {
+struct [[nodiscard]] ModelHeatForwardResult {
     TimeIntegrationResult integration;
     ModelHeatState final_state;
     Vector calculated_temperature;
     double elapsed_time_seconds = 0.0;
 
-    bool completed() const noexcept {
+    [[nodiscard]] constexpr bool completed() const noexcept {
         return integration.completed();
     }
 };

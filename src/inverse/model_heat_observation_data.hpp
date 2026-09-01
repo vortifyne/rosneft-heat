@@ -11,7 +11,7 @@ public:
     const Vector& observed_temperatures() const noexcept;
     const Vector& temperature_error_bounds() const noexcept;
 
-    Vector normalized_residuals(const Vector& calculated_temperatures) const;
+    [[nodiscard]] Vector normalized_residuals(const Vector& calculated_temperatures) const;
 
 private:
     Vector observed_temperatures_;

@@ -8,7 +8,7 @@ struct ModelHeatInverseSolveRequest {
     PoundersSolveRequest optimization;
 };
 
-struct ModelHeatInverseResult {
+struct [[nodiscard]] ModelHeatInverseResult {
     PoundersSolveStatus status;
 
     ModelHeatParameters parameters;
@@ -23,7 +23,9 @@ struct ModelHeatInverseResult {
     int forward_evaluations;
     double forward_elapsed_time_seconds;
 
-    bool converged() const noexcept;
+    [[nodiscard]] constexpr bool converged() const noexcept {
+        return is_pounders_converged(status);
+    }
 };
 
 class ModelHeatInverseSolver {

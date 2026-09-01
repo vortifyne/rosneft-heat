@@ -97,28 +97,33 @@ TEST(ModelHeatParameterSpaceTest, RejectsInvalidPhysicalBounds) {
 TEST(ModelHeatParameterSpaceTest, RejectsInvalidPhysicalParameters) {
     const ModelHeatParameterSpace space(make_bounds());
 
-    EXPECT_THROW(space.to_normalized({.surface_temperature = 249.0, .basal_heat_flux = 0.075}),
+    EXPECT_THROW(static_cast<void>(
+                     space.to_normalized({.surface_temperature = 249.0, .basal_heat_flux = 0.075})),
                  std::invalid_argument);
-    EXPECT_THROW(space.to_normalized({.surface_temperature = 300.0, .basal_heat_flux = 0.121}),
+    EXPECT_THROW(static_cast<void>(
+                     space.to_normalized({.surface_temperature = 300.0, .basal_heat_flux = 0.121})),
                  std::invalid_argument);
-    EXPECT_THROW(
-        space.to_normalized({.surface_temperature = std::numeric_limits<double>::infinity(),
-                             .basal_heat_flux = 0.075}),
-        std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(space.to_normalized(
+                     {.surface_temperature = std::numeric_limits<double>::infinity(),
+                      .basal_heat_flux = 0.075})),
+                 std::invalid_argument);
 }
 
 TEST(ModelHeatParameterSpaceTest, RejectsInvalidNormalizedCoordinates) {
     const ModelHeatParameterSpace space(make_bounds());
 
-    EXPECT_THROW(space.to_physical(Vector{}), std::invalid_argument);
-    EXPECT_THROW(space.to_physical(Vector{0.5}), std::invalid_argument);
-    EXPECT_THROW(space.to_physical(Vector{0.5, 0.5, 0.5}), std::invalid_argument);
-    EXPECT_THROW(space.to_physical(Vector{-0.01, 0.5}), std::invalid_argument);
-    EXPECT_THROW(space.to_physical(Vector{0.5, 1.01}), std::invalid_argument);
-    EXPECT_THROW(space.to_physical(Vector{std::numeric_limits<double>::quiet_NaN(), 0.5}),
+    EXPECT_THROW(static_cast<void>(space.to_physical(Vector{})), std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(space.to_physical(Vector{0.5})), std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(space.to_physical(Vector{0.5, 0.5, 0.5})),
                  std::invalid_argument);
-    EXPECT_THROW(space.to_physical(Vector{0.5, std::numeric_limits<double>::infinity()}),
-                 std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(space.to_physical(Vector{-0.01, 0.5})), std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(space.to_physical(Vector{0.5, 1.01})), std::invalid_argument);
+    EXPECT_THROW(
+        static_cast<void>(space.to_physical(Vector{std::numeric_limits<double>::quiet_NaN(), 0.5})),
+        std::invalid_argument);
+    EXPECT_THROW(
+        static_cast<void>(space.to_physical(Vector{0.5, std::numeric_limits<double>::infinity()})),
+        std::invalid_argument);
 }
 
 } // namespace

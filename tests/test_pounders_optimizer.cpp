@@ -122,51 +122,55 @@ TEST(PoundersOptimizerTest, ValidatesProblemAndRequest) {
         .residual_function = residual,
     };
 
-    EXPECT_THROW(PoundersOptimizer{}.solve({.lower_bounds = Vector{},
-                                            .upper_bounds = Vector{},
-                                            .residual_count = 1,
-                                            .residual_function = residual},
-                                           Vector{}, kSolveRequest),
+    EXPECT_THROW(static_cast<void>(PoundersOptimizer{}.solve({.lower_bounds = Vector{},
+                                                              .upper_bounds = Vector{},
+                                                              .residual_count = 1,
+                                                              .residual_function = residual},
+                                                             Vector{}, kSolveRequest)),
                  std::invalid_argument);
-    EXPECT_THROW(PoundersOptimizer{}.solve({.lower_bounds = Vector{-1.0},
-                                            .upper_bounds = Vector{1.0, 2.0},
-                                            .residual_count = 1,
-                                            .residual_function = residual},
-                                           Vector{0.0}, kSolveRequest),
+    EXPECT_THROW(static_cast<void>(PoundersOptimizer{}.solve({.lower_bounds = Vector{-1.0},
+                                                              .upper_bounds = Vector{1.0, 2.0},
+                                                              .residual_count = 1,
+                                                              .residual_function = residual},
+                                                             Vector{0.0}, kSolveRequest)),
                  std::invalid_argument);
-    EXPECT_THROW(PoundersOptimizer{}.solve({.lower_bounds = Vector{1.0},
-                                            .upper_bounds = Vector{1.0},
-                                            .residual_count = 1,
-                                            .residual_function = residual},
-                                           Vector{1.0}, kSolveRequest),
+    EXPECT_THROW(static_cast<void>(PoundersOptimizer{}.solve({.lower_bounds = Vector{1.0},
+                                                              .upper_bounds = Vector{1.0},
+                                                              .residual_count = 1,
+                                                              .residual_function = residual},
+                                                             Vector{1.0}, kSolveRequest)),
                  std::invalid_argument);
-    EXPECT_THROW(PoundersOptimizer{}.solve(valid_problem, Vector{2.0}, kSolveRequest),
+    EXPECT_THROW(
+        static_cast<void>(PoundersOptimizer{}.solve(valid_problem, Vector{2.0}, kSolveRequest)),
+        std::invalid_argument);
+    EXPECT_THROW(static_cast<void>(PoundersOptimizer{}.solve({.lower_bounds = Vector{-1.0},
+                                                              .upper_bounds = Vector{1.0},
+                                                              .residual_count = 0,
+                                                              .residual_function = residual},
+                                                             Vector{0.0}, kSolveRequest)),
                  std::invalid_argument);
-    EXPECT_THROW(PoundersOptimizer{}.solve({.lower_bounds = Vector{-1.0},
-                                            .upper_bounds = Vector{1.0},
-                                            .residual_count = 0,
-                                            .residual_function = residual},
-                                           Vector{0.0}, kSolveRequest),
-                 std::invalid_argument);
-    EXPECT_THROW(PoundersOptimizer{}.solve({.lower_bounds = Vector{-1.0},
-                                            .upper_bounds = Vector{1.0},
-                                            .residual_count = 1,
-                                            .residual_function = {}},
-                                           Vector{0.0}, kSolveRequest),
+    EXPECT_THROW(static_cast<void>(PoundersOptimizer{}.solve({.lower_bounds = Vector{-1.0},
+                                                              .upper_bounds = Vector{1.0},
+                                                              .residual_count = 1,
+                                                              .residual_function = {}},
+                                                             Vector{0.0}, kSolveRequest)),
                  std::invalid_argument);
 
     PoundersSolveRequest invalid_request = kSolveRequest;
     invalid_request.gradient_absolute_tolerance = std::numeric_limits<double>::quiet_NaN();
-    EXPECT_THROW(PoundersOptimizer{}.solve(valid_problem, Vector{0.0}, invalid_request),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        static_cast<void>(PoundersOptimizer{}.solve(valid_problem, Vector{0.0}, invalid_request)),
+        std::invalid_argument);
     invalid_request = kSolveRequest;
     invalid_request.max_iterations = 0;
-    EXPECT_THROW(PoundersOptimizer{}.solve(valid_problem, Vector{0.0}, invalid_request),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        static_cast<void>(PoundersOptimizer{}.solve(valid_problem, Vector{0.0}, invalid_request)),
+        std::invalid_argument);
     invalid_request = kSolveRequest;
     invalid_request.max_function_evaluations = 0;
-    EXPECT_THROW(PoundersOptimizer{}.solve(valid_problem, Vector{0.0}, invalid_request),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        static_cast<void>(PoundersOptimizer{}.solve(valid_problem, Vector{0.0}, invalid_request)),
+        std::invalid_argument);
 }
 
 TEST(PoundersOptimizerTest, RejectsInvalidResidualVector) {
@@ -185,10 +189,12 @@ TEST(PoundersOptimizerTest, RejectsInvalidResidualVector) {
             [](const Vector&) { return Vector{std::numeric_limits<double>::infinity()}; },
     };
 
-    EXPECT_THROW(PoundersOptimizer{}.solve(wrong_size, Vector{0.0}, kSolveRequest),
-                 std::runtime_error);
-    EXPECT_THROW(PoundersOptimizer{}.solve(nonfinite, Vector{0.0}, kSolveRequest),
-                 std::runtime_error);
+    EXPECT_THROW(
+        static_cast<void>(PoundersOptimizer{}.solve(wrong_size, Vector{0.0}, kSolveRequest)),
+        std::runtime_error);
+    EXPECT_THROW(
+        static_cast<void>(PoundersOptimizer{}.solve(nonfinite, Vector{0.0}, kSolveRequest)),
+        std::runtime_error);
 }
 
 TEST(PoundersOptimizerTest, PropagatesResidualFunctionExceptionSafely) {
@@ -202,7 +208,8 @@ TEST(PoundersOptimizerTest, PropagatesResidualFunctionExceptionSafely) {
         },
     };
 
-    EXPECT_THROW(PoundersOptimizer{}.solve(problem, Vector{0.0}, kSolveRequest), std::domain_error);
+    EXPECT_THROW(static_cast<void>(PoundersOptimizer{}.solve(problem, Vector{0.0}, kSolveRequest)),
+                 std::domain_error);
 }
 
 } // namespace
