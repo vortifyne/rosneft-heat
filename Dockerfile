@@ -5,6 +5,7 @@ ENV VCPKG_ROOT=/opt/vcpkg
 ENV PATH="${VCPKG_ROOT}:${PATH}"
 
 ENV VCPKG_DEFAULT_BINARY_CACHE=/var/cache/vcpkg
+ENV VCPKG_DOWNLOADS=/var/cache/vcpkg/downloads
 
 RUN apt-get update && apt-get install -y \
   build-essential g++ clang ninja-build \
