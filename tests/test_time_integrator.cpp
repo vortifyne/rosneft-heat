@@ -212,6 +212,8 @@ TEST(TimeIntegratorTest, DelegatesLinearSolverSelection) {
     TimeIntegrator integrator;
 
     EXPECT_NO_THROW(integrator.set_linear_solver(LinearSolverKind::umfpack_lu));
+    EXPECT_EQ(integrator.nonlinear_solver().linear_solver_kind(), LinearSolverKind::umfpack_lu);
+    EXPECT_EQ(integrator.nonlinear_solver().linear_solver().type(), LinearSolverType::direct);
 }
 
 } // namespace

@@ -44,10 +44,9 @@ InterpolationAxis make_axis(double coordinate, double first_cell_center, double 
 } // namespace
 
 ModelHeatForwardSolver::ModelHeatForwardSolver(RegularGrid grid, ModelHeatProblem problem,
-                                               ModelHeatForwardSettings settings,
-                                               ModelHeatParameters initial_parameters)
+                                               ModelHeatForwardSettings settings)
     : grid_(grid), problem_(std::move(problem)), settings_(settings),
-      parameters_(initial_parameters), initial_temperature_(grid_.cell_count()) {
+      initial_temperature_(grid_.cell_count()) {
     check_finite(settings_.initial_time, "Initial time must be finite");
     check_finite(settings_.final_time, "Final time must be finite");
     if (settings_.final_time < settings_.initial_time) {
@@ -58,7 +57,6 @@ ModelHeatForwardSolver::ModelHeatForwardSolver(RegularGrid grid, ModelHeatProble
     }
     check_finite(problem_.initial_condition.initial_temperature,
                  "Initial temperature must be finite");
-    check_parameters(parameters_);
 
     initial_temperature_.set_constant(problem_.initial_condition.initial_temperature);
     observation_stencils_.reserve(problem_.observation_points.size());
@@ -67,32 +65,14 @@ ModelHeatForwardSolver::ModelHeatForwardSolver(RegularGrid grid, ModelHeatProble
     }
 }
 
-void ModelHeatForwardSolver::set_surface_temperature(double value) {
-    check_finite(value, "Surface temperature must be finite");
-    parameters_.surface_temperature = value;
-}
-
-void ModelHeatForwardSolver::set_basal_heat_flux(double value) {
-    check_finite(value, "Basal heat flux must be finite");
-    parameters_.basal_heat_flux = value;
-}
-
-void ModelHeatForwardSolver::set_parameters(const ModelHeatParameters& parameters) {
-    check_parameters(parameters);
-    parameters_ = parameters;
-}
-
-const ModelHeatParameters& ModelHeatForwardSolver::parameters() const noexcept {
-    return parameters_;
-}
-
 std::size_t ModelHeatForwardSolver::observation_count() const noexcept {
     return observation_stencils_.size();
 }
 
-ModelHeatForwardResult ModelHeatForwardSolver::solve() const {
+ModelHeatForwardResult ModelHeatForwardSolver::solve(const ModelHeatParameters& parameters) const {
+    check_parameters(parameters);
     const auto start_time = std::chrono::steady_clock::now();
-    const ModelHeatSystem system(grid_, problem_.lithotype, parameters_);
+    const ModelHeatSystem system(grid_, problem_.lithotype, parameters);
     TimeIntegrator integrator;
     integrator.set_initial_solution(settings_.initial_time, initial_temperature_);
     integrator.set_timestep(settings_.time_step);
@@ -117,13 +97,14 @@ ModelHeatForwardSolver::ObservationStencil
 ModelHeatForwardSolver::make_observation_stencil(const ObservationPoint& point) const {
     check_finite(point.x, "Observation x coordinate must be finite");
     check_finite(point.z, "Observation z coordinate must be finite");
-    if (point.x < 0.0 || point.x > grid_.W || point.z < grid_.z_surf || point.z > grid_.L) {
+    if (point.x < 0.0 || point.x > grid_.width || point.z < grid_.surface_depth ||
+        point.z > grid_.bottom_depth) {
         throw std::invalid_argument("Observation point must lie inside the computational domain");
     }
 
     const InterpolationAxis x_axis = make_axis(point.x, 0.5 * grid_.dx, grid_.dx, grid_.nx);
     const InterpolationAxis z_axis =
-        make_axis(point.z, grid_.z_surf + (0.5 * grid_.dz), grid_.dz, grid_.nz);
+        make_axis(point.z, grid_.surface_depth + (0.5 * grid_.dz), grid_.dz, grid_.nz);
     const auto cell_index = [&](int ix, int iz) {
         return (static_cast<Vector::Index>(iz) * static_cast<Vector::Index>(grid_.nx)) +
                static_cast<Vector::Index>(ix);

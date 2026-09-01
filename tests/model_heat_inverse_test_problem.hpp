@@ -72,14 +72,13 @@ inline ModelHeatParameterSpace make_parameter_space() {
 
 inline ModelHeatForwardSolver
 make_forward_solver(ModelHeatForwardSettings settings = make_settings()) {
-    return ModelHeatForwardSolver(make_grid(), make_problem(), settings,
-                                  {.surface_temperature = 10.0, .basal_heat_flux = 0.0});
+    return ModelHeatForwardSolver(make_grid(), make_problem(), settings);
 }
 
 inline ModelHeatForwardResult solve_forward(const ModelHeatParameters& parameters,
                                             ModelHeatForwardSettings settings = make_settings()) {
-    ModelHeatForwardSolver solver(make_grid(), make_problem(), settings, parameters);
-    ModelHeatForwardResult result = solver.solve();
+    ModelHeatForwardSolver solver(make_grid(), make_problem(), settings);
+    ModelHeatForwardResult result = solver.solve(parameters);
     if (!result.completed()) {
         throw std::runtime_error("Failed to solve synthetic model heat problem");
     }

@@ -44,6 +44,14 @@ public:
 
     void set_linear_solver(LinearSolverKind kind);
 
+    LinearSolver& linear_solver() noexcept {
+        return *linear_solver_;
+    }
+
+    const LinearSolver& linear_solver() const noexcept {
+        return *linear_solver_;
+    }
+
     LinearSolverKind linear_solver_kind() const noexcept {
         return linear_solver_kind_;
     }

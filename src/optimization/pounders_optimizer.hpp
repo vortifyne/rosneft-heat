@@ -26,6 +26,8 @@ enum class PoundersSolveStatus {
     unknown,
 };
 
+bool is_pounders_converged(PoundersSolveStatus status) noexcept;
+
 struct PoundersSolveResult {
     PoundersSolveStatus status;
     Vector parameters;

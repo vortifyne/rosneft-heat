@@ -65,11 +65,11 @@ void expect_vector_near(const Vector& actual, const Vector& expected, double tol
 TEST(ModelHeatForwardSolverTest,
      RunsCompleteForwardCalculationAndSamplesWellEveryFiveHundredMeters) {
     const RegularGrid grid(4, 6, 2000.0, 0.0, 3000.0);
-    ModelHeatForwardSolver solver(grid, make_problem(make_well_observations()), make_settings(),
-                                  {.surface_temperature = 10.0, .basal_heat_flux = 0.2});
+    ModelHeatForwardSolver solver(grid, make_problem(make_well_observations()), make_settings());
 
     EXPECT_EQ(solver.observation_count(), 7);
-    const ModelHeatForwardResult result = solver.solve();
+    const ModelHeatForwardResult result =
+        solver.solve({.surface_temperature = 10.0, .basal_heat_flux = 0.2});
 
     ASSERT_TRUE(result.completed());
     EXPECT_EQ(result.integration.accepted_steps, 3);
@@ -89,8 +89,9 @@ TEST(ModelHeatForwardSolverTest,
         EXPECT_NEAR(temperature(0, iz), temperature(3, iz), 1e-12);
     }
 
-    // x = W/2 lies between the two middle columns, but symmetry makes the vertical interpolation
-    // sufficient below. Observations above/below the outer centres use their constant values.
+    // x = width/2 lies between the two middle columns, but symmetry makes the vertical
+    // interpolation sufficient below. Observations above/below the outer centres use their
+    // constant values.
     EXPECT_NEAR(result.calculated_temperature[0], temperature(1, 0), 1e-12);
     EXPECT_NEAR(result.calculated_temperature[1], 0.5 * (temperature(1, 0) + temperature(1, 1)),
                 1e-12);
@@ -107,15 +108,12 @@ TEST(ModelHeatForwardSolverTest, ReusesFixedProblemAndStartsEveryParameterRunFro
         .surface_temperature = 10.0,
         .basal_heat_flux = 0.2,
     };
-    ModelHeatForwardSolver solver(grid, make_problem(make_well_observations()), make_settings(),
-                                  base_parameters);
+    ModelHeatForwardSolver solver(grid, make_problem(make_well_observations()), make_settings());
 
-    const ModelHeatForwardResult first = solver.solve();
-    solver.set_surface_temperature(20.0);
-    solver.set_basal_heat_flux(0.4);
-    const ModelHeatForwardResult changed = solver.solve();
-    solver.set_parameters(base_parameters);
-    const ModelHeatForwardResult repeated = solver.solve();
+    const ModelHeatForwardResult first = solver.solve(base_parameters);
+    const ModelHeatForwardResult changed =
+        solver.solve({.surface_temperature = 20.0, .basal_heat_flux = 0.4});
+    const ModelHeatForwardResult repeated = solver.solve(base_parameters);
 
     ASSERT_TRUE(first.completed());
     ASSERT_TRUE(changed.completed());
@@ -130,10 +128,10 @@ TEST(ModelHeatForwardSolverTest, KeepsLastAcceptedStateWhenCalculationFails) {
     const RegularGrid grid(3, 3, 1500.0, 0.0, 1500.0);
     ModelHeatForwardSettings settings = make_settings();
     settings.nonlinear.max_iterations = 0;
-    ModelHeatForwardSolver solver(grid, make_problem({{.x = 750.0, .z = 750.0}}), settings,
-                                  {.surface_temperature = 20.0, .basal_heat_flux = 0.2});
+    ModelHeatForwardSolver solver(grid, make_problem({{.x = 750.0, .z = 750.0}}), settings);
 
-    const ModelHeatForwardResult result = solver.solve();
+    const ModelHeatForwardResult result =
+        solver.solve({.surface_temperature = 20.0, .basal_heat_flux = 0.2});
 
     EXPECT_FALSE(result.completed());
     EXPECT_EQ(result.integration.status, TimeIntegrationStatus::nonlinear_solve_failed);
@@ -149,11 +147,11 @@ TEST(ModelHeatForwardSolverTest, SupportsSingleCellGridAndConstantBoundaryExtrap
     const RegularGrid grid(1, 1, 1000.0, 0.0, 1000.0);
     ModelHeatForwardSettings settings = make_settings();
     settings.final_time = settings.initial_time;
-    ModelHeatForwardSolver solver(grid,
-                                  make_problem({{.x = 0.0, .z = 0.0}, {.x = 1000.0, .z = 1000.0}}),
-                                  settings, {.surface_temperature = 10.0, .basal_heat_flux = 0.0});
+    ModelHeatForwardSolver solver(
+        grid, make_problem({{.x = 0.0, .z = 0.0}, {.x = 1000.0, .z = 1000.0}}), settings);
 
-    const ModelHeatForwardResult result = solver.solve();
+    const ModelHeatForwardResult result =
+        solver.solve({.surface_temperature = 10.0, .basal_heat_flux = 0.0});
 
     ASSERT_TRUE(result.completed());
     expect_vector_near(result.calculated_temperature, Vector{10.0, 10.0});
@@ -161,20 +159,19 @@ TEST(ModelHeatForwardSolverTest, SupportsSingleCellGridAndConstantBoundaryExtrap
 
 TEST(ModelHeatForwardSolverTest, ValidatesParametersSettingsAndObservationDomain) {
     const RegularGrid grid(2, 2, 1000.0, 0.0, 1000.0);
-    const ModelHeatParameters parameters{.surface_temperature = 10.0, .basal_heat_flux = 0.2};
-    EXPECT_THROW(ModelHeatForwardSolver(grid, make_problem({{.x = -1.0, .z = 500.0}}),
-                                        make_settings(), parameters),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        ModelHeatForwardSolver(grid, make_problem({{.x = -1.0, .z = 500.0}}), make_settings()),
+        std::invalid_argument);
 
     ModelHeatForwardSettings invalid_settings = make_settings();
     invalid_settings.time_step = 0.0;
-    EXPECT_THROW(ModelHeatForwardSolver(grid, make_problem({}), invalid_settings, parameters),
+    EXPECT_THROW(ModelHeatForwardSolver(grid, make_problem({}), invalid_settings),
                  std::invalid_argument);
 
-    ModelHeatForwardSolver solver(grid, make_problem({}), make_settings(), parameters);
-    EXPECT_THROW(solver.set_surface_temperature(std::numeric_limits<double>::infinity()),
+    ModelHeatForwardSolver solver(grid, make_problem({}), make_settings());
+    EXPECT_THROW(solver.solve({.surface_temperature = std::numeric_limits<double>::infinity(),
+                               .basal_heat_flux = 0.2}),
                  std::invalid_argument);
-    EXPECT_DOUBLE_EQ(solver.parameters().surface_temperature, 10.0);
 }
 
 } // namespace

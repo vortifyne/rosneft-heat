@@ -25,17 +25,7 @@ void require_completed(const ModelHeatResidualResult& evaluation) {
 } // namespace
 
 bool ModelHeatInverseResult::converged() const noexcept {
-    switch (status) {
-    case PoundersSolveStatus::converged_gradient_absolute:
-    case PoundersSolveStatus::converged_gradient_relative:
-    case PoundersSolveStatus::converged_gradient_reduction:
-    case PoundersSolveStatus::converged_step:
-    case PoundersSolveStatus::converged_objective:
-    case PoundersSolveStatus::converged_user:
-        return true;
-    default:
-        return false;
-    }
+    return is_pounders_converged(status);
 }
 
 ModelHeatInverseSolver::ModelHeatInverseSolver(ModelHeatResidualEvaluator residual_evaluator)

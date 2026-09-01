@@ -32,8 +32,8 @@ const ModelHeatObservationData& ModelHeatResidualEvaluator::observations() const
 }
 
 ModelHeatResidualResult ModelHeatResidualEvaluator::evaluate(const Vector& normalized_parameters) {
-    forward_solver_.set_parameters(parameter_space_.to_physical(normalized_parameters));
-    ModelHeatForwardResult forward_result = forward_solver_.solve();
+    ModelHeatForwardResult forward_result =
+        forward_solver_.solve(parameter_space_.to_physical(normalized_parameters));
 
     if (!forward_result.completed()) {
         return {

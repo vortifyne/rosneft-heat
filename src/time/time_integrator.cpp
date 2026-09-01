@@ -9,9 +9,7 @@
 #include <stdexcept>
 #include <utility>
 
-TimeIntegrator::TimeIntegrator()
-    : time_scheme_(std::make_unique<BDF1>()),
-      nonlinear_solver_(std::make_unique<NonlinearSolver>()) {
+TimeIntegrator::TimeIntegrator() : time_scheme_(std::make_unique<BDF1>()) {
     time_history_.set_capacity(time_scheme_->required_snapshot_count());
 }
 
@@ -37,7 +35,15 @@ void TimeIntegrator::set_timestep(double dt) {
 }
 
 void TimeIntegrator::set_linear_solver(LinearSolverKind kind) {
-    nonlinear_solver_->set_linear_solver(kind);
+    nonlinear_solver_.set_linear_solver(kind);
+}
+
+NonlinearSolver& TimeIntegrator::nonlinear_solver() noexcept {
+    return nonlinear_solver_;
+}
+
+const NonlinearSolver& TimeIntegrator::nonlinear_solver() const noexcept {
+    return nonlinear_solver_;
 }
 
 const TimeSnapshot& TimeIntegrator::current_snapshot() const {
@@ -91,8 +97,8 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
         Vector solution = time_history_.current().solution;
         auto nonlinear_system =
             time_scheme_->make_nonlinear_system(semi_discrete_system, time_history_, step_end_time);
-        const NonlinearSolveResult nonlinear_result = nonlinear_solver_->solve(
-            *nonlinear_system, solution, nonlinear_request, linear_request);
+        const NonlinearSolveResult nonlinear_result =
+            nonlinear_solver_.solve(*nonlinear_system, solution, nonlinear_request, linear_request);
         nonlinear_iterations += nonlinear_result.iterations;
         linear_iterations += nonlinear_result.linear_iterations;
         last_nonlinear_status = nonlinear_result.status;

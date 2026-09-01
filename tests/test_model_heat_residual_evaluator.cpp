@@ -67,8 +67,7 @@ ModelHeatObservationData make_observations() {
 }
 
 ModelHeatForwardSolver make_forward_solver(ModelHeatForwardSettings settings = make_settings()) {
-    return ModelHeatForwardSolver(make_grid(), make_problem(), settings,
-                                  {.surface_temperature = 10.0, .basal_heat_flux = 0.0});
+    return ModelHeatForwardSolver(make_grid(), make_problem(), settings);
 }
 
 void expect_vector_near(const Vector& actual, const Vector& expected, double tolerance = 1e-12) {
@@ -84,10 +83,9 @@ TEST(ModelHeatResidualEvaluatorTest, EvaluatesNormalizedParametersAndReturnsResi
     const Vector normalized_parameters{0.25, 0.75};
     const ModelHeatParameters physical_parameters =
         evaluator.parameter_space().to_physical(normalized_parameters);
-    ModelHeatForwardSolver direct_solver(make_grid(), make_problem(), make_settings(),
-                                         physical_parameters);
+    ModelHeatForwardSolver direct_solver(make_grid(), make_problem(), make_settings());
 
-    const ModelHeatForwardResult direct_result = direct_solver.solve();
+    const ModelHeatForwardResult direct_result = direct_solver.solve(physical_parameters);
     const ModelHeatResidualResult result = evaluator.evaluate(normalized_parameters);
     const Vector expected_residuals =
         evaluator.observations().normalized_residuals(direct_result.calculated_temperature);

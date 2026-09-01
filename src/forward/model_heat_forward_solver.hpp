@@ -35,17 +35,11 @@ struct ModelHeatForwardResult {
 class ModelHeatForwardSolver {
 public:
     ModelHeatForwardSolver(RegularGrid grid, ModelHeatProblem problem,
-                           ModelHeatForwardSettings settings,
-                           ModelHeatParameters initial_parameters);
+                           ModelHeatForwardSettings settings);
 
-    void set_surface_temperature(double value);
-    void set_basal_heat_flux(double value);
-    void set_parameters(const ModelHeatParameters& parameters);
-
-    const ModelHeatParameters& parameters() const noexcept;
     std::size_t observation_count() const noexcept;
 
-    ModelHeatForwardResult solve() const;
+    ModelHeatForwardResult solve(const ModelHeatParameters& parameters) const;
 
 private:
     struct ObservationStencil {
@@ -59,7 +53,6 @@ private:
     RegularGrid grid_;
     ModelHeatProblem problem_;
     ModelHeatForwardSettings settings_;
-    ModelHeatParameters parameters_;
     Vector initial_temperature_;
     std::vector<ObservationStencil> observation_stencils_;
 };

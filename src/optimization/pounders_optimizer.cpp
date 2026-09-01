@@ -210,7 +210,7 @@ int to_int(PetscInt value, const char* name) {
 
 } // namespace
 
-bool PoundersSolveResult::converged() const noexcept {
+bool is_pounders_converged(PoundersSolveStatus status) noexcept {
     switch (status) {
     case PoundersSolveStatus::converged_gradient_absolute:
     case PoundersSolveStatus::converged_gradient_relative:
@@ -222,6 +222,10 @@ bool PoundersSolveResult::converged() const noexcept {
     default:
         return false;
     }
+}
+
+bool PoundersSolveResult::converged() const noexcept {
+    return is_pounders_converged(status);
 }
 
 PoundersSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& problem,
