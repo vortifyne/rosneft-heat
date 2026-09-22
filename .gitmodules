@@ -1,0 +1,3 @@
+[submodule "thirdparty/TQMesh"]
+	path = thirdparty/TQMesh
+	url = https://github.com/FloSewn/TQMesh.git
