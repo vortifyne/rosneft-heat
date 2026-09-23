@@ -57,6 +57,18 @@ else()
   target_compile_options(heat_numerics PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
+add_library(heat_physics STATIC
+  src/physics/thermophysical_properties.cpp
+)
+
+target_include_directories(heat_physics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+if(MSVC)
+  target_compile_options(heat_physics PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(heat_physics PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
 add_library(model_heat STATIC
   src/discretization/model_heat_system.cpp
   src/forward/model_heat_forward_solver.cpp
@@ -190,10 +202,12 @@ add_executable(heat_unit_tests
   tests/test_heat_system.cpp
   tests/test_least_squares_gradient.cpp
   tests/test_mesh2d.cpp
+  tests/test_thermophysical_properties.cpp
 )
 
 target_link_libraries(heat_unit_tests PRIVATE
   heat_core
+  heat_physics
   GTest::gtest_main
 )
 

@@ -6,5 +6,6 @@
 
 - [architecture-overview.md](architecture-overview.md) — верхнеуровневая архитектура вычислительных компонентов.
 - [fvm-nonorthogonal-correction.md](fvm-nonorthogonal-correction.md) — дискретизация теплопроводности методом конечных объёмов и неортогональная поправка.
+- [thermophysical-properties.md](thermophysical-properties.md) — температурные зависимости и эффективные теплофизические свойства.
 - [problem-statement/](problem-statement/README.md) — исходная постановка задачи.
 - [drafts/](drafts/README.md) — черновые справочные заметки.
