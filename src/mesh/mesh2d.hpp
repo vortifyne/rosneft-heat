@@ -25,6 +25,8 @@ enum class BoundaryKind : int {
 class Mesh2D {
 public:
     using NativeType = TQMesh::Mesh;
+    using CellView = std::span<const TQMesh::Facet* const>;
+    using EdgeView = std::span<const TQMesh::Edge* const>;
 
     struct Region {
         std::vector<Point2D> vertices;
@@ -49,6 +51,10 @@ public:
 
     [[nodiscard]] NativeType& native() noexcept;
     [[nodiscard]] const NativeType& native() const noexcept;
+
+    [[nodiscard]] CellView cells() const noexcept;
+    [[nodiscard]] EdgeView internal_edges() const noexcept;
+    [[nodiscard]] EdgeView boundary_edges(BoundaryKind kind) const;
 
     [[nodiscard]] const TQMesh::Facet& owner(const TQMesh::Edge& edge) const;
     [[nodiscard]] const TQMesh::Facet& neighbor(const TQMesh::Edge& edge) const;

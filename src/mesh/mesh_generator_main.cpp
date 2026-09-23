@@ -1,3 +1,4 @@
+#include "discretization/heat_system.hpp"
 #include "mesh/mesh2d.hpp"
 
 #include <chrono>
@@ -93,15 +94,27 @@ std::vector<Mesh2D::Region> read_regions(const std::filesystem::path& path) {
 } // namespace
 
 int main(const int argc, const char* const argv[]) {
-    if (argc != 4 && argc != 5) {
-        std::cerr << "Usage: heat_mesh <regions.csv> <cell-size> <output.vtu> [quad]\n";
+    if (argc < 4 || argc > 6) {
+        std::cerr << "Usage: heat_mesh <regions.csv> <cell-size> <output.vtu> "
+                     "[quad] [spatial-check]\n";
         return EXIT_FAILURE;
     }
 
     try {
         const std::vector<Mesh2D::Region> regions = read_regions(argv[1]);
         const double cell_size = std::stod(argv[2]);
-        const bool make_quadrilateral = argc == 5 && std::string(argv[4]) == "quad";
+        bool make_quadrilateral = false;
+        bool check_spatial_discretization = false;
+        for (int index = 4; index < argc; ++index) {
+            const std::string option = argv[index];
+            if (option == "quad") {
+                make_quadrilateral = true;
+            } else if (option == "spatial-check") {
+                check_spatial_discretization = true;
+            } else {
+                throw std::invalid_argument("Unknown heat_mesh option: " + option);
+            }
+        }
 
         const auto start = std::chrono::steady_clock::now();
         Mesh2D mesh =
@@ -118,6 +131,28 @@ int main(const int argc, const char* const argv[]) {
                   << " interior_faces=" << native.n_interior_edges()
                   << " boundary_faces=" << native.n_boundary_edges() << " area=" << mesh.area()
                   << " seconds=" << seconds << '\n';
+
+        if (check_spatial_discretization) {
+            const std::size_t cell_count = mesh.cells().size();
+            const std::vector conductivity(cell_count, 2.0);
+            const std::vector heat_capacity(cell_count, 2.0e6);
+            const std::vector heat_production(cell_count, 0.0);
+            const HeatSystem system(mesh, conductivity, heat_capacity, heat_production,
+                                    {.surface_temperature = [](Point2D, double) { return 300.0; },
+                                     .basal_heat_flux = [](Point2D, double) { return 0.0; }});
+            Vector temperature(system.size());
+            temperature.set_constant(300.0);
+            Vector temperature_derivative(system.size());
+            temperature_derivative.set_zero();
+            Vector residual;
+            system.assemble_residual(0.0, temperature, temperature_derivative, residual);
+            SparseMatrix matrix(system.size(), system.size(), SparseStorageOrder::csc);
+            system.assemble_matrix(NonlinearMethod::picard, 0.0, temperature,
+                                   temperature_derivative, 1.0, matrix);
+            std::cout << "spatial_cells=" << system.size()
+                      << " matrix_nonzeros=" << matrix.nonzero_count()
+                      << " residual_max=" << residual.infinity_norm() << '\n';
+        }
     } catch (const std::exception& error) {
         std::cerr << "heat_mesh: " << error.what() << '\n';
         return EXIT_FAILURE;

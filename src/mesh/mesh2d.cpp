@@ -21,6 +21,12 @@ struct Mesh2D::Storage {
     TQMesh::MeshGenerator generator;
     TQMesh::Mesh* mesh = nullptr;
     double expected_area = 0.0;
+    std::vector<const TQMesh::Facet*> cells;
+    std::vector<const TQMesh::Edge*> internal_edges;
+    std::vector<const TQMesh::Edge*> top_edges;
+    std::vector<const TQMesh::Edge*> bottom_edges;
+    std::vector<const TQMesh::Edge*> left_edges;
+    std::vector<const TQMesh::Edge*> right_edges;
 };
 
 namespace {
@@ -208,6 +214,37 @@ Mesh2D Mesh2D::generate(std::span<const Region> regions, const GenerationOptions
     MeshCleanup::assign_mesh_indices(*storage->mesh);
     MeshCleanup::setup_facet_connectivity(*storage->mesh);
 
+    storage->cells.resize(storage->mesh->n_elements());
+    for (const auto& cell : storage->mesh->quads()) {
+        storage->cells.at(static_cast<std::size_t>(cell->index())) = cell.get();
+    }
+    for (const auto& cell : storage->mesh->triangles()) {
+        storage->cells.at(static_cast<std::size_t>(cell->index())) = cell.get();
+    }
+
+    storage->internal_edges.reserve(storage->mesh->n_interior_edges());
+    for (const auto& edge : storage->mesh->interior_edges()) {
+        storage->internal_edges.push_back(edge.get());
+    }
+    for (const auto& edge : storage->mesh->boundary_edges()) {
+        switch (boundary_kind_from_color(edge->color())) {
+        case BoundaryKind::top:
+            storage->top_edges.push_back(edge.get());
+            break;
+        case BoundaryKind::bottom:
+            storage->bottom_edges.push_back(edge.get());
+            break;
+        case BoundaryKind::left:
+            storage->left_edges.push_back(edge.get());
+            break;
+        case BoundaryKind::right:
+            storage->right_edges.push_back(edge.get());
+            break;
+        case BoundaryKind::interface:
+            throw std::runtime_error("An unmerged interface remains on the mesh boundary");
+        }
+    }
+
     Mesh2D result(std::move(storage));
     result.validate();
     if (options.diagnostic_vtu) {
@@ -228,6 +265,30 @@ Mesh2D::NativeType& Mesh2D::native() noexcept {
 
 const Mesh2D::NativeType& Mesh2D::native() const noexcept {
     return *storage_->mesh;
+}
+
+Mesh2D::CellView Mesh2D::cells() const noexcept {
+    return storage_->cells;
+}
+
+Mesh2D::EdgeView Mesh2D::internal_edges() const noexcept {
+    return storage_->internal_edges;
+}
+
+Mesh2D::EdgeView Mesh2D::boundary_edges(const BoundaryKind kind) const {
+    switch (kind) {
+    case BoundaryKind::top:
+        return storage_->top_edges;
+    case BoundaryKind::bottom:
+        return storage_->bottom_edges;
+    case BoundaryKind::left:
+        return storage_->left_edges;
+    case BoundaryKind::right:
+        return storage_->right_edges;
+    case BoundaryKind::interface:
+        throw std::invalid_argument("Layer interfaces are internal mesh edges");
+    }
+    throw std::invalid_argument("Unknown boundary kind");
 }
 
 const TQMesh::Facet& Mesh2D::owner(const TQMesh::Edge& edge) const {

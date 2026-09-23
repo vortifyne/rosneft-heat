@@ -72,6 +72,8 @@ else()
 endif()
 
 add_library(heat_core STATIC
+  src/discretization/heat_system.cpp
+  src/discretization/least_squares_gradient.cpp
   src/mesh/mesh2d.cpp
 )
 
@@ -185,6 +187,8 @@ endif()
 gtest_discover_tests(model_unit_tests)
 
 add_executable(heat_unit_tests
+  tests/test_heat_system.cpp
+  tests/test_least_squares_gradient.cpp
   tests/test_mesh2d.cpp
 )
 
