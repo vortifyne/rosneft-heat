@@ -136,13 +136,17 @@ $$
 $$
 F
 =
-1-\sum_{i=1}^{N_R} f_i e^{-I_i},
+\sum_{i=1}^{N_R} f_i\left(1-e^{-I_i}\right),
 \qquad
 R_o^{\mathrm{calc}}
 =
 \exp(-1.6+3.7F).
 \tag{14}
 $$
+
+Здесь используется исправленная формула Sweeney и Burnham. Переданные стехиометрические
+коэффициенты имеют сумму $0{,}85$ и не нормируются. Обоснование приведено в
+[`easy-ro-stoichiometric-factors.md`](../easy-ro-stoichiometric-factors.md).
 
 Таким образом, EASY%Ro — это не только финальная формула для $R_o$, а вся цепочка
 

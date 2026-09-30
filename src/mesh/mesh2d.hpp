@@ -36,6 +36,7 @@ public:
 
     struct GenerationOptions {
         std::function<double(Point2D)> cell_size;
+        std::function<double(int, Point2D)> region_cell_size;
         int smoothing_iterations = 0;
         bool make_quadrilateral = false;
         std::optional<std::filesystem::path> diagnostic_vtu;

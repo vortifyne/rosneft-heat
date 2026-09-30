@@ -14,9 +14,10 @@ Mesh2D make_mesh(const double size, const int region_id = 1) {
                        BoundaryKind::left},
         .id = region_id,
     };
-    return Mesh2D::generate(
-        std::span<const Mesh2D::Region>(&region, 1),
-        {.cell_size = [size](Point2D) { return size; }, .diagnostic_vtu = std::nullopt});
+    return Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
+                            {.cell_size = [size](Point2D) { return size; },
+                             .region_cell_size = {},
+                             .diagnostic_vtu = std::nullopt});
 }
 
 TEST(MeshTransfer, UsesPhysicalPositionWhenRegionIdentifierChanges) {
@@ -53,6 +54,22 @@ TEST(MeshTransfer, PreservesConstantFieldBetweenDifferentMeshes) {
     }
 }
 
+TEST(MeshTransfer, SamplesMeshAfterCoordinatesMove) {
+    Mesh2D mesh = make_mesh(0.35);
+    std::vector<Point2D> coordinates = mesh.vertex_coordinates();
+    for (Point2D& point : coordinates) {
+        point.z += 3.0;
+    }
+    mesh.set_vertex_coordinates(coordinates);
+    const std::vector<double> values(mesh.cells().size(), 321.0);
+    const auto& center = mesh.cells().front()->xy();
+
+    const std::optional<double> sampled = sample_cell_field(mesh, values, {center.x, center.y});
+
+    ASSERT_TRUE(sampled.has_value());
+    EXPECT_DOUBLE_EQ(*sampled, 321.0);
+}
+
 TEST(MeshTransfer, MarksPointsOutsideOldPhysicalArea) {
     const Mesh2D source = make_mesh(0.35);
     const Mesh2D::Region larger_region = {
@@ -61,9 +78,10 @@ TEST(MeshTransfer, MarksPointsOutsideOldPhysicalArea) {
                        BoundaryKind::left},
         .id = 1,
     };
-    const Mesh2D target = Mesh2D::generate(
-        std::span<const Mesh2D::Region>(&larger_region, 1),
-        {.cell_size = [](Point2D) { return 0.25; }, .diagnostic_vtu = std::nullopt});
+    const Mesh2D target = Mesh2D::generate(std::span<const Mesh2D::Region>(&larger_region, 1),
+                                           {.cell_size = [](Point2D) { return 0.25; },
+                                            .region_cell_size = {},
+                                            .diagnostic_vtu = std::nullopt});
     const CellTransferMap map = make_cell_transfer_map(source, target);
 
     EXPECT_TRUE(std::any_of(map.donor_cells.begin(), map.donor_cells.end(),

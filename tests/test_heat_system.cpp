@@ -18,6 +18,7 @@ Mesh2D make_rectangular_mesh() {
     };
     return Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
                             {.cell_size = [](Point2D) { return 0.5; },
+                             .region_cell_size = {},
                              .smoothing_iterations = 2,
                              .make_quadrilateral = true,
                              .diagnostic_vtu = std::nullopt});
@@ -35,6 +36,7 @@ Mesh2D make_layered_mesh() {
                        .id = 2},
     };
     return Mesh2D::generate(regions, {.cell_size = [](Point2D) { return 0.5; },
+                                      .region_cell_size = {},
                                       .smoothing_iterations = 2,
                                       .make_quadrilateral = false,
                                       .diagnostic_vtu = std::nullopt});

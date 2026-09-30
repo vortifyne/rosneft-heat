@@ -48,6 +48,25 @@ TEST(Mesh2D, GeneratesRectangleWithoutCopyingNativeMesh) {
     EXPECT_NO_THROW(mesh.validate());
 }
 
+TEST(Mesh2D, SupportsRegionSpecificCellSize) {
+    const Mesh2D::Region region = rectangle(
+        0.0, 0.0, 2.0, 1.0, 17,
+        {BoundaryKind::bottom, BoundaryKind::right, BoundaryKind::top, BoundaryKind::left});
+    bool called = false;
+    Mesh2D mesh = Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
+                                   {.cell_size = [](Point2D) { return 0.5; },
+                                    .region_cell_size =
+                                        [&called](const int region_id, Point2D) {
+                                            called = true;
+                                            EXPECT_EQ(region_id, 17);
+                                            return 0.25;
+                                        }});
+
+    EXPECT_TRUE(called);
+    EXPECT_GT(mesh.cells().size(), 0U);
+    EXPECT_NO_THROW(mesh.validate());
+}
+
 TEST(Mesh2D, MergesTwoRegionsAcrossLayerInterface) {
     const std::vector<Mesh2D::Region> regions = {
         rectangle(0.0, 0.0, 4.0, 1.0, 1001,
@@ -82,6 +101,7 @@ TEST(Mesh2D, CanGenerateAllQuadrilateralDiagnosticMesh) {
         std::filesystem::temp_directory_path() / "heat_mesh2d_rectangle.vtu";
     Mesh2D mesh = Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
                                    {.cell_size = [](Point2D) { return 0.4; },
+                                    .region_cell_size = {},
                                     .make_quadrilateral = true,
                                     .diagnostic_vtu = output});
 

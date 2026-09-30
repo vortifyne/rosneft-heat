@@ -83,15 +83,14 @@ void EasyRoModel::reflectance(const std::span<const double> integrals,
         throw std::invalid_argument("Invalid EASY%Ro output size");
     }
     for (std::size_t cell = 0; cell < reflectance_percent.size(); ++cell) {
-        double unreacted = 0.0;
+        double transformed_fraction = 0.0;
         for (std::size_t reaction = 0; reaction < reaction_count(); ++reaction) {
             const double integral = integrals[(cell * reaction_count()) + reaction];
             if (integral < 0.0 || !std::isfinite(integral)) {
                 throw std::invalid_argument("EASY%Ro integral must be finite and non-negative");
             }
-            unreacted += parameters_.weights[reaction] * std::exp(-integral);
+            transformed_fraction += parameters_.weights[reaction] * (1.0 - std::exp(-integral));
         }
-        const double transformed_fraction = 1.0 - unreacted;
         reflectance_percent[cell] = std::exp(-1.6 + (3.7 * transformed_fraction));
     }
 }

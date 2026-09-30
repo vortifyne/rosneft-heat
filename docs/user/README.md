@@ -108,7 +108,7 @@ ctest --test-dir build/release --output-on-failure
 make clean
 ```
 
-## Расчёт первых эпох набора данных
+## Расчёт геологической истории
 
 После сборки Release запустите подготовку таблиц и расчёт одной командой:
 
@@ -116,13 +116,13 @@ make clean
 tools/run_forward.sh local/forward_problem_data/data1 local/results/data1-forward
 ```
 
-Сценарий читает исходные таблицы через `basin_data.py`, записывает компактные входные файлы и запускает `heat_forward`. Необязательные параметры задают размер ячейки, шаг времени в миллионах лет, частоту записи и путь к исполняемому файлу:
+Сценарий читает исходные таблицы неизменённой копией переданного `basin_data.py`, записывает компактные входные файлы и запускает `heat_forward`. По умолчанию используются все конфигурации. Необязательные параметры задают размер ячейки, шаг времени в миллионах лет, число сохраняемых состояний эпохи, путь к исполняемому файлу, ограничение числа конфигураций, контрольные точки, локальное сгущение тонких слоёв и шаг описания границ:
 
 ```bash
-tools/run_forward.sh <data-dir> <output-dir> [cell-size] [dt-ma] [save-every] [heat-forward]
+tools/run_forward.sh <data-dir> <output-dir> [cell-size] [dt-ma] [states-per-epoch] [heat-forward] [max-configurations] [comparison-points] [thin-layer-cell-fraction] [boundary-step]
 ```
 
-Текущий расчёт проходит эпоху от 200 до 187,5 млн лет, перестраивает сетку и выполняет три шага следующей эпохи. В каталоге результата создаются файлы VTU, временной ряд `temperature.pvd`, таблицы `statistics.csv` и `summary.csv`, а также оценка погрешности переноса `transition.csv`.
+В каталоге результата создаются файлы VTU, временной ряд `temperature.pvd`, таблицы `statistics.csv`, `epochs.csv`, `transitions.csv` и `summary.csv`. Если передан файл контрольных точек с заголовком `id,x,z`, конечные температуры записываются в `comparison-temperatures.csv`.
 
 ## Структура проекта
 

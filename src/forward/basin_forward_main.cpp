@@ -3,37 +3,71 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <string>
+#include <string_view>
+
+namespace {
+
+std::string_view require_value(const int argc, const char* const argv[], int& index,
+                               const std::string_view option) {
+    if (++index >= argc) {
+        throw std::invalid_argument("Missing value for " + std::string(option));
+    }
+    return argv[index];
+}
+
+} // namespace
 
 int main(const int argc, const char* const argv[]) {
-    if (argc < 3 || argc > 7) {
-        std::cerr << "Usage: heat_forward <input-dir> <output-dir> [cell-size] [dt-ma] "
-                     "[save-every] [fixed]\n";
+    if (argc < 3) {
+        std::cerr << "Usage: heat_forward <input-dir> <output-dir> [options]\n"
+                     "Options:\n"
+                     "  --cell-size <m>\n"
+                     "  --dt-ma <million-years>\n"
+                     "  --states-per-epoch <count>\n"
+                     "  --thin-layer-cell-fraction <value>\n"
+                     "  --max-configurations <count>\n"
+                     "  --comparison-points <csv>\n"
+                     "  --fixed-mesh\n";
         return EXIT_FAILURE;
     }
     try {
         BasinForwardOptions options;
-        if (argc >= 4) {
-            options.cell_size = std::stod(argv[3]);
-        }
-        if (argc >= 5) {
-            options.timestep_ma = std::stod(argv[4]);
-        }
-        if (argc >= 6) {
-            options.save_every = std::stoi(argv[5]);
-        }
-        if (argc == 7) {
-            if (std::string(argv[6]) != "fixed") {
-                throw std::invalid_argument("The only optional mode is 'fixed'");
+        for (int index = 3; index < argc; ++index) {
+            const std::string_view argument = argv[index];
+            if (argument == "--cell-size") {
+                options.cell_size =
+                    std::stod(std::string(require_value(argc, argv, index, argument)));
+            } else if (argument == "--dt-ma") {
+                options.timestep_ma =
+                    std::stod(std::string(require_value(argc, argv, index, argument)));
+            } else if (argument == "--states-per-epoch") {
+                options.saved_states_per_epoch =
+                    std::stoi(std::string(require_value(argc, argv, index, argument)));
+            } else if (argument == "--thin-layer-cell-fraction") {
+                options.thin_layer_cell_fraction =
+                    std::stod(std::string(require_value(argc, argv, index, argument)));
+            } else if (argument == "--max-configurations") {
+                options.max_configurations = static_cast<std::size_t>(
+                    std::stoull(std::string(require_value(argc, argv, index, argument))));
+            } else if (argument == "--comparison-points") {
+                options.comparison_points = std::string(require_value(argc, argv, index, argument));
+            } else if (argument == "--fixed-mesh") {
+                options.fixed_mesh = true;
+            } else {
+                throw std::invalid_argument("Unknown option: " + std::string(argument));
             }
-            options.fixed_mesh = true;
         }
         const BasinForwardResult result = run_basin_forward(argv[1], argv[2], options);
         std::cout << "accepted_steps=" << result.accepted_steps
                   << " nonlinear_iterations=" << result.nonlinear_iterations
                   << " linear_iterations=" << result.linear_iterations
+                  << " configurations=" << result.configurations
                   << " final_age_ma=" << result.final_age_ma
                   << " transfer_energy_error=" << result.transfer_energy_error
+                  << " cells_min=" << result.minimum_cells << " cells_max=" << result.maximum_cells
+                  << " cell_diameter_max=" << result.maximum_cell_diameter
                   << " wall_seconds=" << result.wall_seconds << '\n';
     } catch (const std::exception& error) {
         std::cerr << "heat_forward: " << error.what() << '\n';

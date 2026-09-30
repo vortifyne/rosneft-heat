@@ -10,6 +10,8 @@
 - [fixed-mesh-epoch.md](fixed-mesh-epoch.md) — расчёт эпохи на неподвижной сетке.
 - [moving-mesh-epoch.md](moving-mesh-epoch.md) — движение материала и сетки внутри эпохи.
 - [epoch-transition.md](epoch-transition.md) — перестроение сетки и перенос состояния.
+- [full-history.md](full-history.md) — общий цикл конфигураций, движение сетки и полный временной ряд.
 - [easy-ro.md](easy-ro.md) — вычисление зрелости витринита EASY%Ro.
+- [easy-ro-stoichiometric-factors.md](easy-ro-stoichiometric-factors.md) — смысл коэффициентов реакций и исправленная формула EASY%Ro.
 - [problem-statement/](problem-statement/README.md) — исходная постановка задачи.
 - [drafts/](drafts/README.md) — черновые справочные заметки.

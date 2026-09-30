@@ -5,7 +5,10 @@
 #include <Eigen/LU>
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <memory>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace {
 
@@ -30,14 +33,89 @@ bool contains(const TQMesh::Facet& cell, const Point2D point) {
     return true;
 }
 
-std::optional<std::size_t> find_cell(const Mesh2D& mesh, const Point2D point) {
-    for (const TQMesh::Facet* cell : mesh.cells()) {
-        if (contains(*cell, point)) {
-            return static_cast<std::size_t>(cell->index());
+class CellLocator {
+public:
+    explicit CellLocator(const Mesh2D& mesh) : mesh_(mesh) {
+        double minimum_x = std::numeric_limits<double>::max();
+        double minimum_z = std::numeric_limits<double>::max();
+        double maximum_x = std::numeric_limits<double>::lowest();
+        double maximum_z = std::numeric_limits<double>::lowest();
+        double maximum_diameter = 0.0;
+        for (const TQMesh::Facet* cell : mesh.cells()) {
+            for (std::size_t vertex = 0; vertex < cell->n_vertices(); ++vertex) {
+                const auto& point = cell->vertex(vertex).xy();
+                minimum_x = std::min(minimum_x, point.x);
+                minimum_z = std::min(minimum_z, point.y);
+                maximum_x = std::max(maximum_x, point.x);
+                maximum_z = std::max(maximum_z, point.y);
+            }
+            maximum_diameter = std::max(maximum_diameter, cell->max_edge_length());
+        }
+        origin_ = {minimum_x, minimum_z};
+        maximum_ = {maximum_x, maximum_z};
+        bucket_size_ = std::max(maximum_diameter, 1.0e-12);
+        columns_ = std::max<std::size_t>(
+            1, static_cast<std::size_t>(std::ceil((maximum_x - minimum_x) / bucket_size_)) + 1);
+
+        for (const TQMesh::Facet* cell : mesh.cells()) {
+            double cell_minimum_x = std::numeric_limits<double>::max();
+            double cell_minimum_z = std::numeric_limits<double>::max();
+            double cell_maximum_x = std::numeric_limits<double>::lowest();
+            double cell_maximum_z = std::numeric_limits<double>::lowest();
+            for (std::size_t vertex = 0; vertex < cell->n_vertices(); ++vertex) {
+                const auto& point = cell->vertex(vertex).xy();
+                cell_minimum_x = std::min(cell_minimum_x, point.x);
+                cell_minimum_z = std::min(cell_minimum_z, point.y);
+                cell_maximum_x = std::max(cell_maximum_x, point.x);
+                cell_maximum_z = std::max(cell_maximum_z, point.y);
+            }
+            const auto [first_column, first_row] = bucket(cell_minimum_x, cell_minimum_z);
+            const auto [last_column, last_row] = bucket(cell_maximum_x, cell_maximum_z);
+            for (std::size_t row = first_row; row <= last_row; ++row) {
+                for (std::size_t column = first_column; column <= last_column; ++column) {
+                    buckets_[key(column, row)].push_back(static_cast<std::size_t>(cell->index()));
+                }
+            }
         }
     }
-    return std::nullopt;
-}
+
+    [[nodiscard]] std::optional<std::size_t> find(const Point2D point) const {
+        if (point.x < origin_.x || point.z < origin_.z || point.x > maximum_.x ||
+            point.z > maximum_.z) {
+            return std::nullopt;
+        }
+        const auto [column, row] = bucket(point.x, point.z);
+        const auto found = buckets_.find(key(column, row));
+        if (found == buckets_.end()) {
+            return std::nullopt;
+        }
+        for (const std::size_t index : found->second) {
+            if (contains(*mesh_.cells()[index], point)) {
+                return index;
+            }
+        }
+        return std::nullopt;
+    }
+
+private:
+    [[nodiscard]] std::pair<std::size_t, std::size_t> bucket(const double x, const double z) const {
+        const double relative_x = std::max(0.0, x - origin_.x);
+        const double relative_z = std::max(0.0, z - origin_.z);
+        return {static_cast<std::size_t>(relative_x / bucket_size_),
+                static_cast<std::size_t>(relative_z / bucket_size_)};
+    }
+
+    [[nodiscard]] std::size_t key(const std::size_t column, const std::size_t row) const {
+        return row * columns_ + column;
+    }
+
+    const Mesh2D& mesh_;
+    Point2D origin_;
+    Point2D maximum_;
+    double bucket_size_ = 1.0;
+    std::size_t columns_ = 1;
+    std::unordered_map<std::size_t, std::vector<std::size_t>> buckets_;
+};
 
 std::vector<std::vector<std::size_t>> neighbors(const Mesh2D& mesh) {
     std::vector<std::vector<std::size_t>> result(mesh.cells().size());
@@ -93,28 +171,43 @@ double reconstruct(const Mesh2D& mesh, const std::span<const double> values,
 
 CellTransferMap make_cell_transfer_map(const Mesh2D& source, const Mesh2D& target) {
     CellTransferMap result;
+    const CellIndexLocator locator = make_cell_index_locator(source);
     result.target_points.resize(target.cells().size());
     result.donor_cells.resize(target.cells().size());
     for (const TQMesh::Facet* cell : target.cells()) {
         const std::size_t index = static_cast<std::size_t>(cell->index());
         result.target_points[index] = {cell->xy().x, cell->xy().y};
-        result.donor_cells[index] = find_cell(source, result.target_points[index]);
+        result.donor_cells[index] = locator(result.target_points[index]);
     }
     return result;
 }
 
+CellIndexLocator make_cell_index_locator(const Mesh2D& mesh) {
+    auto locator = std::make_shared<CellLocator>(mesh);
+    return [locator = std::move(locator)](const Point2D point) { return locator->find(point); };
+}
+
 std::optional<double> sample_cell_field(const Mesh2D& mesh, const std::span<const double> values,
                                         const Point2D point) {
+    return make_cell_field_sampler(mesh, values)(point);
+}
+
+CellFieldSampler make_cell_field_sampler(const Mesh2D& mesh, const std::span<const double> values) {
     if (values.size() != mesh.cells().size()) {
         throw std::invalid_argument("Cell field size must match the mesh");
     }
-    const auto donor = find_cell(mesh, point);
-    if (!donor) {
-        return std::nullopt;
-    }
-    const auto adjacency = neighbors(mesh);
-    const auto gradients = reconstruct_gradients(mesh, values, adjacency);
-    return reconstruct(mesh, values, adjacency, gradients, *donor, point);
+    auto locator = std::make_shared<CellLocator>(mesh);
+    auto adjacency = std::make_shared<std::vector<std::vector<std::size_t>>>(neighbors(mesh));
+    auto gradients = std::make_shared<std::vector<Eigen::Vector2d>>(
+        reconstruct_gradients(mesh, values, *adjacency));
+    return [&mesh, values, locator = std::move(locator), adjacency = std::move(adjacency),
+            gradients = std::move(gradients)](const Point2D point) -> std::optional<double> {
+        const auto donor = locator->find(point);
+        if (!donor) {
+            return std::nullopt;
+        }
+        return reconstruct(mesh, values, *adjacency, *gradients, *donor, point);
+    };
 }
 
 std::vector<double>

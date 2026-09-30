@@ -8,10 +8,14 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
-from prepare_mesh_geometry import extract_regions, write_regions
+import numpy as np
 
-
-DEFAULT_AGES = (200.0, 187.5, 175.0)
+from prepare_mesh_geometry import (
+    extract_regions,
+    sampled_layers,
+    sampling_points,
+    write_regions,
+)
 
 
 def load_module(path: Path) -> ModuleType:
@@ -34,22 +38,41 @@ def write_csv(path: Path, header: tuple[str, ...], rows: list[tuple[object, ...]
         writer.writerows(rows)
 
 
+def nearest_values(
+    source_x: np.ndarray, source_values: np.ndarray, target_x: np.ndarray
+) -> np.ndarray:
+    right = np.searchsorted(source_x, target_x, side="left")
+    right = np.clip(right, 0, len(source_x) - 1)
+    left = np.maximum(right - 1, 0)
+    use_left = np.abs(target_x - source_x[left]) <= np.abs(source_x[right] - target_x)
+    return source_values[np.where(use_left, left, right)]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare compact forward-problem input")
     parser.add_argument("data_dir", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--boundary-step", type=float, default=25.0)
-    parser.add_argument("--ages", type=float, nargs="+", default=DEFAULT_AGES)
+    parser.add_argument("--ages", type=float, nargs="+")
+    parser.add_argument("--max-configurations", type=int)
     parser.add_argument(
         "--basin-data",
         type=Path,
-        default=Path("local/forward_problem_data/basin_data.py"),
+        default=Path("tools/basin_data.py"),
     )
     arguments = parser.parse_args()
 
     module = load_module(arguments.basin_data)
     data = module.BasinData(arguments.data_dir)
-    ages = tuple(float(age) for age in arguments.ages)
+    ages = (
+        tuple(float(age) for age in arguments.ages)
+        if arguments.ages is not None
+        else tuple(reversed([float(age) for age in data.times]))
+    )
+    if arguments.max_configurations is not None:
+        if arguments.max_configurations < 2:
+            raise ValueError("At least two configurations are required")
+        ages = ages[: arguments.max_configurations]
     available = {float(age) for age in data.times}
     missing = [age for age in ages if age not in available]
     if missing:
@@ -64,18 +87,27 @@ def main() -> None:
     for age in ages:
         snapshot = data.snapshot(age)
         regions = extract_regions(snapshot, arguments.boundary_step, layer_ids)
+        geometry = sampled_layers(snapshot, sampling_points(snapshot, arguments.boundary_step))
         region_file = f"regions_{age_name(age)}.csv"
         write_regions(arguments.output / region_file, regions)
         configuration_rows.append((f"{age:.15g}", region_file))
 
-        for layer in snapshot:
+        for layer, sampled in zip(snapshot, geometry, strict=True):
             layer_id = layer_ids[str(layer["layer"])]
+            source_x = np.asarray(layer["x"], dtype=np.float64)
+            target_x = sampled["x"]
+            lithotypes = nearest_values(
+                source_x, np.asarray(layer["lith"], dtype=int), target_x
+            )
+            porosities = np.interp(
+                target_x, source_x, np.asarray(layer["porosity"], dtype=np.float64)
+            )
             for x, top, bottom, lithotype, porosity in zip(
-                layer["x"],
-                layer["z_top"],
-                layer["z_bot"],
-                layer["lith"],
-                layer["porosity"],
+                target_x,
+                sampled["top"],
+                sampled["bottom"],
+                lithotypes,
+                porosities,
                 strict=True,
             ):
                 layer_rows.append(

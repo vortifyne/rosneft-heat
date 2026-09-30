@@ -119,6 +119,7 @@ int main(const int argc, const char* const argv[]) {
         const auto start = std::chrono::steady_clock::now();
         Mesh2D mesh =
             Mesh2D::generate(regions, {.cell_size = [cell_size](Point2D) { return cell_size; },
+                                       .region_cell_size = {},
                                        .make_quadrilateral = make_quadrilateral,
                                        .diagnostic_vtu = std::filesystem::path(argv[3])});
         const double seconds =

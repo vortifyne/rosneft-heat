@@ -95,7 +95,9 @@ double quadtree_scale(std::span<const Mesh2D::Region> regions) {
             scale = std::max(scale, std::abs(point.z));
         }
     }
-    return 2.1 * scale;
+    // The mesh moves during an epoch. Keep the TQMesh spatial index large enough for the
+    // coordinates of the following configuration as well as the generated configuration.
+    return 4.2 * scale;
 }
 
 BoundaryKind boundary_kind_from_color(const int color) {
@@ -143,8 +145,11 @@ Mesh2D Mesh2D::generate(std::span<const Region> regions, const GenerationOptions
 
     for (std::size_t region_index = 0; region_index < regions.size(); ++region_index) {
         const Region& region = regions[region_index];
-        UserSizeFunction size_function = [&options](const Vec2d& point) {
-            const double size = options.cell_size({point.x, point.y});
+        UserSizeFunction size_function = [&options, &region](const Vec2d& point) {
+            const Point2D location{point.x, point.y};
+            const double size = options.region_cell_size
+                                    ? options.region_cell_size(region.id, location)
+                                    : options.cell_size(location);
             if (!std::isfinite(size) || !(size > 0.0)) {
                 throw std::runtime_error("Mesh cell size must be finite and positive");
             }
@@ -391,7 +396,10 @@ void Mesh2D::validate(const double relative_tolerance) const {
         }
         if (!std::isfinite(cell.area()) || !(cell.area() > 0.0) || !std::isfinite(cell.xy().x) ||
             !std::isfinite(cell.xy().y)) {
-            throw std::runtime_error("Mesh cell geometry is invalid");
+            throw std::runtime_error(
+                "Mesh cell geometry is invalid: index=" + std::to_string(cell.index()) +
+                " area=" + std::to_string(cell.area()) + " x=" + std::to_string(cell.xy().x) +
+                " z=" + std::to_string(cell.xy().y));
         }
         for (std::size_t i = 0; i < cell.n_vertices(); ++i) {
             const std::size_t first = cell.vertex(i).index();

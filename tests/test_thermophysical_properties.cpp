@@ -104,6 +104,7 @@ Mesh2D make_test_mesh() {
     };
     return Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
                             {.cell_size = [](Point2D) { return 0.3; },
+                             .region_cell_size = {},
                              .smoothing_iterations = 1,
                              .make_quadrilateral = false,
                              .diagnostic_vtu = std::nullopt});
