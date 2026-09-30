@@ -72,6 +72,7 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
     int rejected_steps = 0;
     int nonlinear_iterations = 0;
     int linear_iterations = 0;
+    double last_residual_norm = 0.0;
     std::optional<NonlinearSolveStatus> last_nonlinear_status;
     std::optional<LinearSolveStatus> last_linear_status;
 
@@ -89,6 +90,7 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
                 .rejected_steps = rejected_steps,
                 .nonlinear_iterations = nonlinear_iterations,
                 .linear_iterations = linear_iterations,
+                .last_residual_norm = last_residual_norm,
                 .last_nonlinear_status = last_nonlinear_status,
                 .last_linear_status = last_linear_status,
             };
@@ -101,6 +103,7 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
             nonlinear_solver_.solve(*nonlinear_system, solution, nonlinear_request, linear_request);
         nonlinear_iterations += nonlinear_result.iterations;
         linear_iterations += nonlinear_result.linear_iterations;
+        last_residual_norm = nonlinear_result.final_residual_norm;
         last_nonlinear_status = nonlinear_result.status;
         if (nonlinear_result.last_linear_status.has_value()) {
             last_linear_status = nonlinear_result.last_linear_status;
@@ -114,6 +117,7 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
                 .rejected_steps = rejected_steps,
                 .nonlinear_iterations = nonlinear_iterations,
                 .linear_iterations = linear_iterations,
+                .last_residual_norm = last_residual_norm,
                 .last_nonlinear_status = last_nonlinear_status,
                 .last_linear_status = last_linear_status,
             };
@@ -130,6 +134,7 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
         .rejected_steps = rejected_steps,
         .nonlinear_iterations = nonlinear_iterations,
         .linear_iterations = linear_iterations,
+        .last_residual_norm = last_residual_norm,
         .last_nonlinear_status = last_nonlinear_status,
         .last_linear_status = last_linear_status,
     };

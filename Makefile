@@ -16,10 +16,10 @@ docker-image:
 	docker build -t $(DOCKER_IMAGE) .
 
 docker-debug:
-	$(DOCKER_RUN) bash -c "cmake --preset debug -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed && cmake --build --preset debug"
+	$(DOCKER_RUN) bash -c "cmake --preset debug -UZ_VCPKG_ROOT_DIR -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed && cmake --build --preset debug"
 
 docker-release:
-	$(DOCKER_RUN) bash -c "cmake --preset release -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed && cmake --build --preset release"
+	$(DOCKER_RUN) bash -c "cmake --preset release -UZ_VCPKG_ROOT_DIR -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed && cmake --build --preset release"
 
 docker-run:
 	$(DOCKER_RUN) ./build/release/heat_solver

@@ -61,6 +61,9 @@ public:
     [[nodiscard]] CppUtils::Vec2d normal_from_owner(const TQMesh::Edge& edge) const;
     [[nodiscard]] BoundaryKind boundary_kind(const TQMesh::Edge& edge) const;
     [[nodiscard]] double area() const noexcept;
+    [[nodiscard]] std::vector<Point2D> vertex_coordinates() const;
+
+    void set_vertex_coordinates(std::span<const Point2D> coordinates);
 
     void write_vtu(const std::filesystem::path& path);
     void validate(double relative_tolerance = 1.0e-10) const;

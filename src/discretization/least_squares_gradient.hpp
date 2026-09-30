@@ -20,12 +20,18 @@ class LeastSquaresGradient {
 public:
     using Gradient = Eigen::Vector2d;
 
+    struct DerivativeTerm {
+        std::size_t cell;
+        Gradient coefficient;
+    };
+
     LeastSquaresGradient(std::size_t cell_count,
                          std::span<const LeastSquaresConnection> connections,
                          std::span<const LeastSquaresBoundarySample> boundary_samples);
 
     [[nodiscard]] std::size_t size() const noexcept;
     [[nodiscard]] std::size_t boundary_sample_count() const noexcept;
+    [[nodiscard]] std::span<const DerivativeTerm> derivatives(std::size_t cell) const;
 
     void reconstruct(std::span<const double> cell_values, std::span<const double> boundary_values,
                      std::span<Gradient> gradients) const;
@@ -49,5 +55,6 @@ private:
     };
 
     std::vector<std::vector<Term>> stencils_;
+    std::vector<std::vector<DerivativeTerm>> derivatives_;
     std::size_t boundary_sample_count_ = 0;
 };

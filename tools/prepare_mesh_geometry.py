@@ -158,11 +158,18 @@ def split_at_pinches(layer: dict[str, np.ndarray]) -> list[dict[str, np.ndarray]
     return pieces
 
 
-def extract_regions(snapshot: list[dict[str, object]], step: float) -> list[Region]:
+def extract_regions(
+    snapshot: list[dict[str, object]],
+    step: float,
+    layer_ids: dict[str, int] | None = None,
+) -> list[Region]:
     points = sampling_points(snapshot, step)
     layers = sampled_layers(snapshot, points)
     regions = [
-        make_region(piece, index + 1)
+        make_region(
+            piece,
+            layer_ids[str(snapshot[index]["layer"])] if layer_ids else index + 1,
+        )
         for index, layer in enumerate(layers)
         for piece in split_at_pinches(layer)
     ]

@@ -13,6 +13,9 @@ struct NonlinearSolveRequest {
     double absolute_tolerance;
     double step_relative_tolerance;
     int max_iterations;
+    bool use_backtracking = false;
+    int max_backtracking_steps = 8;
+    double backtracking_reduction = 0.5;
 };
 
 enum class NonlinearSolveStatus {

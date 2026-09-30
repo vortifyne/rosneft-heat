@@ -340,6 +340,31 @@ double Mesh2D::area() const noexcept {
     return result;
 }
 
+std::vector<Point2D> Mesh2D::vertex_coordinates() const {
+    std::vector<Point2D> result(native().n_vertices());
+    for (const auto& vertex : native().vertices()) {
+        result.at(vertex->index()) = {vertex->xy().x, vertex->xy().y};
+    }
+    return result;
+}
+
+void Mesh2D::set_vertex_coordinates(const std::span<const Point2D> coordinates) {
+    if (coordinates.size() != native().n_vertices()) {
+        throw std::invalid_argument("Mesh coordinate count must match the vertex count");
+    }
+    for (const Point2D coordinate : coordinates) {
+        if (!std::isfinite(coordinate.x) || !std::isfinite(coordinate.z)) {
+            throw std::invalid_argument("Mesh vertex coordinates must be finite");
+        }
+    }
+    for (auto& vertex : native().vertices()) {
+        const Point2D coordinate = coordinates[vertex->index()];
+        MeshCleanup::set_vertex_coordinates(*vertex, {coordinate.x, coordinate.z});
+    }
+    storage_->expected_area = area();
+    validate();
+}
+
 void Mesh2D::write_vtu(const std::filesystem::path& path) {
     if (!path.parent_path().empty()) {
         std::filesystem::create_directories(path.parent_path());

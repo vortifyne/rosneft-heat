@@ -22,6 +22,7 @@ struct [[nodiscard]] TimeIntegrationResult {
     int rejected_steps;
     int nonlinear_iterations = 0;
     int linear_iterations = 0;
+    double last_residual_norm = 0.0;
     std::optional<NonlinearSolveStatus> last_nonlinear_status;
     std::optional<LinearSolveStatus> last_linear_status;
 

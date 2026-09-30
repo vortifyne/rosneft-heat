@@ -58,6 +58,7 @@ else()
 endif()
 
 add_library(heat_physics STATIC
+  src/physics/easy_ro.cpp
   src/physics/thermophysical_properties.cpp
 )
 
@@ -93,6 +94,22 @@ target_include_directories(heat_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(heat_core
   PUBLIC heat_numerics TQMesh::TQMesh
 )
+
+add_library(heat_forward_core STATIC
+  src/forward/basin_forward_solver.cpp
+  src/forward/basin_input.cpp
+  src/forward/mesh_transfer.cpp
+  src/forward/vtu_output.cpp
+)
+
+target_include_directories(heat_forward_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(heat_forward_core PUBLIC heat_core heat_physics)
+
+if(MSVC)
+  target_compile_options(heat_forward_core PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(heat_forward_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
 
 if(MSVC)
   target_compile_options(heat_core PRIVATE /W4 /permissive-)
@@ -152,6 +169,15 @@ else()
   target_compile_options(heat_mesh PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
+add_executable(heat_forward src/forward/basin_forward_main.cpp)
+target_link_libraries(heat_forward PRIVATE heat_forward_core)
+
+if(MSVC)
+  target_compile_options(heat_forward PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(heat_forward PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
 enable_testing()
 include(GoogleTest)
 
@@ -199,14 +225,17 @@ endif()
 gtest_discover_tests(model_unit_tests)
 
 add_executable(heat_unit_tests
+  tests/test_easy_ro.cpp
   tests/test_heat_system.cpp
   tests/test_least_squares_gradient.cpp
   tests/test_mesh2d.cpp
+  tests/test_mesh_transfer.cpp
   tests/test_thermophysical_properties.cpp
 )
 
 target_link_libraries(heat_unit_tests PRIVATE
   heat_core
+  heat_forward_core
   heat_physics
   GTest::gtest_main
 )

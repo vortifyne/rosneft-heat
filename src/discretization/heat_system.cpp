@@ -47,11 +47,12 @@ struct HeatSystem::MatrixAssembly {
 HeatSystem::HeatSystem(const Mesh2D& mesh, const std::span<const double> thermal_conductivity,
                        const std::span<const double> volumetric_heat_capacity,
                        const std::span<const double> heat_production,
-                       HeatBoundaryConditions boundary_conditions)
+                       HeatBoundaryConditions boundary_conditions, PropertyUpdater property_updater)
     : thermal_conductivity_(thermal_conductivity.begin(), thermal_conductivity.end()),
       volumetric_heat_capacity_(volumetric_heat_capacity.begin(), volumetric_heat_capacity.end()),
       heat_production_(heat_production.begin(), heat_production.end()),
-      boundary_conditions_(std::move(boundary_conditions)) {
+      boundary_conditions_(std::move(boundary_conditions)),
+      property_updater_(std::move(property_updater)) {
     const std::size_t cell_count = mesh.cells().size();
     check_field(thermal_conductivity, cell_count, true,
                 "Thermal conductivity must be finite and positive");
@@ -62,7 +63,16 @@ HeatSystem::HeatSystem(const Mesh2D& mesh, const std::span<const double> thermal
         throw std::invalid_argument("Heat-system boundary functions must be set");
     }
 
-    inverse_cell_area_.resize(cell_count);
+    update_geometry(mesh);
+}
+
+void HeatSystem::update_geometry(const Mesh2D& mesh) {
+    const std::size_t cell_count = mesh.cells().size();
+    if (cell_count != thermal_conductivity_.size()) {
+        throw std::invalid_argument("Updated mesh cell count must match the heat system");
+    }
+
+    inverse_cell_area_.assign(cell_count, 0.0);
     for (const TQMesh::Facet* cell : mesh.cells()) {
         const std::size_t index = static_cast<std::size_t>(cell->index());
         if (!(cell->area() > 0.0) || !std::isfinite(cell->area())) {
@@ -70,6 +80,10 @@ HeatSystem::HeatSystem(const Mesh2D& mesh, const std::span<const double> thermal
         }
         inverse_cell_area_.at(index) = 1.0 / cell->area();
     }
+
+    internal_faces_.clear();
+    surface_faces_.clear();
+    basal_faces_.clear();
 
     std::vector<LeastSquaresConnection> connections;
     connections.reserve(mesh.internal_edges().size());
@@ -139,18 +153,35 @@ HeatSystem::HeatSystem(const Mesh2D& mesh, const std::span<const double> thermal
                           mesh.boundary_edges(BoundaryKind::right).size();
 
     gradient_reconstruction_.emplace(cell_count, connections, surface_samples);
-    surface_temperatures_.resize(surface_faces_.size());
-    gradients_.resize(cell_count);
+    surface_temperatures_.assign(surface_faces_.size(), 0.0);
+    gradients_.assign(cell_count, LeastSquaresGradient::Gradient::Zero());
 }
 
 Vector::Index HeatSystem::size() const noexcept {
     return static_cast<Vector::Index>(inverse_cell_area_.size());
 }
 
+std::span<const double> HeatSystem::thermal_conductivity() const noexcept {
+    return thermal_conductivity_;
+}
+
+std::span<const double> HeatSystem::volumetric_heat_capacity() const noexcept {
+    return volumetric_heat_capacity_;
+}
+
+std::span<const double> HeatSystem::heat_production() const noexcept {
+    return heat_production_;
+}
+
+void HeatSystem::set_implicit_nonorthogonal_correction(const bool enabled) noexcept {
+    implicit_nonorthogonal_correction_ = enabled;
+}
+
 void HeatSystem::assemble_residual(const double time, const Vector& solution,
                                    const Vector& solution_derivative, Vector& residual) const {
     check_finite(time, "Assembly time must be finite");
     check_vector_sizes(solution, solution_derivative);
+    update_properties(solution);
     prepare_gradients(time, solution);
 
     residual.resize(size());
@@ -168,6 +199,7 @@ void HeatSystem::assemble_matrix(const NonlinearMethod method, const double time
     check_finite(time, "Assembly time must be finite");
     check_finite(derivative_shift, "Derivative shift must be finite");
     check_vector_sizes(solution, solution_derivative);
+    update_properties(solution);
 
     std::vector<double> diagonal(static_cast<std::size_t>(size()), 0.0);
     std::vector<MatrixTriplet> triplets;
@@ -231,8 +263,9 @@ void HeatSystem::assemble_internal_diffusion(MatrixAssembly& assembly, const dou
     static_cast<void>(solution);
     static_cast<void>(solution_derivative);
     assemble_orthogonal_diffusion_matrix(assembly);
-    // An implicit correction can be added here with one independent call:
-    // assemble_nonorthogonal_correction_matrix(assembly);
+    if (implicit_nonorthogonal_correction_) {
+        assemble_nonorthogonal_correction_matrix(assembly);
+    }
 }
 
 void HeatSystem::assemble_source(ResidualAssembly& assembly, const double time,
@@ -371,6 +404,43 @@ void HeatSystem::assemble_orthogonal_diffusion_matrix(MatrixAssembly& assembly) 
     }
 }
 
+void HeatSystem::assemble_nonorthogonal_correction_matrix(MatrixAssembly& assembly) const {
+    const auto add_gradient = [&assembly, this](const std::size_t row, const std::size_t cell,
+                                                const Eigen::Vector2d& direction,
+                                                const double factor) {
+        for (const auto& term : gradient_reconstruction_->derivatives(cell)) {
+            const double value = factor * term.coefficient.dot(direction);
+            if (term.cell == row) {
+                assembly.diagonal[row] += value;
+            } else {
+                assembly.triplets.emplace_back(static_cast<Vector::Index>(row),
+                                               static_cast<Vector::Index>(term.cell), value);
+            }
+        }
+    };
+
+    for (const InternalFace& face : internal_faces_) {
+        const double total_distance = face.owner_distance + face.neighbor_distance;
+        const double common = -face_conductivity(face) * face.length;
+        const double owner_weight = face.neighbor_distance / total_distance;
+        const double neighbor_weight = face.owner_distance / total_distance;
+        add_gradient(face.owner, face.owner, face.correction,
+                     common * owner_weight * inverse_cell_area_[face.owner]);
+        add_gradient(face.owner, face.neighbor, face.correction,
+                     common * neighbor_weight * inverse_cell_area_[face.owner]);
+        add_gradient(face.neighbor, face.owner, face.correction,
+                     -common * owner_weight * inverse_cell_area_[face.neighbor]);
+        add_gradient(face.neighbor, face.neighbor, face.correction,
+                     -common * neighbor_weight * inverse_cell_area_[face.neighbor]);
+    }
+
+    for (const BoundaryFace& face : surface_faces_) {
+        const double factor =
+            -thermal_conductivity_[face.cell] * face.length * inverse_cell_area_[face.cell];
+        add_gradient(face.cell, face.cell, face.correction, factor);
+    }
+}
+
 double HeatSystem::face_conductivity(const InternalFace& face) const noexcept {
     const double owner_conductivity = thermal_conductivity_[face.owner];
     const double neighbor_conductivity = thermal_conductivity_[face.neighbor];
@@ -384,6 +454,20 @@ void HeatSystem::check_vector_sizes(const Vector& solution,
     if (solution.size() != size() || solution_derivative.size() != size()) {
         throw std::invalid_argument("Heat-system vector sizes must match the mesh cell count");
     }
+}
+
+void HeatSystem::update_properties(const Vector& solution) const {
+    if (!property_updater_) {
+        return;
+    }
+    property_updater_(std::span<const double>(solution.native().data(),
+                                              static_cast<std::size_t>(solution.size())),
+                      thermal_conductivity_, volumetric_heat_capacity_, heat_production_);
+    check_field(thermal_conductivity_, thermal_conductivity_.size(), true,
+                "Thermal conductivity must be finite and positive");
+    check_field(volumetric_heat_capacity_, volumetric_heat_capacity_.size(), true,
+                "Volumetric heat capacity must be finite and positive");
+    check_field(heat_production_, heat_production_.size(), false, "Heat production must be finite");
 }
 
 void HeatSystem::prepare_gradients(const double time, const Vector& solution) const {

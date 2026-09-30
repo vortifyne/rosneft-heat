@@ -103,4 +103,26 @@ TEST(Mesh2D, RejectsClockwiseRegion) {
                  std::invalid_argument);
 }
 
+TEST(Mesh2D, UpdatesVertexCoordinatesWithoutChangingConnectivity) {
+    const Mesh2D::Region region = rectangle(
+        0.0, 0.0, 4.0, 2.0, 17,
+        {BoundaryKind::bottom, BoundaryKind::right, BoundaryKind::top, BoundaryKind::left});
+    Mesh2D::GenerationOptions options;
+    options.cell_size = [](Point2D) { return 0.5; };
+    Mesh2D mesh = Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1), options);
+    const std::size_t cell_count = mesh.cells().size();
+    const std::size_t edge_count = mesh.internal_edges().size();
+    std::vector<Point2D> coordinates = mesh.vertex_coordinates();
+    for (Point2D& point : coordinates) {
+        point.z *= 1.25;
+    }
+
+    mesh.set_vertex_coordinates(coordinates);
+
+    EXPECT_EQ(mesh.cells().size(), cell_count);
+    EXPECT_EQ(mesh.internal_edges().size(), edge_count);
+    EXPECT_NEAR(mesh.area(), 10.0, 1.0e-9);
+    EXPECT_NO_THROW(mesh.validate());
+}
+
 } // namespace

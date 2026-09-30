@@ -198,6 +198,40 @@ TEST(HeatSystem, AdvancesOneBdf1StepWithPicardMethod) {
     EXPECT_GT(integrator.current_snapshot().solution.native().maxCoeff(), 300.0);
 }
 
+TEST(HeatSystem, KeepsConstantTemperatureWhileMeshMoves) {
+    Mesh2D mesh = make_rectangular_mesh();
+    HeatSystem system = make_system(mesh);
+    Vector initial_temperature(system.size());
+    initial_temperature.set_constant(300.0);
+    TimeIntegrator integrator;
+    integrator.set_initial_solution(0.0, initial_temperature);
+    integrator.set_timestep(0.1);
+    const std::vector<Point2D> initial_coordinates = mesh.vertex_coordinates();
+
+    for (int step = 1; step <= 3; ++step) {
+        std::vector<Point2D> coordinates = initial_coordinates;
+        const double vertical_scale = 1.0 + (0.05 * static_cast<double>(step));
+        for (Point2D& point : coordinates) {
+            point.z *= vertical_scale;
+        }
+        mesh.set_vertex_coordinates(coordinates);
+        system.update_geometry(mesh);
+        const TimeIntegrationResult result = integrator.advance_to(
+            system, 0.1 * static_cast<double>(step),
+            {.nonlinear_method = NonlinearMethod::picard,
+             .relative_tolerance = 1.0e-10,
+             .absolute_tolerance = 1.0e-9,
+             .step_relative_tolerance = 1.0e-12,
+             .max_iterations = 20},
+            {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1});
+        ASSERT_TRUE(result.completed());
+    }
+
+    for (Vector::Index index = 0; index < system.size(); ++index) {
+        EXPECT_NEAR(integrator.current_snapshot().solution[index], 300.0, 1.0e-10);
+    }
+}
+
 TEST(HeatSystem, RejectsNewtonMatrix) {
     const Mesh2D mesh = make_rectangular_mesh();
     const HeatSystem system = make_system(mesh);
@@ -210,4 +244,67 @@ TEST(HeatSystem, RejectsNewtonMatrix) {
     EXPECT_THROW(
         system.assemble_matrix(NonlinearMethod::newton, 0.0, temperature, derivative, 0.0, matrix),
         std::invalid_argument);
+}
+
+TEST(HeatSystem, ImplicitNonorthogonalMatrixMatchesLinearResidual) {
+    const Mesh2D mesh = make_rectangular_mesh();
+    HeatSystem system = make_system(mesh, 2.0, 3.0, 0.0, 300.0, 0.0);
+    system.set_implicit_nonorthogonal_correction(true);
+    Vector temperature(system.size());
+    Vector direction(system.size());
+    for (Vector::Index index = 0; index < system.size(); ++index) {
+        temperature[index] = 300.0 + (0.1 * static_cast<double>(index));
+        direction[index] = std::sin(static_cast<double>(index) + 0.5);
+    }
+    Vector derivative(system.size());
+    derivative.set_zero();
+    SparseMatrix matrix;
+    system.assemble_matrix(NonlinearMethod::picard, 0.0, temperature, derivative, 0.0, matrix);
+    Vector residual;
+    Vector shifted_residual;
+    system.assemble_residual(0.0, temperature, derivative, residual);
+    constexpr double epsilon = 1.0e-3;
+    system.assemble_residual(0.0, temperature + (direction * epsilon), derivative,
+                             shifted_residual);
+    const Vector difference =
+        ((shifted_residual - residual) * (1.0 / epsilon)) - (matrix * direction);
+
+    EXPECT_LT(difference.infinity_norm(), 1.0e-7);
+}
+
+TEST(HeatSystem, RefreshesTemperatureDependentPropertiesForResidualAndMatrix) {
+    const Mesh2D mesh = make_rectangular_mesh();
+    const std::size_t count = mesh.cells().size();
+    const std::vector conductivity(count, 1.0);
+    const std::vector heat_capacity(count, 2.0);
+    const std::vector heat_production(count, 0.0);
+    int updates = 0;
+    HeatSystem system(mesh, conductivity, heat_capacity, heat_production,
+                      {.surface_temperature = [](Point2D, double) { return 300.0; },
+                       .basal_heat_flux = [](Point2D, double) { return 0.0; }},
+                      [&updates](const std::span<const double> temperature,
+                                 const std::span<double> updated_conductivity,
+                                 const std::span<double> updated_heat_capacity,
+                                 const std::span<double> updated_heat_production) {
+                          ++updates;
+                          for (std::size_t index = 0; index < temperature.size(); ++index) {
+                              updated_conductivity[index] = 0.01 * temperature[index];
+                              updated_heat_capacity[index] = 1000.0 + temperature[index];
+                              updated_heat_production[index] = 1.0e-6;
+                          }
+                      });
+    Vector temperature(system.size());
+    temperature.set_constant(350.0);
+    Vector derivative(system.size());
+    derivative.set_zero();
+    Vector residual;
+    SparseMatrix matrix;
+
+    system.assemble_residual(0.0, temperature, derivative, residual);
+    system.assemble_matrix(NonlinearMethod::picard, 0.0, temperature, derivative, 1.0, matrix);
+
+    EXPECT_EQ(updates, 2);
+    EXPECT_DOUBLE_EQ(system.thermal_conductivity().front(), 3.5);
+    EXPECT_DOUBLE_EQ(system.volumetric_heat_capacity().front(), 1350.0);
+    EXPECT_DOUBLE_EQ(system.heat_production().front(), 1.0e-6);
 }

@@ -18,6 +18,11 @@ void NonlinearSolver::set_linear_solver(LinearSolverKind kind) {
 NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_system, Vector& x,
                                             const NonlinearSolveRequest& nonlinear_request,
                                             const LinearSolveRequest& linear_request) {
+    if (nonlinear_request.max_iterations < 0 || nonlinear_request.max_backtracking_steps < 0 ||
+        !(nonlinear_request.backtracking_reduction > 0.0) ||
+        !(nonlinear_request.backtracking_reduction < 1.0)) {
+        throw std::invalid_argument("Invalid nonlinear solver iteration settings");
+    }
     Vector residual;
     nonlinear_system.assemble_residual(x, residual);
 
@@ -66,9 +71,27 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
             };
         }
 
-        Vector x_candidate = x + delta_x;
+        double step_scale = 1.0;
+        Vector scaled_delta = delta_x;
+        Vector x_candidate = x + scaled_delta;
         Vector candidate_residual;
         nonlinear_system.assemble_residual(x_candidate, candidate_residual);
+
+        if (nonlinear_request.use_backtracking && candidate_residual.all_finite()) {
+            const double current_norm = residual.norm();
+            int backtracking_step = 0;
+            while (candidate_residual.norm() >= current_norm &&
+                   backtracking_step < nonlinear_request.max_backtracking_steps) {
+                step_scale *= nonlinear_request.backtracking_reduction;
+                scaled_delta = delta_x * step_scale;
+                x_candidate = x + scaled_delta;
+                nonlinear_system.assemble_residual(x_candidate, candidate_residual);
+                ++backtracking_step;
+                if (!candidate_residual.all_finite()) {
+                    continue;
+                }
+            }
+        }
 
         if (!candidate_residual.all_finite()) {
             return {
@@ -81,7 +104,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
         }
 
         const double residual_norm = candidate_residual.norm();
-        const double step_norm = delta_x.norm();
+        const double step_norm = scaled_delta.norm();
         const double solution_norm = x_candidate.norm();
         const int completed_iterations = iteration + 1;
 

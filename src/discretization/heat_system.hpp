@@ -18,11 +18,22 @@ struct HeatBoundaryConditions {
 
 class HeatSystem final : public SemiDiscreteSystem {
 public:
+    using PropertyUpdater = std::function<void(std::span<const double>, std::span<double>,
+                                               std::span<double>, std::span<double>)>;
+
     HeatSystem(const Mesh2D& mesh, std::span<const double> thermal_conductivity,
                std::span<const double> volumetric_heat_capacity,
-               std::span<const double> heat_production, HeatBoundaryConditions boundary_conditions);
+               std::span<const double> heat_production, HeatBoundaryConditions boundary_conditions,
+               PropertyUpdater property_updater = {});
 
     [[nodiscard]] Vector::Index size() const noexcept;
+
+    void update_geometry(const Mesh2D& mesh);
+    void set_implicit_nonorthogonal_correction(bool enabled) noexcept;
+
+    [[nodiscard]] std::span<const double> thermal_conductivity() const noexcept;
+    [[nodiscard]] std::span<const double> volumetric_heat_capacity() const noexcept;
+    [[nodiscard]] std::span<const double> heat_production() const noexcept;
 
     void assemble_residual(double time, const Vector& solution, const Vector& solution_derivative,
                            Vector& residual) const override;
@@ -92,12 +103,14 @@ private:
 
     [[nodiscard]] double face_conductivity(const InternalFace& face) const noexcept;
     void check_vector_sizes(const Vector& solution, const Vector& solution_derivative) const;
+    void update_properties(const Vector& solution) const;
     void prepare_gradients(double time, const Vector& solution) const;
 
-    std::vector<double> thermal_conductivity_;
-    std::vector<double> volumetric_heat_capacity_;
-    std::vector<double> heat_production_;
+    mutable std::vector<double> thermal_conductivity_;
+    mutable std::vector<double> volumetric_heat_capacity_;
+    mutable std::vector<double> heat_production_;
     HeatBoundaryConditions boundary_conditions_;
+    PropertyUpdater property_updater_;
 
     std::vector<double> inverse_cell_area_;
     std::vector<InternalFace> internal_faces_;
@@ -108,4 +121,5 @@ private:
     std::optional<LeastSquaresGradient> gradient_reconstruction_;
     mutable std::vector<double> surface_temperatures_;
     mutable std::vector<LeastSquaresGradient::Gradient> gradients_;
+    bool implicit_nonorthogonal_correction_ = false;
 };

@@ -15,7 +15,8 @@ bool finite(const Eigen::Vector2d& vector) {
 LeastSquaresGradient::LeastSquaresGradient(
     const std::size_t cell_count, std::span<const LeastSquaresConnection> connections,
     std::span<const LeastSquaresBoundarySample> boundary_samples)
-    : stencils_(cell_count), boundary_sample_count_(boundary_samples.size()) {
+    : stencils_(cell_count), derivatives_(cell_count),
+      boundary_sample_count_(boundary_samples.size()) {
     if (cell_count == 0) {
         throw std::invalid_argument("Least-squares gradient requires at least one cell");
     }
@@ -69,8 +70,12 @@ LeastSquaresGradient::LeastSquaresGradient(
         stencil.reserve(samples[cell].size());
         for (const Sample& sample : samples[cell]) {
             const double weight = 1.0 / sample.displacement.squaredNorm();
-            stencil.push_back(
-                {sample.source, sample.index, inverse * (weight * sample.displacement)});
+            const Gradient coefficient = inverse * (weight * sample.displacement);
+            stencil.push_back({sample.source, sample.index, coefficient});
+            derivatives_[cell].push_back({cell, -coefficient});
+            if (sample.source == Source::cell) {
+                derivatives_[cell].push_back({sample.index, coefficient});
+            }
         }
     }
 }
@@ -81,6 +86,11 @@ std::size_t LeastSquaresGradient::size() const noexcept {
 
 std::size_t LeastSquaresGradient::boundary_sample_count() const noexcept {
     return boundary_sample_count_;
+}
+
+std::span<const LeastSquaresGradient::DerivativeTerm>
+LeastSquaresGradient::derivatives(const std::size_t cell) const {
+    return derivatives_.at(cell);
 }
 
 void LeastSquaresGradient::reconstruct(const std::span<const double> cell_values,
