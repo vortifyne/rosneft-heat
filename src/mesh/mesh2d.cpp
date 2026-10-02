@@ -1,9 +1,6 @@
 #include "mesh/mesh2d.hpp"
 
-#include "Domain.h"
-#include "MeshChecker.h"
 #include "MeshCleanup.h"
-#include "MeshGenerator.h"
 #include "TQMeshSetup.h"
 
 #include <algorithm>
@@ -18,8 +15,6 @@
 #include <utility>
 
 struct Mesh2D::Storage {
-    std::vector<std::unique_ptr<TQMesh::Domain>> domains;
-    TQMesh::MeshGenerator generator;
     std::unique_ptr<TQMesh::Mesh> owned_mesh;
     TQMesh::Mesh* mesh = nullptr;
     double expected_area = 0.0;
@@ -34,15 +29,11 @@ struct Mesh2D::Storage {
 namespace {
 
 using CppUtils::Vec2d;
-using TQMesh::Domain;
 using TQMesh::Facet;
 using TQMesh::Mesh;
-using TQMesh::MeshChecker;
 using TQMesh::MeshCleanup;
-using TQMesh::MeshExportType;
 using TQMesh::NullFacet;
 using TQMesh::TQMeshSetup;
-using TQMesh::UserSizeFunction;
 
 double dot(const Vec2d& lhs, const Vec2d& rhs) {
     return lhs.x * rhs.x + lhs.y * rhs.y;
@@ -56,54 +47,6 @@ double signed_polygon_area(std::span<const Point2D> vertices) {
         twice_area += current.x * next.z - next.x * current.z;
     }
     return 0.5 * twice_area;
-}
-
-void validate_generation_input(std::span<const Mesh2D::Region> regions,
-                               const Mesh2D::GenerationOptions& options) {
-    if (regions.empty()) {
-        throw std::invalid_argument("Mesh2D requires at least one region");
-    }
-    if (!options.cell_size) {
-        throw std::invalid_argument("Mesh2D requires a cell-size function");
-    }
-    if (options.smoothing_iterations < 0) {
-        throw std::invalid_argument("Mesh2D smoothing iteration count cannot be negative");
-    }
-    if (options.refine_to_quadrilateral && !options.make_quadrilateral) {
-        throw std::invalid_argument(
-            "Quadrilateral refinement requires triangle-to-quad modification");
-    }
-
-    for (const auto& region : regions) {
-        if (region.vertices.size() < 3) {
-            throw std::invalid_argument("A mesh region requires at least three vertices");
-        }
-        if (region.edge_kinds.size() != region.vertices.size()) {
-            throw std::invalid_argument("A mesh region requires one edge kind per polygon edge");
-        }
-        if (!(signed_polygon_area(region.vertices) > 0.0)) {
-            throw std::invalid_argument(
-                "Mesh region vertices must be counter-clockwise and non-degenerate");
-        }
-        for (const Point2D point : region.vertices) {
-            if (!std::isfinite(point.x) || !std::isfinite(point.z)) {
-                throw std::invalid_argument("Mesh region coordinates must be finite");
-            }
-        }
-    }
-}
-
-double quadtree_scale(std::span<const Mesh2D::Region> regions) {
-    double scale = 1.0;
-    for (const auto& region : regions) {
-        for (const Point2D point : region.vertices) {
-            scale = std::max(scale, std::abs(point.x));
-            scale = std::max(scale, std::abs(point.z));
-        }
-    }
-    // The mesh moves during an epoch. Keep the TQMesh spatial index large enough for the
-    // coordinates of the following configuration as well as the generated configuration.
-    return 4.2 * scale;
 }
 
 BoundaryKind boundary_kind_from_color(const int color) {
@@ -175,99 +118,6 @@ template <typename Storage> void populate_views(Storage& storage) {
 }
 
 } // namespace
-
-Mesh2D Mesh2D::generate(std::span<const Region> regions, const GenerationOptions& options) {
-    validate_generation_input(regions, options);
-    TQMeshSetup::get_instance().set_quadtree_scale(quadtree_scale(regions));
-
-    auto storage = std::make_unique<Storage>();
-    storage->domains.reserve(regions.size());
-    std::vector<Mesh*> meshes;
-    meshes.reserve(regions.size());
-
-    for (std::size_t region_index = 0; region_index < regions.size(); ++region_index) {
-        const Region& region = regions[region_index];
-        UserSizeFunction size_function = [&options, &region](const Vec2d& point) {
-            const Point2D location{point.x, point.y};
-            const double size = options.region_cell_size
-                                    ? options.region_cell_size(region.id, location)
-                                    : options.cell_size(location);
-            if (!std::isfinite(size) || !(size > 0.0)) {
-                throw std::runtime_error("Mesh cell size must be finite and positive");
-            }
-            return size;
-        };
-
-        auto domain = std::make_unique<Domain>(std::move(size_function));
-        std::vector<Vec2d> coordinates;
-        std::vector<int> colors;
-        coordinates.reserve(region.vertices.size());
-        colors.reserve(region.edge_kinds.size());
-        for (const Point2D point : region.vertices) {
-            coordinates.emplace_back(point.x, point.z);
-        }
-        for (const BoundaryKind kind : region.edge_kinds) {
-            colors.push_back(static_cast<int>(kind));
-        }
-        domain->add_exterior_boundary().set_shape_from_coordinates(coordinates, colors);
-
-        Mesh& mesh =
-            storage->generator.new_mesh(*domain, static_cast<int>(region_index), region.id);
-        if (!storage->generator.triangulation(mesh).generate_elements()) {
-            throw std::runtime_error("TQMesh failed to generate mesh elements for region " +
-                                     std::to_string(region_index) + " (identifier " +
-                                     std::to_string(region.id) + ")");
-        }
-        if (options.make_quadrilateral) {
-            storage->generator.tri2quad_modification(mesh).modify();
-            if (options.refine_to_quadrilateral &&
-                !storage->generator.quad_refinement(mesh).refine()) {
-                throw std::runtime_error("TQMesh failed to create an all-quad mesh");
-            }
-        }
-        if (options.smoothing_iterations > 0) {
-            storage->generator.mixed_smoothing(mesh).smooth(options.smoothing_iterations);
-        }
-        MeshChecker checker(mesh, *domain);
-        if (!checker.check_completeness()) {
-            throw std::runtime_error("TQMesh generated an incomplete mesh");
-        }
-
-        meshes.push_back(&mesh);
-        storage->expected_area += signed_polygon_area(region.vertices);
-        storage->domains.push_back(std::move(domain));
-    }
-
-    storage->mesh = meshes.front();
-    std::vector<bool> merged(meshes.size(), false);
-    merged.front() = true;
-    std::size_t remaining = meshes.size() - 1;
-    while (remaining > 0) {
-        bool made_progress = false;
-        for (std::size_t i = 1; i < meshes.size(); ++i) {
-            if (merged[i]) {
-                continue;
-            }
-            if (storage->generator.merge_meshes(*storage->mesh, *meshes[i])) {
-                merged[i] = true;
-                --remaining;
-                made_progress = true;
-            }
-        }
-        if (!made_progress) {
-            throw std::runtime_error(
-                "TQMesh could not connect all mesh regions through shared edges");
-        }
-    }
-    populate_views(*storage);
-
-    Mesh2D result(std::move(storage));
-    result.validate();
-    if (options.diagnostic_vtu) {
-        result.write_vtu(*options.diagnostic_vtu);
-    }
-    return result;
-}
 
 Mesh2D Mesh2D::from_cells(const std::span<const Cell> cells) {
     if (cells.empty()) {
@@ -482,15 +332,6 @@ void Mesh2D::set_vertex_coordinates(const std::span<const Point2D> coordinates) 
     }
     storage_->expected_area = area();
     validate();
-}
-
-void Mesh2D::write_vtu(const std::filesystem::path& path) {
-    if (!path.parent_path().empty()) {
-        std::filesystem::create_directories(path.parent_path());
-    }
-    if (!storage_->generator.write_mesh(native(), path.string(), MeshExportType::VTU)) {
-        throw std::runtime_error("TQMesh failed to write diagnostic VTU output");
-    }
 }
 
 void Mesh2D::validate(const double relative_tolerance) const {

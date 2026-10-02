@@ -1,31 +1,13 @@
 #include "mesh/mesh2d.hpp"
+#include "mesh_test_utils.hpp"
 
-#include <algorithm>
-#include <array>
-#include <filesystem>
 #include <gtest/gtest.h>
 #include <set>
 #include <stdexcept>
 #include <vector>
 
-namespace {
-
-Mesh2D::Region rectangle(const double x0, const double z0, const double x1, const double z1,
-                         const int id, std::array<BoundaryKind, 4> kinds) {
-    return {
-        .vertices = {{x0, z0}, {x1, z0}, {x1, z1}, {x0, z1}},
-        .edge_kinds = {kinds.begin(), kinds.end()},
-        .id = id,
-    };
-}
-
-TEST(Mesh2D, GeneratesRectangleWithoutCopyingNativeMesh) {
-    const Mesh2D::Region region = rectangle(
-        0.0, 0.0, 4.0, 2.0, 17,
-        {BoundaryKind::bottom, BoundaryKind::right, BoundaryKind::top, BoundaryKind::left});
-    Mesh2D::GenerationOptions options;
-    options.cell_size = [](Point2D) { return 0.5; };
-    Mesh2D mesh = Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1), options);
+TEST(Mesh2D, BuildsExplicitCellsWithoutCopyingNativeMesh) {
+    Mesh2D mesh = make_rectangular_test_mesh(4.0, 2.0, 0.5, 17);
 
     const auto& native = mesh.native();
     EXPECT_GT(native.n_vertices(), 0U);
@@ -37,111 +19,28 @@ TEST(Mesh2D, GeneratesRectangleWithoutCopyingNativeMesh) {
     std::set<BoundaryKind> boundary_kinds;
     for (const auto& edge : native.boundary_edges()) {
         boundary_kinds.insert(mesh.boundary_kind(*edge));
-        const auto normal = mesh.normal_from_owner(*edge);
-        EXPECT_NEAR(normal.norm(), 1.0, 1.0e-12);
+        EXPECT_NEAR(mesh.normal_from_owner(*edge).norm(), 1.0, 1.0e-12);
     }
     EXPECT_EQ(boundary_kinds, (std::set{BoundaryKind::top, BoundaryKind::bottom, BoundaryKind::left,
                                         BoundaryKind::right}));
-    for (const auto& cell : native.triangles()) {
+    for (const auto& cell : native.quads()) {
         EXPECT_EQ(cell->color(), 17);
     }
     EXPECT_NO_THROW(mesh.validate());
 }
 
-TEST(Mesh2D, SupportsRegionSpecificCellSize) {
-    const Mesh2D::Region region = rectangle(
-        0.0, 0.0, 2.0, 1.0, 17,
-        {BoundaryKind::bottom, BoundaryKind::right, BoundaryKind::top, BoundaryKind::left});
-    bool called = false;
-    Mesh2D mesh = Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
-                                   {.cell_size = [](Point2D) { return 0.5; },
-                                    .region_cell_size =
-                                        [&called](const int region_id, Point2D) {
-                                            called = true;
-                                            EXPECT_EQ(region_id, 17);
-                                            return 0.25;
-                                        },
-                                    .smoothing_iterations = 0,
-                                    .make_quadrilateral = false,
-                                    .refine_to_quadrilateral = false,
-                                    .diagnostic_vtu = std::nullopt});
+TEST(Mesh2D, RejectsClockwiseCell) {
+    const Mesh2D::Cell cell{.vertices = {{0.0, 0.0}, {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}},
+                            .edge_kinds = {BoundaryKind::top, BoundaryKind::left,
+                                           BoundaryKind::bottom, BoundaryKind::right},
+                            .id = 1};
 
-    EXPECT_TRUE(called);
-    EXPECT_GT(mesh.cells().size(), 0U);
-    EXPECT_NO_THROW(mesh.validate());
-}
-
-TEST(Mesh2D, MergesTwoRegionsAcrossLayerInterface) {
-    const std::vector<Mesh2D::Region> regions = {
-        rectangle(0.0, 0.0, 4.0, 1.0, 1001,
-                  {BoundaryKind::bottom, BoundaryKind::right, BoundaryKind::interface,
-                   BoundaryKind::left}),
-        rectangle(
-            0.0, 1.0, 4.0, 2.0, 1002,
-            {BoundaryKind::interface, BoundaryKind::right, BoundaryKind::top, BoundaryKind::left}),
-    };
-    Mesh2D::GenerationOptions options;
-    options.cell_size = [](Point2D) { return 0.5; };
-    Mesh2D mesh = Mesh2D::generate(regions, options);
-
-    EXPECT_NEAR(mesh.area(), 8.0, 1.0e-10);
-    EXPECT_NO_THROW(mesh.validate());
-
-    bool found_layer_interface = false;
-    for (const auto& edge : mesh.native().interior_edges()) {
-        found_layer_interface |= mesh.owner(*edge).color() != mesh.neighbor(*edge).color();
-    }
-    EXPECT_TRUE(found_layer_interface);
-    for (const auto& edge : mesh.native().boundary_edges()) {
-        EXPECT_NE(mesh.boundary_kind(*edge), BoundaryKind::interface);
-    }
-}
-
-TEST(Mesh2D, CanGenerateQuadDominantDiagnosticMeshWithoutRefinement) {
-    const Mesh2D::Region region = rectangle(
-        0.0, 0.0, 2.0, 1.0, 3,
-        {BoundaryKind::bottom, BoundaryKind::right, BoundaryKind::top, BoundaryKind::left});
-    const std::filesystem::path output =
-        std::filesystem::temp_directory_path() / "heat_mesh2d_rectangle.vtu";
-    const Mesh2D triangular = Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
-                                               {.cell_size = [](Point2D) { return 0.4; },
-                                                .region_cell_size = {},
-                                                .smoothing_iterations = 0,
-                                                .make_quadrilateral = false,
-                                                .refine_to_quadrilateral = false,
-                                                .diagnostic_vtu = std::nullopt});
-    Mesh2D mesh = Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
-                                   {.cell_size = [](Point2D) { return 0.4; },
-                                    .region_cell_size = {},
-                                    .make_quadrilateral = true,
-                                    .refine_to_quadrilateral = false,
-                                    .diagnostic_vtu = output});
-
-    EXPECT_GT(mesh.native().n_quads(), 0U);
-    EXPECT_LT(mesh.native().n_elements(), triangular.native().n_elements());
-    EXPECT_TRUE(std::filesystem::is_regular_file(output));
-    std::filesystem::remove(output);
-}
-
-TEST(Mesh2D, RejectsClockwiseRegion) {
-    Mesh2D::Region region = rectangle(
-        0.0, 0.0, 1.0, 1.0, 1,
-        {BoundaryKind::bottom, BoundaryKind::right, BoundaryKind::top, BoundaryKind::left});
-    std::reverse(region.vertices.begin(), region.vertices.end());
-
-    Mesh2D::GenerationOptions options;
-    options.cell_size = [](Point2D) { return 0.25; };
-    EXPECT_THROW(Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1), options),
+    EXPECT_THROW(Mesh2D::from_cells(std::span<const Mesh2D::Cell>(&cell, 1)),
                  std::invalid_argument);
 }
 
 TEST(Mesh2D, UpdatesVertexCoordinatesWithoutChangingConnectivity) {
-    const Mesh2D::Region region = rectangle(
-        0.0, 0.0, 4.0, 2.0, 17,
-        {BoundaryKind::bottom, BoundaryKind::right, BoundaryKind::top, BoundaryKind::left});
-    Mesh2D::GenerationOptions options;
-    options.cell_size = [](Point2D) { return 0.5; };
-    Mesh2D mesh = Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1), options);
+    Mesh2D mesh = make_rectangular_test_mesh(4.0, 2.0, 0.5, 17);
     const std::size_t cell_count = mesh.cells().size();
     const std::size_t edge_count = mesh.internal_edges().size();
     std::vector<Point2D> coordinates = mesh.vertex_coordinates();
@@ -157,7 +56,7 @@ TEST(Mesh2D, UpdatesVertexCoordinatesWithoutChangingConnectivity) {
     EXPECT_NO_THROW(mesh.validate());
 }
 
-TEST(Mesh2D, BuildsExplicitQuadrilateralAndTriangleCells) {
+TEST(Mesh2D, BuildsQuadrilateralAndTriangleCells) {
     const std::vector<Mesh2D::Cell> cells = {
         {.vertices = {{0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}},
          .edge_kinds = {BoundaryKind::top, BoundaryKind::right, BoundaryKind::bottom,
@@ -176,5 +75,3 @@ TEST(Mesh2D, BuildsExplicitQuadrilateralAndTriangleCells) {
     EXPECT_NEAR(mesh.area(), 1.5, 1.0e-12);
     EXPECT_NO_THROW(mesh.validate());
 }
-
-} // namespace

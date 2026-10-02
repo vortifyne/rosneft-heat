@@ -10,7 +10,6 @@
 - [fixed-mesh-epoch.md](fixed-mesh-epoch.md) — расчёт эпохи на неподвижной сетке.
 - [moving-mesh-epoch.md](moving-mesh-epoch.md) — движение материала и сетки внутри эпохи.
 - [epoch-transition.md](epoch-transition.md) — перестроение сетки и перенос состояния.
-- [linear-system-conditioning.md](linear-system-conditioning.md) — диагностическая оценка обусловленности матриц метода Пикара.
 - [global-energy-balance.md](global-energy-balance.md) — единый баланс энергии всей расчётной области.
 - [manufactured-heat-solution.md](manufactured-heat-solution.md) — проверка пространственного и временного порядков на точном решении.
 - [full-history.md](full-history.md) — общий цикл конфигураций, движение сетки и полный временной ряд.

@@ -1,4 +1,5 @@
-#include "forward/mesh_transfer.hpp"
+#include "mesh/mesh_transfer.hpp"
+#include "mesh_test_utils.hpp"
 
 #include <algorithm>
 #include <gtest/gtest.h>
@@ -8,16 +9,7 @@
 namespace {
 
 Mesh2D make_mesh(const double size, const int region_id = 1) {
-    const Mesh2D::Region region = {
-        .vertices = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 1.0}, {0.0, 1.0}},
-        .edge_kinds = {BoundaryKind::top, BoundaryKind::right, BoundaryKind::bottom,
-                       BoundaryKind::left},
-        .id = region_id,
-    };
-    return Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
-                            {.cell_size = [size](Point2D) { return size; },
-                             .region_cell_size = {},
-                             .diagnostic_vtu = std::nullopt});
+    return make_rectangular_test_mesh(2.0, 1.0, size, region_id);
 }
 
 TEST(MeshTransfer, UsesPhysicalPositionWhenRegionIdentifierChanges) {
@@ -72,16 +64,7 @@ TEST(MeshTransfer, SamplesMeshAfterCoordinatesMove) {
 
 TEST(MeshTransfer, MarksPointsOutsideOldPhysicalArea) {
     const Mesh2D source = make_mesh(0.35);
-    const Mesh2D::Region larger_region = {
-        .vertices = {{0.0, -0.5}, {2.0, -0.5}, {2.0, 1.0}, {0.0, 1.0}},
-        .edge_kinds = {BoundaryKind::top, BoundaryKind::right, BoundaryKind::bottom,
-                       BoundaryKind::left},
-        .id = 1,
-    };
-    const Mesh2D target = Mesh2D::generate(std::span<const Mesh2D::Region>(&larger_region, 1),
-                                           {.cell_size = [](Point2D) { return 0.25; },
-                                            .region_cell_size = {},
-                                            .diagnostic_vtu = std::nullopt});
+    const Mesh2D target = make_rectangular_test_mesh(2.0, 1.5, 0.25, 1, -0.5);
     const CellTransferMap map = make_cell_transfer_map(source, target);
 
     EXPECT_TRUE(std::any_of(map.donor_cells.begin(), map.donor_cells.end(),

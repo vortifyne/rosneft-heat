@@ -1,6 +1,6 @@
 .PHONY: all help \
-        docker-image docker-debug docker-release docker-run docker-bench docker-test \
-        local-debug local-release local-run local-bench local-test clean
+        docker-image docker-debug docker-release docker-bench docker-test \
+        local-debug local-release local-bench local-test clean
 
 DOCKER_IMAGE = heat-env
 
@@ -11,7 +11,7 @@ DOCKER_RUN = docker run --rm \
 	-w $(shell pwd) \
 	$(DOCKER_IMAGE)
 
-# Docker (single runnable and benchmarkable)
+# Docker
 docker-image:
 	docker build -t $(DOCKER_IMAGE) .
 
@@ -20,9 +20,6 @@ docker-debug:
 
 docker-release:
 	$(DOCKER_RUN) bash -c "cmake --preset release -UZ_VCPKG_ROOT_DIR -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed && cmake --build --preset release"
-
-docker-run:
-	$(DOCKER_RUN) ./build/release/heat_solver
 
 docker-bench: docker-release
 	$(DOCKER_RUN) ./build/release/benchmarks
@@ -39,9 +36,6 @@ local-debug:
 local-release:
 	cmake --preset release -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed
 	cmake --build --preset release
-
-local-run:
-	./build/release/heat_solver
 
 local-bench: local-release
 	./build/release/benchmarks

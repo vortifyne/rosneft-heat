@@ -1,48 +1,38 @@
 #include "discretization/heat_system.hpp"
 #include "linear/umfpack_linear_solver.hpp"
+#include "mesh_test_utils.hpp"
 #include "time/time_integrator.hpp"
 
-#include <array>
 #include <cmath>
 #include <gtest/gtest.h>
-#include <limits>
 #include <vector>
 
 namespace {
 
-Mesh2D make_rectangular_mesh(const double cell_size = 0.5,
-                             const bool refine_to_quadrilateral = true) {
-    const Mesh2D::Region region = {
-        .vertices = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 2.0}, {0.0, 2.0}},
-        .edge_kinds = {BoundaryKind::top, BoundaryKind::right, BoundaryKind::bottom,
-                       BoundaryKind::left},
-        .id = 1,
-    };
-    return Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
-                            {.cell_size = [cell_size](Point2D) { return cell_size; },
-                             .region_cell_size = {},
-                             .smoothing_iterations = 2,
-                             .make_quadrilateral = true,
-                             .refine_to_quadrilateral = refine_to_quadrilateral,
-                             .diagnostic_vtu = std::nullopt});
+Mesh2D make_rectangular_mesh(const double cell_size = 0.5) {
+    return make_rectangular_test_mesh(4.0, 2.0, cell_size, 1, 0.0, true);
 }
 
 Mesh2D make_layered_mesh() {
-    const std::array regions = {
-        Mesh2D::Region{.vertices = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 1.0}, {0.0, 1.0}},
-                       .edge_kinds = {BoundaryKind::top, BoundaryKind::right,
-                                      BoundaryKind::interface, BoundaryKind::left},
-                       .id = 1},
-        Mesh2D::Region{.vertices = {{0.0, 1.0}, {4.0, 1.0}, {4.0, 2.0}, {0.0, 2.0}},
-                       .edge_kinds = {BoundaryKind::interface, BoundaryKind::right,
-                                      BoundaryKind::bottom, BoundaryKind::left},
-                       .id = 2},
-    };
-    return Mesh2D::generate(regions, {.cell_size = [](Point2D) { return 0.5; },
-                                      .region_cell_size = {},
-                                      .smoothing_iterations = 2,
-                                      .make_quadrilateral = false,
-                                      .diagnostic_vtu = std::nullopt});
+    std::vector<Mesh2D::Cell> cells;
+    for (int iz = 0; iz < 4; ++iz) {
+        for (int ix = 0; ix < 8; ++ix) {
+            const double x0 = 0.5 * static_cast<double>(ix);
+            const double z0 = 0.5 * static_cast<double>(iz);
+            cells.push_back({
+                .vertices = {{x0, z0}, {x0 + 0.5, z0}, {x0 + 0.5, z0 + 0.5}, {x0, z0 + 0.5}},
+                .edge_kinds =
+                    {
+                        iz == 0 ? BoundaryKind::top : BoundaryKind::interface,
+                        ix == 7 ? BoundaryKind::right : BoundaryKind::interface,
+                        iz == 3 ? BoundaryKind::bottom : BoundaryKind::interface,
+                        ix == 0 ? BoundaryKind::left : BoundaryKind::interface,
+                    },
+                .id = iz < 2 ? 1 : 2,
+            });
+        }
+    }
+    return Mesh2D::from_cells(cells);
 }
 
 HeatSystem make_system(const Mesh2D& mesh, const double conductivity = 2.0,
@@ -56,43 +46,6 @@ HeatSystem make_system(const Mesh2D& mesh, const double conductivity = 2.0,
                       {.surface_temperature =
                            [surface_temperature](Point2D, double) { return surface_temperature; },
                        .basal_heat_flux = [basal_flux](Point2D, double) { return basal_flux; }});
-}
-
-double solve_linear_steady_error(const Mesh2D& mesh) {
-    constexpr double conductivity = 2.0;
-    constexpr double gradient = 4.0;
-    const HeatSystem system =
-        make_system(mesh, conductivity, 3.0, 0.0, 300.0, conductivity * gradient);
-    Vector temperature(system.size());
-    temperature.set_constant(300.0);
-    Vector derivative(system.size());
-    derivative.set_zero();
-    UmfpackLinearSolver solver;
-
-    for (int iteration = 0; iteration < 40; ++iteration) {
-        Vector residual;
-        system.assemble_residual(0.0, temperature, derivative, residual);
-        if (residual.infinity_norm() < 1.0e-8) {
-            break;
-        }
-        SparseMatrix matrix(system.size(), system.size(), SparseStorageOrder::csc);
-        system.assemble_matrix(NonlinearMethod::picard, 0.0, temperature, derivative, 0.0, matrix);
-        Vector correction;
-        const LinearSolveResult result = solver.solve(
-            matrix, -residual, correction,
-            {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1});
-        if (result.status != LinearSolveStatus::converged) {
-            return std::numeric_limits<double>::infinity();
-        }
-        temperature += correction;
-    }
-
-    double error = 0.0;
-    for (const TQMesh::Facet* cell : mesh.cells()) {
-        error = std::max(error,
-                         std::abs(temperature[cell->index()] - (300.0 + gradient * cell->xy().y)));
-    }
-    return error;
 }
 
 } // namespace
@@ -234,16 +187,6 @@ TEST(HeatSystem, SolvesConstantCoefficientSteadyProblemWithUmfpack) {
     for (const TQMesh::Facet* cell : mesh.cells()) {
         EXPECT_NEAR(temperature[cell->index()], 300.0 + gradient * cell->xy().y, 1.0e-7);
     }
-}
-
-TEST(HeatSystem, QuadDominantMeshImprovesSteadyLinearSolutionWhenRefined) {
-    const Mesh2D coarse = make_rectangular_mesh(0.5, false);
-    const Mesh2D fine = make_rectangular_mesh(0.25, false);
-
-    const double coarse_error = solve_linear_steady_error(coarse);
-    const double fine_error = solve_linear_steady_error(fine);
-
-    EXPECT_LT(fine_error, coarse_error);
 }
 
 TEST(HeatSystem, AdvancesOneBdf1StepWithPicardMethod) {

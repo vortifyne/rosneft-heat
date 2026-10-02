@@ -1,4 +1,4 @@
-#include "forward/layered_mesh.hpp"
+#include "basin/layered_mesh.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -38,38 +38,32 @@ Point2D point(const double x, const double top, const double thickness, const do
     return {.x = x, .z = top + eta * thickness};
 }
 
-void append_cell(std::vector<Mesh2D::Cell>& quads, std::vector<LayeredCellId>& quad_ids,
-                 std::vector<Mesh2D::Cell>& triangles, std::vector<LayeredCellId>& triangle_ids,
-                 const BasinLayerProfile& layer, const std::size_t column, const std::size_t row,
-                 const double left_x, const double right_x, const double left_top,
-                 const double right_top, const double left_thickness, const double right_thickness,
-                 const std::size_t rows, const double tolerance) {
+void append_cell(std::vector<Mesh2D::Cell>& quads, std::vector<Mesh2D::Cell>& triangles,
+                 const BasinLayerProfile& layer, const std::size_t row, const double left_x,
+                 const double right_x, const double left_top, const double right_top,
+                 const double left_thickness, const double right_thickness, const std::size_t rows,
+                 const double tolerance) {
     const double eta_top = static_cast<double>(row) / static_cast<double>(rows);
     const double eta_bottom = static_cast<double>(row + 1) / static_cast<double>(rows);
     const Point2D top_left = point(left_x, left_top, left_thickness, eta_top);
     const Point2D top_right = point(right_x, right_top, right_thickness, eta_top);
     const Point2D bottom_right = point(right_x, right_top, right_thickness, eta_bottom);
     const Point2D bottom_left = point(left_x, left_top, left_thickness, eta_bottom);
-    const LayeredCellId identifier{.layer_id = layer.id, .column = column, .row = row};
-
     if (left_thickness <= tolerance) {
         triangles.push_back(
             {.vertices = {top_left, top_right, bottom_right},
              .edge_kinds = {BoundaryKind::top, BoundaryKind::right, BoundaryKind::bottom},
              .id = layer.id});
-        triangle_ids.push_back(identifier);
     } else if (right_thickness <= tolerance) {
         triangles.push_back(
             {.vertices = {top_left, top_right, bottom_left},
              .edge_kinds = {BoundaryKind::top, BoundaryKind::bottom, BoundaryKind::left},
              .id = layer.id});
-        triangle_ids.push_back(identifier);
     } else {
         quads.push_back({.vertices = {top_left, top_right, bottom_right, bottom_left},
                          .edge_kinds = {BoundaryKind::top, BoundaryKind::right,
                                         BoundaryKind::bottom, BoundaryKind::left},
                          .id = layer.id});
-        quad_ids.push_back(identifier);
     }
 }
 
@@ -117,15 +111,12 @@ LayeredMeshLayout make_layered_mesh_layout(const std::span<const BasinConfigurat
     return result;
 }
 
-LayeredMesh make_layered_mesh(const BasinConfiguration& configuration,
-                              const LayeredMeshLayout& layout) {
+Mesh2D make_layered_mesh(const BasinConfiguration& configuration, const LayeredMeshLayout& layout) {
     if (layout.x.size() < 2) {
         throw std::invalid_argument("Layered mesh layout requires at least two x coordinates");
     }
     std::vector<Mesh2D::Cell> quads;
     std::vector<Mesh2D::Cell> triangles;
-    std::vector<LayeredCellId> quad_ids;
-    std::vector<LayeredCellId> triangle_ids;
 
     for (const BasinLayerProfile& layer : configuration.layers) {
         const auto row_count = layout.layer_rows.find(layer.id);
@@ -148,9 +139,8 @@ LayeredMesh make_layered_mesh(const BasinConfiguration& configuration,
                 continue;
             }
             for (std::size_t row = 0; row < row_count->second; ++row) {
-                append_cell(quads, quad_ids, triangles, triangle_ids, layer, column, row, left_x,
-                            right_x, left_top, right_top, left_thickness, right_thickness,
-                            row_count->second, tolerance);
+                append_cell(quads, triangles, layer, row, left_x, right_x, left_top, right_top,
+                            left_thickness, right_thickness, row_count->second, tolerance);
             }
         }
     }
@@ -161,14 +151,5 @@ LayeredMesh make_layered_mesh(const BasinConfiguration& configuration,
                  std::make_move_iterator(quads.end()));
     cells.insert(cells.end(), std::make_move_iterator(triangles.begin()),
                  std::make_move_iterator(triangles.end()));
-    std::vector<LayeredCellId> identifiers;
-    identifiers.reserve(quad_ids.size() + triangle_ids.size());
-    identifiers.insert(identifiers.end(), quad_ids.begin(), quad_ids.end());
-    identifiers.insert(identifiers.end(), triangle_ids.begin(), triangle_ids.end());
-
-    Mesh2D mesh = Mesh2D::from_cells(cells);
-    if (mesh.cells().size() != identifiers.size()) {
-        throw std::logic_error("Layered mesh cell identifiers do not match mesh cells");
-    }
-    return {.mesh = std::move(mesh), .cell_ids = std::move(identifiers)};
+    return Mesh2D::from_cells(cells);
 }

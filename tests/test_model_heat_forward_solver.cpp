@@ -1,4 +1,4 @@
-#include "forward/model_heat_forward_solver.hpp"
+#include "model/model_heat_forward_solver.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>

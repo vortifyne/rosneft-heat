@@ -1,4 +1,4 @@
-#include "forward/basin_input.hpp"
+#include "basin/basin_input.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -48,47 +48,6 @@ std::vector<std::vector<std::string>> read_csv(const std::filesystem::path& path
         }
     }
     return rows;
-}
-
-BoundaryKind boundary_kind(const int value) {
-    switch (value) {
-    case 1:
-        return BoundaryKind::top;
-    case 2:
-        return BoundaryKind::bottom;
-    case 3:
-        return BoundaryKind::left;
-    case 4:
-        return BoundaryKind::right;
-    case 5:
-        return BoundaryKind::interface;
-    default:
-        throw std::runtime_error("Unknown boundary kind in region file");
-    }
-}
-
-std::vector<Mesh2D::Region> read_regions(const std::filesystem::path& path) {
-    const auto rows = read_csv(path, "region_id,layer_id,x,z,edge_kind");
-    std::vector<Mesh2D::Region> result;
-    std::unordered_map<int, std::size_t> positions;
-    for (const auto& fields : rows) {
-        if (fields.size() != 5) {
-            throw std::runtime_error("Invalid region row in " + path.string());
-        }
-        const int region_id = std::stoi(fields[0]);
-        const int layer_id = std::stoi(fields[1]);
-        const auto [position, inserted] = positions.emplace(region_id, result.size());
-        if (inserted) {
-            result.push_back({.vertices = {}, .edge_kinds = {}, .id = layer_id});
-        }
-        auto& region = result.at(position->second);
-        if (region.id != layer_id) {
-            throw std::runtime_error("Layer identifier changes inside a region");
-        }
-        region.vertices.push_back({std::stod(fields[2]), std::stod(fields[3])});
-        region.edge_kinds.push_back(boundary_kind(std::stoi(fields[4])));
-    }
-    return result;
 }
 
 double interpolate(const std::span<const double> x, const std::span<const double> values,
@@ -165,13 +124,12 @@ const BasinLayerProfile& BasinConfiguration::layer(const int id) const {
 
 BasinInput BasinInput::read(const std::filesystem::path& directory) {
     BasinInput result;
-    const auto configurations = read_csv(directory / "configurations.csv", "age_ma,regions_file");
+    const auto configurations = read_csv(directory / "configurations.csv", "age_ma");
     for (const auto& fields : configurations) {
-        if (fields.size() != 2) {
+        if (fields.size() != 1) {
             throw std::runtime_error("Invalid configuration row");
         }
         result.configurations_.push_back({.age_ma = std::stod(fields[0]),
-                                          .regions = read_regions(directory / fields[1]),
                                           .layers = {},
                                           .surface_temperature = {},
                                           .basal_heat_flux = {}});
@@ -258,17 +216,6 @@ BasinInput BasinInput::read(const std::filesystem::path& directory) {
         result.easy_ro_.weights.push_back(std::stod(fields[2]));
     }
     return result;
-}
-
-const BasinConfiguration& BasinInput::configuration(const double age_ma) const {
-    const auto found =
-        std::find_if(configurations_.begin(), configurations_.end(), [age_ma](const auto& value) {
-            return std::abs(value.age_ma - age_ma) < 1.0e-10;
-        });
-    if (found == configurations_.end()) {
-        throw std::out_of_range("Requested basin configuration is absent");
-    }
-    return *found;
 }
 
 const LithotypeThermophysicalProperties& BasinInput::lithotype(const int code) const {

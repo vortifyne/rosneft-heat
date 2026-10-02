@@ -52,13 +52,7 @@ make docker-image
 make docker-test
 ```
 
-### 4. Запуск программы и бенчмарков
-
-- **Запуск солвера:**
-
-  ```bash
-  make docker-run
-  ```
+### 4. Запуск замеров производительности
 
 - **Запуск Google Benchmark:**
 
@@ -79,10 +73,7 @@ make local-release
 # 2. Запуск тестов
 make local-test
 
-# 3. Запуск солвера
-make local-run
-
-# 4. Запуск бенчмарков
+# 3. Запуск бенчмарков
 make local-bench
 ```
 
@@ -96,8 +87,7 @@ cmake --build --preset release
 # Запуск тестов
 ctest --test-dir build/release --output-on-failure
 
-# Запуск бинарника
-./build/release/heat_solver
+# Запуск прямого расчёта описан ниже
 ```
 
 ## Очистка артефактов сборки
@@ -116,22 +106,19 @@ make clean
 tools/run_forward.sh local/forward_problem_data/data1 local/results/data1-forward
 ```
 
-Сценарий читает исходные таблицы неизменённой копией переданного `basin_data.py`, записывает компактные входные файлы и запускает `heat_forward`. По умолчанию используются все конфигурации. Необязательные параметры задают размер ячейки, шаг времени в миллионах лет, число сохраняемых состояний эпохи, путь к исполняемому файлу, ограничение числа конфигураций, контрольные точки, локальное сгущение тонких слоёв и шаг описания границ:
+Сценарий читает исходные таблицы с помощью переданного организаторами `basin_data.py`, записывает компактные входные файлы и запускает `heat_forward`. Используются все конфигурации. Необязательные параметры задают размер ячейки и шаг времени в миллионах лет:
 
 ```bash
-tools/run_forward.sh <data-dir> <output-dir> [cell-size] [dt-ma] [states-per-epoch] [heat-forward] [max-configurations] [comparison-points] [thin-layer-cell-fraction] [boundary-step] [mesh-kind] [estimate-condition]
+tools/run_forward.sh <data-dir> <output-dir> [cell-size] [dt-ma]
 ```
 
-Вид сетки принимает значения `triangular`, `quad-dominant` и `layered`. Второй вариант
-объединяет подходящие пары треугольников в четырёхугольники без дополнительного измельчения всей
-сетки. Третий строит согласованные с геологическими слоями четырёхугольные ячейки и треугольники
-у выклиниваний и используется по умолчанию. Значение `yes` последнего параметра включает грубую
-оценку обусловленности матриц и запись `conditioning.csv`; обычный расчёт её не выполняет.
+По умолчанию размер ячейки равен 50 м, шаг времени — 0,25 млн лет.
+
+Решатель строит согласованные с геологическими слоями четырёхугольные ячейки и треугольники у
+выклиниваний.
 
 В каталоге результата создаются файлы VTU, временной ряд `temperature.pvd`, таблицы
-`statistics.csv`, `epochs.csv`, `transitions.csv`, `energy-balance.csv` и `summary.csv`. Если
-передан файл контрольных точек с заголовком `id,x,z`, конечные температуры записываются в
-`comparison-temperatures.csv`.
+`statistics.csv`, `epochs.csv`, `transitions.csv`, `energy-balance.csv` и `summary.csv`.
 
 ## Структура проекта
 
@@ -140,4 +127,4 @@ tools/run_forward.sh <data-dir> <output-dir> [cell-size] [dt-ma] [states-per-epo
 - `benchmarks/` — замеры производительности на базе Google Benchmark.
 - `docs/` — архитектурная и пользовательская документация.
 - `CMakePresets.json` — конфигурации сборки (Debug, Release).
-- `vcpkg.json` — манифест внешних зависимостей (Eigen3, fmt, SuiteSparse UMFPACK, GTest, Benchmark).
+- `vcpkg.json` — манифест внешних зависимостей (Eigen3, SuiteSparse UMFPACK, GTest, Benchmark).

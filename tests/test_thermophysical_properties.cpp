@@ -1,5 +1,6 @@
 #include "discretization/heat_system.hpp"
 #include "mesh/mesh2d.hpp"
+#include "mesh_test_utils.hpp"
 #include "physics/thermophysical_properties.hpp"
 
 #include <algorithm>
@@ -96,18 +97,7 @@ LithotypeThermophysicalProperties lithotype_from(const ReferenceCase& reference)
 }
 
 Mesh2D make_test_mesh() {
-    const Mesh2D::Region region = {
-        .vertices = {{0.0, 0.0}, {2.0, 0.0}, {2.0, 1.0}, {0.0, 1.0}},
-        .edge_kinds = {BoundaryKind::top, BoundaryKind::right, BoundaryKind::bottom,
-                       BoundaryKind::left},
-        .id = 1,
-    };
-    return Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
-                            {.cell_size = [](Point2D) { return 0.3; },
-                             .region_cell_size = {},
-                             .smoothing_iterations = 1,
-                             .make_quadrilateral = false,
-                             .diagnostic_vtu = std::nullopt});
+    return make_rectangular_test_mesh(2.0, 1.0, 0.3);
 }
 
 } // namespace

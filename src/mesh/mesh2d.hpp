@@ -3,10 +3,7 @@
 #include "Mesh.h"
 
 #include <array>
-#include <filesystem>
-#include <functional>
 #include <memory>
-#include <optional>
 #include <span>
 #include <vector>
 
@@ -29,28 +26,12 @@ public:
     using CellView = std::span<const TQMesh::Facet* const>;
     using EdgeView = std::span<const TQMesh::Edge* const>;
 
-    struct Region {
-        std::vector<Point2D> vertices;
-        std::vector<BoundaryKind> edge_kinds;
-        int id = 0;
-    };
-
     struct Cell {
         std::vector<Point2D> vertices;
         std::vector<BoundaryKind> edge_kinds;
         int id = 0;
     };
 
-    struct GenerationOptions {
-        std::function<double(Point2D)> cell_size;
-        std::function<double(int, Point2D)> region_cell_size;
-        int smoothing_iterations = 0;
-        bool make_quadrilateral = false;
-        bool refine_to_quadrilateral = false;
-        std::optional<std::filesystem::path> diagnostic_vtu;
-    };
-
-    static Mesh2D generate(std::span<const Region> regions, const GenerationOptions& options);
     static Mesh2D from_cells(std::span<const Cell> cells);
 
     Mesh2D(Mesh2D&&) noexcept;
@@ -75,7 +56,6 @@ public:
 
     void set_vertex_coordinates(std::span<const Point2D> coordinates);
 
-    void write_vtu(const std::filesystem::path& path);
     void validate(double relative_tolerance = 1.0e-10) const;
 
 private:

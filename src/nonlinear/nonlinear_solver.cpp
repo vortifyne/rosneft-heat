@@ -33,7 +33,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
             .final_residual_norm = std::numeric_limits<double>::infinity(),
             .linear_iterations = 0,
             .last_linear_status = std::nullopt,
-            .minimum_reciprocal_condition_estimate = std::nullopt,
         };
     }
 
@@ -45,13 +44,11 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
             .final_residual_norm = initial_residual_norm,
             .linear_iterations = 0,
             .last_linear_status = std::nullopt,
-            .minimum_reciprocal_condition_estimate = std::nullopt,
         };
     }
 
     int linear_iterations = 0;
     std::optional<LinearSolveStatus> last_linear_status;
-    std::optional<double> minimum_reciprocal_condition_estimate;
     for (int iteration = 0; iteration < nonlinear_request.max_iterations; ++iteration) {
         SparseMatrix matrix(x.size(), x.size(), linear_solver_->required_storage_order());
         nonlinear_system.assemble_matrix(nonlinear_request.nonlinear_method, x, matrix);
@@ -63,13 +60,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
             linear_solver_->solve(matrix, b, delta_x, current_linear_request);
         linear_iterations += linear_result.iterations;
         last_linear_status = linear_result.status;
-        if (linear_result.reciprocal_condition_estimate) {
-            minimum_reciprocal_condition_estimate =
-                minimum_reciprocal_condition_estimate
-                    ? std::min(*minimum_reciprocal_condition_estimate,
-                               *linear_result.reciprocal_condition_estimate)
-                    : linear_result.reciprocal_condition_estimate;
-        }
 
         if (linear_result.status != LinearSolveStatus::converged) {
             return {
@@ -78,7 +68,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .final_residual_norm = residual.norm(),
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
-                .minimum_reciprocal_condition_estimate = minimum_reciprocal_condition_estimate,
             };
         }
 
@@ -111,7 +100,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .final_residual_norm = std::numeric_limits<double>::infinity(),
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
-                .minimum_reciprocal_condition_estimate = minimum_reciprocal_condition_estimate,
             };
         }
 
@@ -130,7 +118,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .final_residual_norm = residual_norm,
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
-                .minimum_reciprocal_condition_estimate = minimum_reciprocal_condition_estimate,
             };
         }
 
@@ -141,7 +128,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .final_residual_norm = residual_norm,
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
-                .minimum_reciprocal_condition_estimate = minimum_reciprocal_condition_estimate,
             };
         }
 
@@ -152,7 +138,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .final_residual_norm = residual_norm,
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
-                .minimum_reciprocal_condition_estimate = minimum_reciprocal_condition_estimate,
             };
         }
     }
@@ -163,7 +148,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
         .final_residual_norm = residual.norm(),
         .linear_iterations = linear_iterations,
         .last_linear_status = last_linear_status,
-        .minimum_reciprocal_condition_estimate = minimum_reciprocal_condition_estimate,
     };
 }
 

@@ -11,10 +11,8 @@ from types import ModuleType
 import numpy as np
 
 from prepare_mesh_geometry import (
-    extract_regions,
     sampled_layers,
     sampling_points,
-    write_regions,
 )
 
 
@@ -25,10 +23,6 @@ def load_module(path: Path) -> ModuleType:
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
-
-
-def age_name(age: float) -> str:
-    return f"{age:g}".replace(".", "_")
 
 
 def write_csv(path: Path, header: tuple[str, ...], rows: list[tuple[object, ...]]) -> None:
@@ -52,9 +46,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare compact forward-problem input")
     parser.add_argument("data_dir", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--boundary-step", type=float, default=25.0)
-    parser.add_argument("--ages", type=float, nargs="+")
-    parser.add_argument("--max-configurations", type=int)
+    parser.add_argument("cell_size", type=float)
     parser.add_argument(
         "--basin-data",
         type=Path,
@@ -64,19 +56,7 @@ def main() -> None:
 
     module = load_module(arguments.basin_data)
     data = module.BasinData(arguments.data_dir)
-    ages = (
-        tuple(float(age) for age in arguments.ages)
-        if arguments.ages is not None
-        else tuple(reversed([float(age) for age in data.times]))
-    )
-    if arguments.max_configurations is not None:
-        if arguments.max_configurations < 2:
-            raise ValueError("At least two configurations are required")
-        ages = ages[: arguments.max_configurations]
-    available = {float(age) for age in data.times}
-    missing = [age for age in ages if age not in available]
-    if missing:
-        raise ValueError(f"Missing configurations: {missing}")
+    ages = tuple(reversed([float(age) for age in data.times]))
 
     arguments.output.mkdir(parents=True, exist_ok=True)
     layer_ids = {name: index + 1 for index, name in enumerate(data.layers)}
@@ -86,11 +66,8 @@ def main() -> None:
     boundary_rows: list[tuple[object, ...]] = []
     for age in ages:
         snapshot = data.snapshot(age)
-        regions = extract_regions(snapshot, arguments.boundary_step, layer_ids)
-        geometry = sampled_layers(snapshot, sampling_points(snapshot, arguments.boundary_step))
-        region_file = f"regions_{age_name(age)}.csv"
-        write_regions(arguments.output / region_file, regions)
-        configuration_rows.append((f"{age:.15g}", region_file))
+        geometry = sampled_layers(snapshot, sampling_points(snapshot, arguments.cell_size))
+        configuration_rows.append((f"{age:.15g}",))
 
         for layer, sampled in zip(snapshot, geometry, strict=True):
             layer_id = layer_ids[str(layer["layer"])]
@@ -138,7 +115,7 @@ def main() -> None:
 
     write_csv(
         arguments.output / "configurations.csv",
-        ("age_ma", "regions_file"),
+        ("age_ma",),
         configuration_rows,
     )
     write_csv(
@@ -190,7 +167,7 @@ def main() -> None:
 
     print(
         f"prepared={arguments.output} configurations={len(ages)} "
-        f"layers={len(layer_ids)} boundary_step={arguments.boundary_step:g}"
+        f"layers={len(layer_ids)} cell_size={arguments.cell_size:g}"
     )
 
 

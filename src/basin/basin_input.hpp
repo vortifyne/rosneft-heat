@@ -1,6 +1,5 @@
 #pragma once
 
-#include "mesh/mesh2d.hpp"
 #include "physics/thermophysical_properties.hpp"
 
 #include <filesystem>
@@ -33,7 +32,6 @@ struct BasinLayerProfile {
 
 struct BasinConfiguration {
     double age_ma = 0.0;
-    std::vector<Mesh2D::Region> regions;
     std::vector<BasinLayerProfile> layers;
     ScalarProfile surface_temperature;
     ScalarProfile basal_heat_flux;
@@ -52,7 +50,6 @@ class BasinInput {
 public:
     static BasinInput read(const std::filesystem::path& directory);
 
-    [[nodiscard]] const BasinConfiguration& configuration(double age_ma) const;
     [[nodiscard]] const LithotypeThermophysicalProperties& lithotype(int code) const;
     [[nodiscard]] std::span<const BasinConfiguration> configurations() const noexcept;
     [[nodiscard]] const EasyRoInput& easy_ro() const noexcept;

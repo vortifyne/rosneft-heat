@@ -9,7 +9,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(HEAT_BUILD_MODEL_INVERSE "Build the model inverse problem and PETSc tests" OFF)
 
-find_package(fmt CONFIG REQUIRED)
 find_package(Eigen3 CONFIG REQUIRED)
 find_package(UMFPACK CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
@@ -57,22 +56,9 @@ else()
   target_compile_options(heat_numerics PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
-add_library(heat_physics STATIC
-  src/physics/easy_ro.cpp
-  src/physics/thermophysical_properties.cpp
-)
-
-target_include_directories(heat_physics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-if(MSVC)
-  target_compile_options(heat_physics PRIVATE /W4 /permissive-)
-else()
-  target_compile_options(heat_physics PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
-endif()
-
 add_library(model_heat STATIC
-  src/discretization/model_heat_system.cpp
-  src/forward/model_heat_forward_solver.cpp
+  src/model/model_heat_system.cpp
+  src/model/model_heat_forward_solver.cpp
 )
 
 target_include_directories(model_heat PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -84,38 +70,29 @@ else()
   target_compile_options(model_heat PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
-add_library(heat_core STATIC
+add_library(basin_heat STATIC
+  src/basin/basin_forward_solver.cpp
+  src/basin/basin_input.cpp
+  src/basin/basin_state.cpp
+  src/basin/forward_output.cpp
+  src/basin/layered_mesh.cpp
+  src/basin/mesh_motion.cpp
+  src/basin/vtu_output.cpp
   src/discretization/heat_system.cpp
   src/discretization/least_squares_gradient.cpp
   src/mesh/mesh2d.cpp
+  src/mesh/mesh_transfer.cpp
+  src/physics/easy_ro.cpp
+  src/physics/thermophysical_properties.cpp
 )
 
-target_include_directories(heat_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(heat_core
-  PUBLIC heat_numerics TQMesh::TQMesh
-)
-
-add_library(heat_forward_core STATIC
-  src/forward/basin_forward_solver.cpp
-  src/forward/basin_input.cpp
-  src/forward/layered_mesh.cpp
-  src/forward/mesh_transfer.cpp
-  src/forward/vtu_output.cpp
-)
-
-target_include_directories(heat_forward_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(heat_forward_core PUBLIC heat_core heat_physics)
+target_include_directories(basin_heat PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(basin_heat PUBLIC heat_numerics TQMesh::TQMesh)
 
 if(MSVC)
-  target_compile_options(heat_forward_core PRIVATE /W4 /permissive-)
+  target_compile_options(basin_heat PRIVATE /W4 /permissive-)
 else()
-  target_compile_options(heat_forward_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
-endif()
-
-if(MSVC)
-  target_compile_options(heat_core PRIVATE /W4 /permissive-)
-else()
-  target_compile_options(heat_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+  target_compile_options(basin_heat PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
 if(HEAT_BUILD_MODEL_INVERSE)
@@ -152,26 +129,8 @@ if(HEAT_BUILD_MODEL_INVERSE)
   endif()
 endif()
 
-add_executable(heat_solver src/main.cpp)
-target_link_libraries(heat_solver PRIVATE heat_core fmt::fmt)
-
-if(MSVC)
-  target_compile_options(heat_solver PRIVATE /W4 /permissive-)
-else()
-  target_compile_options(heat_solver PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
-endif()
-
-add_executable(heat_mesh src/mesh/mesh_generator_main.cpp)
-target_link_libraries(heat_mesh PRIVATE heat_core)
-
-if(MSVC)
-  target_compile_options(heat_mesh PRIVATE /W4 /permissive-)
-else()
-  target_compile_options(heat_mesh PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
-endif()
-
-add_executable(heat_forward src/forward/basin_forward_main.cpp)
-target_link_libraries(heat_forward PRIVATE heat_forward_core)
+add_executable(heat_forward src/basin/main.cpp)
+target_link_libraries(heat_forward PRIVATE basin_heat)
 
 if(MSVC)
   target_compile_options(heat_forward PRIVATE /W4 /permissive-)
@@ -226,6 +185,7 @@ endif()
 gtest_discover_tests(model_unit_tests)
 
 add_executable(heat_unit_tests
+  tests/test_basin_forward_solver.cpp
   tests/test_easy_ro.cpp
   tests/test_heat_system.cpp
   tests/test_layered_mesh.cpp
@@ -237,9 +197,7 @@ add_executable(heat_unit_tests
 )
 
 target_link_libraries(heat_unit_tests PRIVATE
-  heat_core
-  heat_forward_core
-  heat_physics
+  basin_heat
   GTest::gtest_main
 )
 

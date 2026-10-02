@@ -1,4 +1,4 @@
-#include "forward/layered_mesh.hpp"
+#include "basin/layered_mesh.hpp"
 
 #include <gtest/gtest.h>
 #include <vector>
@@ -17,7 +17,6 @@ BasinLayerProfile layer(const int id, const double top, const double bottom) {
 
 BasinConfiguration configuration(std::vector<BasinLayerProfile> layers) {
     return {.age_ma = 0.0,
-            .regions = {},
             .layers = std::move(layers),
             .surface_temperature = {},
             .basal_heat_flux = {}};
@@ -27,13 +26,12 @@ TEST(LayeredMesh, BuildsConformingQuadrilateralsAcrossLayers) {
     const BasinConfiguration basin = configuration({layer(1, 0.0, 1.0), layer(2, 1.0, 2.0)});
     const LayeredMeshLayout layout = make_layered_mesh_layout({&basin, 1}, 1.0);
 
-    LayeredMesh result = make_layered_mesh(basin, layout);
+    Mesh2D result = make_layered_mesh(basin, layout);
 
-    EXPECT_EQ(result.mesh.cells().size(), 4U);
-    EXPECT_EQ(result.mesh.native().n_quads(), 4U);
-    EXPECT_EQ(result.cell_ids.size(), result.mesh.cells().size());
-    EXPECT_NEAR(result.mesh.area(), 4.0, 1.0e-12);
-    EXPECT_NO_THROW(result.mesh.validate());
+    EXPECT_EQ(result.cells().size(), 4U);
+    EXPECT_EQ(result.native().n_quads(), 4U);
+    EXPECT_NEAR(result.area(), 4.0, 1.0e-12);
+    EXPECT_NO_THROW(result.validate());
 }
 
 TEST(LayeredMesh, UsesTriangleFanAtLayerPinch) {
@@ -42,23 +40,11 @@ TEST(LayeredMesh, UsesTriangleFanAtLayerPinch) {
     const BasinConfiguration basin = configuration({std::move(wedge)});
     const LayeredMeshLayout layout = make_layered_mesh_layout({&basin, 1}, 1.0);
 
-    LayeredMesh result = make_layered_mesh(basin, layout);
+    Mesh2D result = make_layered_mesh(basin, layout);
 
-    EXPECT_GT(result.mesh.native().n_triangles(), 0U);
-    EXPECT_NEAR(result.mesh.area(), 2.0, 1.0e-12);
-    EXPECT_NO_THROW(result.mesh.validate());
-}
-
-TEST(LayeredMesh, KeepsMaterialCellIdentifiersAcrossCompatibleConfigurations) {
-    const BasinConfiguration first = configuration({layer(1, 0.0, 1.0), layer(2, 1.0, 2.0)});
-    const BasinConfiguration second = configuration({layer(1, 0.2, 1.4), layer(2, 1.4, 2.8)});
-    const std::vector<BasinConfiguration> history = {first, second};
-    const LayeredMeshLayout layout = make_layered_mesh_layout(history, 1.0);
-
-    LayeredMesh old_mesh = make_layered_mesh(first, layout);
-    LayeredMesh new_mesh = make_layered_mesh(second, layout);
-
-    EXPECT_EQ(old_mesh.cell_ids, new_mesh.cell_ids);
+    EXPECT_GT(result.native().n_triangles(), 0U);
+    EXPECT_NEAR(result.area(), 2.0, 1.0e-12);
+    EXPECT_NO_THROW(result.validate());
 }
 
 } // namespace

@@ -75,7 +75,6 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
     double last_residual_norm = 0.0;
     std::optional<NonlinearSolveStatus> last_nonlinear_status;
     std::optional<LinearSolveStatus> last_linear_status;
-    std::optional<double> minimum_reciprocal_condition_estimate;
 
     while (time_history_.current().time < final_time) {
         const double current_time = time_history_.current().time;
@@ -94,7 +93,6 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
                 .last_residual_norm = last_residual_norm,
                 .last_nonlinear_status = last_nonlinear_status,
                 .last_linear_status = last_linear_status,
-                .minimum_reciprocal_condition_estimate = minimum_reciprocal_condition_estimate,
             };
         }
 
@@ -110,14 +108,6 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
         if (nonlinear_result.last_linear_status.has_value()) {
             last_linear_status = nonlinear_result.last_linear_status;
         }
-        if (nonlinear_result.minimum_reciprocal_condition_estimate) {
-            minimum_reciprocal_condition_estimate =
-                minimum_reciprocal_condition_estimate
-                    ? std::min(*minimum_reciprocal_condition_estimate,
-                               *nonlinear_result.minimum_reciprocal_condition_estimate)
-                    : nonlinear_result.minimum_reciprocal_condition_estimate;
-        }
-
         if (!nonlinear_result.converged()) {
             ++rejected_steps;
             return {
@@ -129,7 +119,6 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
                 .last_residual_norm = last_residual_norm,
                 .last_nonlinear_status = last_nonlinear_status,
                 .last_linear_status = last_linear_status,
-                .minimum_reciprocal_condition_estimate = minimum_reciprocal_condition_estimate,
             };
         }
 
@@ -147,6 +136,5 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
         .last_residual_norm = last_residual_norm,
         .last_nonlinear_status = last_nonlinear_status,
         .last_linear_status = last_linear_status,
-        .minimum_reciprocal_condition_estimate = minimum_reciprocal_condition_estimate,
     };
 }
