@@ -21,6 +21,7 @@ struct BasinForwardResult {
     int nonlinear_iterations = 0;
     int maximum_nonlinear_iterations_per_step = 0;
     int linear_iterations = 0;
+    int topology_regularized_epochs = 0;
     int configurations = 0;
     double final_age_ma = 0.0;
     double global_energy_balance = 0.0;

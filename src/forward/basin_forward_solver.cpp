@@ -754,7 +754,7 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
                          "temperature_min,"
                          "temperature_max,Ro_min,Ro_max\n";
     output.epochs << "start_age_ma,end_age_ma,steps,nonlinear_iterations,linear_iterations,"
-                     "start_cells,end_cells,wall_seconds\n";
+                     "start_cells,end_cells,topology_regularized,wall_seconds\n";
     output.transitions << "age_ma,old_cells,new_cells\n";
     output.energy_balance << "elapsed_ma,age_ma,kind,relative_error\n";
     if (options.estimate_condition) {
@@ -811,12 +811,15 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
         const std::size_t old_cell_count = mesh.cells().size();
 
         int saved_states = 0;
+        bool topology_regularized = false;
         std::unique_ptr<MaterialMotion> motion;
         if (!options.fixed_mesh) {
             try {
                 motion = std::make_unique<MaterialMotion>(mesh, first, second, duration);
             } catch (const std::exception&) {
                 motion = std::make_unique<MaterialMotion>(mesh, first, second, duration, true);
+                topology_regularized = true;
+                ++result.topology_regularized_epochs;
             }
             fields.velocity_z.assign(motion->velocity_z().begin(), motion->velocity_z().end());
         }
@@ -903,7 +906,8 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
                           << result.accepted_steps - steps_before << ','
                           << result.nonlinear_iterations - nonlinear_before << ','
                           << result.linear_iterations - linear_before << ',' << old_cell_count
-                          << ',' << old_cell_count << ',' << epoch_seconds << '\n';
+                          << ',' << old_cell_count << ',' << topology_regularized << ','
+                          << epoch_seconds << '\n';
             break;
         }
 
@@ -951,7 +955,8 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
                       << result.accepted_steps - steps_before << ','
                       << result.nonlinear_iterations - nonlinear_before << ','
                       << result.linear_iterations - linear_before << ',' << old_cell_count << ','
-                      << mesh.cells().size() << ',' << epoch_seconds << '\n';
+                      << mesh.cells().size() << ',' << topology_regularized << ',' << epoch_seconds
+                      << '\n';
     }
 
     if (options.comparison_points) {
@@ -975,14 +980,15 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
     std::ofstream summary(output_directory / "summary.csv");
     summary << "configurations,accepted_steps,nonlinear_iterations,"
                "maximum_nonlinear_iterations_per_step,linear_iterations,final_age_ma,"
+               "topology_regularized_epochs,"
                "global_energy_balance,cells_min,cells_max,"
                "cell_diameter_max,wall_seconds,condition_estimate_max,output_bytes\n"
             << result.configurations << ',' << result.accepted_steps << ','
             << result.nonlinear_iterations << ',' << result.maximum_nonlinear_iterations_per_step
             << ',' << result.linear_iterations << ',' << result.final_age_ma << ','
-            << result.global_energy_balance << ',' << result.minimum_cells << ','
-            << result.maximum_cells << ',' << result.maximum_cell_diameter << ','
-            << result.wall_seconds << ',' << result.maximum_condition_estimate << ','
-            << output_bytes << '\n';
+            << result.topology_regularized_epochs << ',' << result.global_energy_balance << ','
+            << result.minimum_cells << ',' << result.maximum_cells << ','
+            << result.maximum_cell_diameter << ',' << result.wall_seconds << ','
+            << result.maximum_condition_estimate << ',' << output_bytes << '\n';
     return result;
 }

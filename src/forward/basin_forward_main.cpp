@@ -80,6 +80,7 @@ int main(const int argc, const char* const argv[]) {
                   << " nonlinear_iterations_per_step_max="
                   << result.maximum_nonlinear_iterations_per_step
                   << " linear_iterations=" << result.linear_iterations
+                  << " topology_regularized_epochs=" << result.topology_regularized_epochs
                   << " configurations=" << result.configurations
                   << " final_age_ma=" << result.final_age_ma
                   << " global_energy_balance=" << result.global_energy_balance
