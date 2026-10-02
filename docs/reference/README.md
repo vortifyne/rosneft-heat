@@ -1,19 +1,17 @@
 # Справочные материалы
 
-Раздел содержит документы по архитектуре, математической модели, численным методам и форматам данных.
+Раздел содержит действующие соглашения по архитектуре, физической модели и численным методам.
 
-## Документы
-
-- [architecture-overview.md](architecture-overview.md) — верхнеуровневая архитектура вычислительных компонентов.
-- [fvm-nonorthogonal-correction.md](fvm-nonorthogonal-correction.md) — дискретизация теплопроводности методом конечных объёмов и неортогональная поправка.
-- [thermophysical-properties.md](thermophysical-properties.md) — температурные зависимости и эффективные теплофизические свойства.
-- [fixed-mesh-epoch.md](fixed-mesh-epoch.md) — расчёт эпохи на неподвижной сетке.
-- [moving-mesh-epoch.md](moving-mesh-epoch.md) — движение материала и сетки внутри эпохи.
-- [epoch-transition.md](epoch-transition.md) — перестроение сетки и перенос состояния.
-- [global-energy-balance.md](global-energy-balance.md) — единый баланс энергии всей расчётной области.
-- [manufactured-heat-solution.md](manufactured-heat-solution.md) — проверка пространственного и временного порядков на точном решении.
-- [full-history.md](full-history.md) — общий цикл конфигураций, движение сетки и полный временной ряд.
-- [easy-ro.md](easy-ro.md) — вычисление зрелости витринита EASY%Ro.
-- [easy-ro-stoichiometric-factors.md](easy-ro-stoichiometric-factors.md) — смысл коэффициентов реакций и исправленная формула EASY%Ro.
-- [problem-statement/](problem-statement/README.md) — исходная постановка задачи.
-- [drafts/](drafts/README.md) — черновые справочные заметки.
+- [Архитектура программы](architecture-overview.md) — разделение кода и направление
+  зависимостей.
+- [Полный прямой расчёт](basin-forward-model.md) — сетка, движение внутри эпохи и переход между
+  конфигурациями.
+- [Метод конечных объёмов](fvm-nonorthogonal-correction.md) — потоки и неортогональная поправка.
+- [Теплофизические свойства](thermophysical-properties.md) — температурные зависимости и
+  эффективные коэффициенты.
+- [EASY%Ro](easy-ro.md) — накопление термической истории и отражательная способность витринита.
+- [Глобальный баланс энергии](global-energy-balance.md) — единый показатель сохранения энергии.
+- [Проверка прямого решателя](verification.md) — автоматические и численные проверки.
+- [Исходная постановка](problem-statement/README.md) — материалы организаторов.
+- [Архив проектных материалов](drafts/README.md) — ранние проекты, не описывающие текущее
+  состояние программы.
