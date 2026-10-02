@@ -29,6 +29,10 @@ int main(const int argc, const char* const argv[]) {
                      "  --thin-layer-cell-fraction <value>\n"
                      "  --max-configurations <count>\n"
                      "  --comparison-points <csv>\n"
+                     "  --quad-dominant\n"
+                     "  --layered-mesh\n"
+                     "  --triangular-mesh\n"
+                     "  --estimate-condition\n"
                      "  --fixed-mesh\n";
         return EXIT_FAILURE;
     }
@@ -55,6 +59,17 @@ int main(const int argc, const char* const argv[]) {
                 options.comparison_points = std::string(require_value(argc, argv, index, argument));
             } else if (argument == "--fixed-mesh") {
                 options.fixed_mesh = true;
+            } else if (argument == "--quad-dominant") {
+                options.quad_dominant = true;
+                options.layered_mesh = false;
+            } else if (argument == "--layered-mesh") {
+                options.layered_mesh = true;
+                options.quad_dominant = false;
+            } else if (argument == "--triangular-mesh") {
+                options.layered_mesh = false;
+                options.quad_dominant = false;
+            } else if (argument == "--estimate-condition") {
+                options.estimate_condition = true;
             } else {
                 throw std::invalid_argument("Unknown option: " + std::string(argument));
             }
@@ -65,9 +80,10 @@ int main(const int argc, const char* const argv[]) {
                   << " linear_iterations=" << result.linear_iterations
                   << " configurations=" << result.configurations
                   << " final_age_ma=" << result.final_age_ma
-                  << " transfer_energy_error=" << result.transfer_energy_error
+                  << " global_energy_balance=" << result.global_energy_balance
                   << " cells_min=" << result.minimum_cells << " cells_max=" << result.maximum_cells
                   << " cell_diameter_max=" << result.maximum_cell_diameter
+                  << " condition_estimate_max=" << result.maximum_condition_estimate
                   << " wall_seconds=" << result.wall_seconds << '\n';
     } catch (const std::exception& error) {
         std::cerr << "heat_forward: " << error.what() << '\n';

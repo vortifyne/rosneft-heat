@@ -3,10 +3,13 @@
 #include "linear/sparse_matrix.hpp"
 #include "linear/vector.hpp"
 
+#include <optional>
+
 struct LinearSolveRequest {
     double relative_tolerance;
     double absolute_tolerance;
     int max_iterations;
+    bool estimate_condition = false;
 };
 
 enum class LinearSolveStatus {
@@ -22,6 +25,7 @@ struct [[nodiscard]] LinearSolveResult {
     LinearSolveStatus status;
     int iterations;
     double final_residual_norm;
+    std::optional<double> reciprocal_condition_estimate;
 };
 
 enum class LinearSolverType {

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 2 || $# -gt 10 ]]; then
-    echo "Usage: tools/run_forward.sh <data-dir> <output-dir> [cell-size] [dt-ma] [states-per-epoch] [heat-forward] [max-configurations] [comparison-points] [thin-layer-cell-fraction] [boundary-step]" >&2
+if [[ $# -lt 2 || $# -gt 12 ]]; then
+    echo "Usage: tools/run_forward.sh <data-dir> <output-dir> [cell-size] [dt-ma] [states-per-epoch] [heat-forward] [max-configurations] [comparison-points] [thin-layer-cell-fraction] [boundary-step] [mesh-kind] [estimate-condition]" >&2
     exit 1
 fi
 
@@ -16,6 +16,8 @@ max_configurations=${7:-}
 comparison_points=${8:-}
 thin_layer_cell_fraction=${9:-}
 boundary_step=${10:-$cell_size}
+mesh_kind=${11:-layered}
+estimate_condition=${12:-no}
 input_dir="$output_dir/input"
 
 prepare_arguments=("$data_dir" "$input_dir" --boundary-step "$boundary_step")
@@ -29,6 +31,22 @@ if [[ -n "$comparison_points" ]]; then
 fi
 if [[ -n "$thin_layer_cell_fraction" ]]; then
     solver_arguments+=(--thin-layer-cell-fraction "$thin_layer_cell_fraction")
+fi
+if [[ "$mesh_kind" == "layered" ]]; then
+    solver_arguments+=(--layered-mesh)
+elif [[ "$mesh_kind" == "quad-dominant" ]]; then
+    solver_arguments+=(--quad-dominant)
+elif [[ "$mesh_kind" == "triangular" ]]; then
+    solver_arguments+=(--triangular-mesh)
+else
+    echo "Unknown mesh kind: $mesh_kind" >&2
+    exit 1
+fi
+if [[ "$estimate_condition" == "yes" ]]; then
+    solver_arguments+=(--estimate-condition)
+elif [[ "$estimate_condition" != "no" ]]; then
+    echo "Unknown estimate-condition value: $estimate_condition" >&2
+    exit 1
 fi
 
 UV_CACHE_DIR=${UV_CACHE_DIR:-/tmp/rosneft-heat-uv-cache} \

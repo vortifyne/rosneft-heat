@@ -2,6 +2,7 @@
 
 #include "discretization/heat_system.hpp"
 #include "forward/basin_input.hpp"
+#include "forward/layered_mesh.hpp"
 #include "forward/mesh_transfer.hpp"
 #include "forward/vtu_output.hpp"
 #include "physics/easy_ro.hpp"
@@ -29,6 +30,8 @@ namespace {
 
 constexpr double kSecondsPerYear = 365.25 * 24.0 * 3600.0;
 constexpr double kSecondsPerMa = 1.0e6 * kSecondsPerYear;
+constexpr double kMinimumTopologyThickness = 0.5;
+constexpr double kMinimumTopologyThicknessFraction = 0.001;
 constexpr FluidThermophysicalProperties kFluid{
     .thermal_conductivity = 0.7,
     .density = 1040.0,
@@ -53,25 +56,38 @@ struct CellFields {
 };
 
 Mesh2D make_mesh(const BasinConfiguration& configuration, const double cell_size,
-                 const double thin_layer_cell_fraction) {
+                 const double thin_layer_cell_fraction, const bool quad_dominant,
+                 const int smoothing_iterations = 2) {
     return Mesh2D::generate(
         configuration.regions,
         {.cell_size = [cell_size](Point2D) { return cell_size; },
          .region_cell_size =
              [&configuration, cell_size, thin_layer_cell_fraction](const int layer_id,
                                                                    const Point2D point) {
+                 const auto& layer = configuration.layer(layer_id);
                  if (!(thin_layer_cell_fraction > 0.0)) {
                      return cell_size;
                  }
-                 const auto& layer = configuration.layer(layer_id);
                  const double thickness =
                      std::abs(layer.bottom_at(point.x) - layer.top_at(point.x));
                  return std::min(cell_size,
                                  std::max(0.1 * cell_size, thin_layer_cell_fraction * thickness));
              },
-         .smoothing_iterations = 2,
-         .make_quadrilateral = false,
+         .smoothing_iterations = smoothing_iterations,
+         .make_quadrilateral = quad_dominant,
          .diagnostic_vtu = std::nullopt});
+}
+
+Mesh2D make_preferred_mesh(const BasinConfiguration& configuration, const double cell_size,
+                           const double thin_layer_cell_fraction, const bool quad_dominant) {
+    if (!quad_dominant) {
+        return make_mesh(configuration, cell_size, thin_layer_cell_fraction, false);
+    }
+    try {
+        return make_mesh(configuration, cell_size, thin_layer_cell_fraction, true);
+    } catch (const std::exception&) {
+        return make_mesh(configuration, cell_size, thin_layer_cell_fraction, false);
+    }
 }
 
 CellFields make_cell_fields(const Mesh2D& mesh, const BasinConfiguration& configuration,
@@ -116,15 +132,51 @@ void update_properties(const std::span<const double> temperature, CellFields& fi
 class MaterialMotion {
 public:
     MaterialMotion(Mesh2D& mesh, const BasinConfiguration& first, const BasinConfiguration& second,
-                   const double duration)
+                   const double duration, const bool preserve_topology = false)
         : mesh_(mesh), initial_(mesh.vertex_coordinates()), final_(initial_),
           porosity_first_(mesh.cells().size()), porosity_second_(mesh.cells().size()),
           velocity_z_(mesh.cells().size()) {
-        std::vector<Point2D> global_final = initial_;
-        const auto& first_top = first.layers.front();
-        const auto& first_bottom = first.layers.back();
-        const auto& second_top = second.layer(first_top.id);
-        const auto& second_bottom = second.layer(first_bottom.id);
+        const auto target_interval = [&first, &second, preserve_topology](const int layer_id,
+                                                                          const double x) {
+            const auto& requested = second.layer(layer_id);
+            if (!preserve_topology) {
+                return std::pair{requested.top_at(x), requested.bottom_at(x)};
+            }
+            const auto& old_requested = first.layer(layer_id);
+            if (old_requested.bottom_at(x) - old_requested.top_at(x) <= 1.0e-10) {
+                return std::pair{requested.top_at(x), requested.bottom_at(x)};
+            }
+
+            bool found_first_material = false;
+            double boundary = 0.0;
+            for (const BasinLayerProfile& old_layer : first.layers) {
+                if (x < old_layer.x.front() || x > old_layer.x.back()) {
+                    continue;
+                }
+                const double old_thickness = old_layer.bottom_at(x) - old_layer.top_at(x);
+                if (!(old_thickness > 1.0e-10)) {
+                    continue;
+                }
+                const auto& new_layer = second.layer(old_layer.id);
+                if (!found_first_material) {
+                    boundary = new_layer.top_at(x);
+                    found_first_material = true;
+                }
+                const double new_thickness = new_layer.bottom_at(x) - new_layer.top_at(x);
+                const double retained_thickness =
+                    new_thickness > 1.0e-10
+                        ? new_thickness
+                        : std::min(old_thickness,
+                                   std::max(kMinimumTopologyThickness,
+                                            kMinimumTopologyThicknessFraction * old_thickness));
+                const double top = boundary;
+                boundary += retained_thickness;
+                if (old_layer.id == layer_id) {
+                    return std::pair{top, boundary};
+                }
+            }
+            throw std::runtime_error("Cannot map layer while preserving mesh topology");
+        };
         for (const auto& vertex : mesh.native().vertices()) {
             if (vertex->facets().empty()) {
                 throw std::runtime_error("Mesh vertex has no material cell");
@@ -138,27 +190,20 @@ public:
                     continue;
                 }
                 const auto& layer_first = first.layer(facet->color());
-                const auto& layer_second = second.layer(facet->color());
                 const double top = layer_first.top_at(x);
                 const double bottom = layer_first.bottom_at(x);
                 const double thickness = bottom - top;
                 const double eta = std::abs(thickness) > 1.0e-12
                                        ? std::clamp((initial_[index].z - top) / thickness, 0.0, 1.0)
                                        : 0.5;
-                final_z +=
-                    ((1.0 - eta) * layer_second.top_at(x)) + (eta * layer_second.bottom_at(x));
+                const auto [target_top, target_bottom] = target_interval(facet->color(), x);
+                final_z += ((1.0 - eta) * target_top) + (eta * target_bottom);
             }
             final_[index].z = final_z / static_cast<double>(adjacent_layers.size());
-
-            const double global_top = first_top.top_at(x);
-            const double global_bottom = first_bottom.bottom_at(x);
-            const double global_eta = std::clamp(
-                (initial_[index].z - global_top) / (global_bottom - global_top), 0.0, 1.0);
-            global_final[index].z = ((1.0 - global_eta) * second_top.top_at(x)) +
-                                    (global_eta * second_bottom.bottom_at(x));
         }
 
-        const auto has_positive_cells = [&mesh](const std::span<const Point2D> coordinates) {
+        const auto first_non_positive_cell =
+            [&mesh](const std::span<const Point2D> coordinates) -> std::optional<std::size_t> {
             for (const TQMesh::Facet* cell : mesh.cells()) {
                 double twice_area = 0.0;
                 for (std::size_t vertex = 0; vertex < cell->n_vertices(); ++vertex) {
@@ -168,39 +213,23 @@ public:
                     twice_area += (current.x * next.z) - (next.x * current.z);
                 }
                 if (!(twice_area > 0.0) || !std::isfinite(twice_area)) {
-                    return false;
+                    return static_cast<std::size_t>(cell->index());
                 }
             }
-            return true;
+            return std::nullopt;
         };
-        if (!has_positive_cells(final_)) {
-            std::vector<Point2D> candidate = final_;
-            bool found = false;
-            for (int step = 1; step <= 20 && !found; ++step) {
-                const double blend = 0.05 * static_cast<double>(step);
-                for (std::size_t index = 0; index < candidate.size(); ++index) {
-                    candidate[index].z =
-                        ((1.0 - blend) * final_[index].z) + (blend * global_final[index].z);
-                }
-                if (has_positive_cells(candidate)) {
-                    final_ = candidate;
-                    found = true;
-                }
+        if (const auto cell_index = first_non_positive_cell(final_)) {
+            const TQMesh::Facet* cell = mesh.cells()[*cell_index];
+            std::ostringstream message;
+            message << (preserve_topology ? "Topology-preserving" : "Exact")
+                    << " material motion produces a non-positive cell " << *cell_index
+                    << " in layer " << cell->color() << ":";
+            for (std::size_t vertex = 0; vertex < cell->n_vertices(); ++vertex) {
+                const std::size_t index = cell->vertex(vertex).index();
+                message << " (" << initial_[index].x << ',' << initial_[index].z << " -> "
+                        << final_[index].x << ',' << final_[index].z << ')';
             }
-            for (int step = 1; step <= 20 && !found; ++step) {
-                const double damping = 0.05 * static_cast<double>(step);
-                for (std::size_t index = 0; index < candidate.size(); ++index) {
-                    candidate[index].z =
-                        ((1.0 - damping) * global_final[index].z) + (damping * initial_[index].z);
-                }
-                if (has_positive_cells(candidate)) {
-                    final_ = candidate;
-                    found = true;
-                }
-            }
-            if (!found) {
-                throw std::runtime_error("Cannot construct a positive moving mesh");
-            }
+            throw std::runtime_error(message.str());
         }
         for (const TQMesh::Facet* cell : mesh.cells()) {
             const std::size_t index = static_cast<std::size_t>(cell->index());
@@ -318,6 +347,8 @@ struct OutputState {
     std::ofstream statistics;
     std::ofstream epochs;
     std::ofstream transitions;
+    std::ofstream conditioning;
+    std::ofstream energy_balance;
     std::vector<PvdEntry> series;
     int index = 0;
 };
@@ -373,10 +404,24 @@ double cell_enthalpy(const double temperature, const double porosity,
     return result * width;
 }
 
-double transfer_energy_error(const Mesh2D& old_mesh, const Vector& old_temperature,
-                             const CellFields& old_fields, const Mesh2D& new_mesh,
-                             const Vector& new_temperature, const CellFields& new_fields,
-                             const CellTransferMap& transfer_map) {
+struct TransferEnergy {
+    double imbalance = 0.0;
+};
+
+double total_energy(const Mesh2D& mesh, const Vector& temperature, const CellFields& fields) {
+    double result = 0.0;
+    for (const TQMesh::Facet* cell : mesh.cells()) {
+        const std::size_t index = static_cast<std::size_t>(cell->index());
+        result += cell->area() * cell_enthalpy(temperature[cell->index()], fields.porosity[index],
+                                               *fields.lithotypes[index]);
+    }
+    return result;
+}
+
+TransferEnergy transfer_energy(const Mesh2D& old_mesh, const Vector& old_temperature,
+                               const CellFields& old_fields, const Mesh2D& new_mesh,
+                               const Vector& new_temperature, const CellFields& new_fields,
+                               const CellTransferMap& transfer_map) {
     double before = 0.0;
     for (const TQMesh::Facet* cell : old_mesh.cells()) {
         const std::size_t index = static_cast<std::size_t>(cell->index());
@@ -394,7 +439,139 @@ double transfer_energy_error(const Mesh2D& old_mesh, const Vector& old_temperatu
             cell->area() * cell_enthalpy(new_temperature[cell->index()], new_fields.porosity[index],
                                          *new_fields.lithotypes[index]);
     }
-    return std::abs(after - before) / std::max(std::abs(before), 1.0);
+    const double imbalance = after - before;
+    return {.imbalance = imbalance};
+}
+
+struct TransferredState {
+    Mesh2D mesh;
+    CellFields fields;
+    Vector temperature;
+    std::vector<double> maturity;
+    double energy_imbalance = 0.0;
+};
+
+CellTransferMap make_material_transfer_map(const Mesh2D& source, const Mesh2D& target,
+                                           const BasinConfiguration& source_configuration,
+                                           const BasinConfiguration& target_configuration) {
+    CellTransferMap result;
+    const CellIndexLocator locate = make_cell_index_locator(source);
+    result.target_points.resize(target.cells().size());
+    result.donor_cells.resize(target.cells().size());
+    for (const TQMesh::Facet* cell : target.cells()) {
+        const std::size_t index = static_cast<std::size_t>(cell->index());
+        const auto& target_layer = target_configuration.layer(cell->color());
+        const auto& source_layer = source_configuration.layer(cell->color());
+        const double x = cell->xy().x;
+        const double target_top = target_layer.top_at(x);
+        const double target_bottom = target_layer.bottom_at(x);
+        const double eta =
+            std::clamp((cell->xy().y - target_top) / (target_bottom - target_top), 0.0, 1.0);
+        result.target_points[index] = {x, ((1.0 - eta) * source_layer.top_at(x)) +
+                                              (eta * source_layer.bottom_at(x))};
+        result.donor_cells[index] = locate(result.target_points[index]);
+    }
+    return result;
+}
+
+TransferredState transfer_state(const Mesh2D& old_mesh, const Vector& old_temperature,
+                                const CellFields& old_fields,
+                                const std::span<const double> old_maturity, Mesh2D new_mesh,
+                                const BasinConfiguration& old_configuration,
+                                const BasinConfiguration& new_configuration,
+                                const BasinInput& input, const EasyRoModel& easy_ro,
+                                const double cell_size, const bool initialize_new_material,
+                                const bool follow_material = false) {
+    CellFields new_fields = make_cell_fields(new_mesh, new_configuration, input);
+    CellTransferMap transfer_map =
+        follow_material
+            ? make_material_transfer_map(old_mesh, new_mesh, old_configuration, new_configuration)
+            : make_cell_transfer_map(old_mesh, new_mesh);
+    for (const TQMesh::Facet* cell : new_mesh.cells()) {
+        const std::size_t index = static_cast<std::size_t>(cell->index());
+        if (transfer_map.donor_cells[index]) {
+            continue;
+        }
+        const auto& layer = new_configuration.layer(cell->color());
+        const bool existed = std::any_of(
+            old_configuration.layers.begin(), old_configuration.layers.end(),
+            [&layer](const BasinLayerProfile& old_layer) { return old_layer.id == layer.id; });
+        if (!existed) {
+            if (!initialize_new_material) {
+                throw std::runtime_error("Remeshing created material outside the old domain");
+            }
+            continue;
+        }
+        const Point2D target_point = transfer_map.target_points[index];
+        const double target_eta = new_fields.material_eta[index];
+        double nearest_distance = std::numeric_limits<double>::max();
+        std::optional<std::size_t> nearest;
+        for (const TQMesh::Facet* source_cell : old_mesh.cells()) {
+            const std::size_t source_index = static_cast<std::size_t>(source_cell->index());
+            if (static_cast<int>(old_fields.layer_id[source_index]) != layer.id) {
+                continue;
+            }
+            const double horizontal = (source_cell->xy().x - target_point.x) / cell_size;
+            const double vertical = old_fields.material_eta[source_index] - target_eta;
+            const double distance = (horizontal * horizontal) + (vertical * vertical);
+            if (distance < nearest_distance) {
+                nearest_distance = distance;
+                nearest = source_index;
+            }
+        }
+        if (!nearest) {
+            throw std::runtime_error("Cannot locate existing material during state transfer");
+        }
+        transfer_map.donor_cells[index] = nearest;
+        transfer_map.target_points[index] = {old_mesh.cells()[*nearest]->xy().x,
+                                             old_mesh.cells()[*nearest]->xy().y};
+    }
+
+    const CellFieldSampler temperature_sampler =
+        make_cell_field_sampler(old_mesh, values(old_temperature));
+    const auto initialize_temperature = [&](const std::size_t index, const Point2D point) {
+        const auto& layer = new_configuration.layer(new_mesh.cells()[index]->color());
+        const double top = layer.top_at(point.x);
+        const double bottom = layer.bottom_at(point.x);
+        const double eta = std::clamp((point.z - top) / (bottom - top), 0.0, 1.0);
+        const double surface = new_configuration.surface_temperature.at(point.x);
+        std::optional<double> contact;
+        for (int attempt = 0; attempt <= 10 && !contact; ++attempt) {
+            const double inward_offset = static_cast<double>(attempt) * 0.1 * cell_size;
+            contact = temperature_sampler({point.x, bottom + inward_offset});
+        }
+        if (!contact) {
+            throw std::runtime_error("Cannot initialize new material at its lower contact");
+        }
+        return ((1.0 - eta) * surface) + (eta * *contact);
+    };
+    const std::vector<double> transferred_temperature = transfer_cell_field(
+        old_mesh, values(old_temperature), transfer_map, initialize_temperature);
+    Vector new_temperature(static_cast<Vector::Index>(new_mesh.cells().size()));
+    for (std::size_t index = 0; index < transferred_temperature.size(); ++index) {
+        new_temperature[static_cast<Vector::Index>(index)] = transferred_temperature[index];
+    }
+
+    std::vector<double> new_maturity = easy_ro.initial_state(new_mesh.cells().size());
+    for (std::size_t reaction = 0; reaction < easy_ro.reaction_count(); ++reaction) {
+        std::vector<double> old_reaction(old_mesh.cells().size());
+        for (std::size_t cell = 0; cell < old_reaction.size(); ++cell) {
+            old_reaction[cell] = old_maturity[(cell * easy_ro.reaction_count()) + reaction];
+        }
+        const std::vector<double> transferred = transfer_cell_field(
+            old_mesh, old_reaction, transfer_map, [](std::size_t, Point2D) { return 0.0; });
+        for (std::size_t cell = 0; cell < transferred.size(); ++cell) {
+            new_maturity[(cell * easy_ro.reaction_count()) + reaction] =
+                std::max(0.0, transferred[cell]);
+        }
+    }
+    const TransferEnergy energy = transfer_energy(old_mesh, old_temperature, old_fields, new_mesh,
+                                                  new_temperature, new_fields, transfer_map);
+    return {.mesh = std::move(new_mesh),
+            .fields = std::move(new_fields),
+            .temperature = std::move(new_temperature),
+            .maturity = std::move(new_maturity),
+            .energy_imbalance = energy.imbalance};
 }
 
 NonlinearSolveRequest nonlinear_request() {
@@ -410,8 +587,11 @@ NonlinearSolveRequest nonlinear_request() {
     };
 }
 
-LinearSolveRequest linear_request() {
-    return {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1};
+LinearSolveRequest linear_request(const bool estimate_condition) {
+    return {.relative_tolerance = 1.0e-12,
+            .absolute_tolerance = 1.0e-12,
+            .max_iterations = 1,
+            .estimate_condition = estimate_condition};
 }
 
 void accumulate_result(BasinForwardResult& total, const TimeIntegrationResult& step) {
@@ -437,6 +617,14 @@ double maximum_cell_diameter(const Mesh2D& mesh) {
                 result = std::max(result, difference.norm());
             }
         }
+    }
+    return result;
+}
+
+double minimum_cell_area(const Mesh2D& mesh) {
+    double result = std::numeric_limits<double>::infinity();
+    for (const TQMesh::Facet* cell : mesh.cells()) {
+        result = std::min(result, cell->area());
     }
     return result;
 }
@@ -553,17 +741,27 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
                        .statistics = std::ofstream(output_directory / "statistics.csv"),
                        .epochs = std::ofstream(output_directory / "epochs.csv"),
                        .transitions = std::ofstream(output_directory / "transitions.csv"),
+                       .conditioning = {},
+                       .energy_balance = std::ofstream(output_directory / "energy-balance.csv"),
                        .series = {},
                        .index = 0};
-    if (!output.statistics || !output.epochs || !output.transitions) {
+    if (!output.statistics || !output.epochs || !output.transitions || !output.energy_balance) {
         throw std::runtime_error("Cannot open forward-solver tabular output");
     }
     output.statistics << "elapsed_ma,age_ma,kind,cells,nonlinear_iterations,cell_area_min,"
                          "temperature_min,"
                          "temperature_max,Ro_min,Ro_max\n";
     output.epochs << "start_age_ma,end_age_ma,steps,nonlinear_iterations,linear_iterations,"
-                     "start_cells,end_cells,energy_relative_error,wall_seconds\n";
-    output.transitions << "age_ma,energy_relative_error,old_cells,new_cells\n";
+                     "start_cells,end_cells,wall_seconds\n";
+    output.transitions << "age_ma,old_cells,new_cells\n";
+    output.energy_balance << "elapsed_ma,age_ma,kind,relative_error\n";
+    if (options.estimate_condition) {
+        output.conditioning.open(output_directory / "conditioning.csv");
+        if (!output.conditioning) {
+            throw std::runtime_error("Cannot open condition-estimate output");
+        }
+        output.conditioning << "elapsed_ma,age_ma,cells,cell_area_min,condition_estimate\n";
+    }
 
     const EasyRoInput& easy_input = input.easy_ro();
     const EasyRoModel easy_ro({.preexponential = easy_input.preexponential,
@@ -571,8 +769,21 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
                                .activation_energies = easy_input.activation_energies,
                                .weights = easy_input.weights});
 
+    const std::span<const BasinConfiguration> used_configurations =
+        configurations.first(configuration_count);
+    std::optional<LayeredMeshLayout> layered_layout;
+    std::vector<LayeredCellId> layered_cell_ids;
     const BasinConfiguration& oldest = configurations.front();
-    Mesh2D mesh = make_mesh(oldest, options.cell_size, options.thin_layer_cell_fraction);
+    Mesh2D mesh = [&]() {
+        if (options.layered_mesh) {
+            layered_layout = make_layered_mesh_layout(used_configurations, options.cell_size);
+            LayeredMesh layered = make_layered_mesh(oldest, *layered_layout);
+            layered_cell_ids = std::move(layered.cell_ids);
+            return std::move(layered.mesh);
+        }
+        return make_preferred_mesh(oldest, options.cell_size, options.thin_layer_cell_fraction,
+                                   options.quad_dominant);
+    }();
     CellFields fields = make_cell_fields(mesh, oldest, input);
     Vector temperature = initial_temperature(mesh, oldest, fields);
     update_properties(values(temperature), fields);
@@ -584,6 +795,8 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
     save_state(output, mesh, temperature, fields, easy_ro, maturity, 0.0, oldest.age_ma, "initial",
                0);
     double elapsed = 0.0;
+    double accumulated_energy_imbalance = 0.0;
+    double accumulated_basal_energy = 0.0;
     for (std::size_t epoch = 0; epoch + 1 < configuration_count; ++epoch) {
         const auto epoch_wall_start = std::chrono::steady_clock::now();
         const BasinConfiguration& first = configurations[epoch];
@@ -595,28 +808,37 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
         const int linear_before = result.linear_iterations;
         const std::size_t old_cell_count = mesh.cells().size();
 
-        MaterialMotion motion(mesh, first, second, duration);
-        if (!options.fixed_mesh) {
-            fields.velocity_z.assign(motion.velocity_z().begin(), motion.velocity_z().end());
-        }
-        auto system =
-            make_system(mesh, fields, boundary_conditions(first, second, elapsed, duration));
-        TimeIntegrator integrator;
-        integrator.set_initial_solution(elapsed, temperature);
-        integrator.set_timestep(timestep);
         int saved_states = 0;
-        while (integrator.current_snapshot().time < epoch_end) {
-            const double old_time = integrator.current_snapshot().time;
-            const Vector old_temperature = integrator.current_snapshot().solution;
+        std::unique_ptr<MaterialMotion> motion;
+        if (!options.fixed_mesh) {
+            try {
+                motion = std::make_unique<MaterialMotion>(mesh, first, second, duration);
+            } catch (const std::exception&) {
+                motion = std::make_unique<MaterialMotion>(mesh, first, second, duration, true);
+            }
+            fields.velocity_z.assign(motion->velocity_z().begin(), motion->velocity_z().end());
+        }
+        std::unique_ptr<HeatSystem> system =
+            make_system(mesh, fields, boundary_conditions(first, second, elapsed, duration));
+
+        double current_time = elapsed;
+        while (current_time < epoch_end) {
+            const double old_time = current_time;
             const double target = std::min(epoch_end, old_time + timestep);
+            Vector old_temperature = temperature;
+            const double energy_before = total_energy(mesh, old_temperature, fields);
             if (!options.fixed_mesh) {
                 const double fraction = (target - elapsed) / duration;
-                motion.set_position(fraction);
-                motion.set_porosity(fraction, fields.porosity);
+                motion->set_position(fraction);
+                motion->set_porosity(fraction, fields.porosity);
                 system->update_geometry(mesh);
             }
-            const TimeIntegrationResult step =
-                integrator.advance_to(*system, target, nonlinear_request(), linear_request());
+
+            TimeIntegrator integrator;
+            integrator.set_initial_solution(old_time, temperature);
+            integrator.set_timestep(target - old_time);
+            const TimeIntegrationResult step = integrator.advance_to(
+                *system, target, nonlinear_request(), linear_request(options.estimate_condition));
             try {
                 accumulate_result(result, step);
             } catch (const std::exception& error) {
@@ -627,8 +849,33 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
                     " Ma: " + error.what());
             }
             temperature = integrator.current_snapshot().solution;
+            const HeatEnergyRates rates = system->energy_rates(target, temperature);
+            const double energy_after = total_energy(mesh, temperature, fields);
+            const double step_duration = target - old_time;
+            accumulated_energy_imbalance +=
+                energy_after - energy_before +
+                (step_duration *
+                 (rates.surface_outflow - rates.basal_inflow - rates.heat_production));
+            accumulated_basal_energy += step_duration * rates.basal_inflow;
+            result.global_energy_balance = std::abs(accumulated_energy_imbalance) /
+                                           std::max(std::abs(accumulated_basal_energy), 1.0);
+            output.energy_balance << std::setprecision(17) << target / kSecondsPerMa << ','
+                                  << first.age_ma - ((target - elapsed) / kSecondsPerMa) << ",step,"
+                                  << result.global_energy_balance << '\n';
+            if (step.minimum_reciprocal_condition_estimate) {
+                const double reciprocal = *step.minimum_reciprocal_condition_estimate;
+                const double condition =
+                    reciprocal > 0.0 ? 1.0 / reciprocal : std::numeric_limits<double>::infinity();
+                result.maximum_condition_estimate =
+                    std::max(result.maximum_condition_estimate, condition);
+                output.conditioning << std::setprecision(17) << target / kSecondsPerMa << ','
+                                    << first.age_ma - ((target - elapsed) / kSecondsPerMa) << ','
+                                    << mesh.cells().size() << ',' << minimum_cell_area(mesh) << ','
+                                    << condition << '\n';
+            }
             easy_ro.advance(values(old_temperature), values(temperature), target - old_time,
                             maturity);
+            current_time = target;
 
             const double fraction = (target - elapsed) / duration;
             const int expected_saved =
@@ -654,106 +901,42 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
                           << result.accepted_steps - steps_before << ','
                           << result.nonlinear_iterations - nonlinear_before << ','
                           << result.linear_iterations - linear_before << ',' << old_cell_count
-                          << ',' << old_cell_count << ",0," << epoch_seconds << '\n';
+                          << ',' << old_cell_count << ',' << epoch_seconds << '\n';
             break;
         }
 
         save_state(output, mesh, temperature, fields, easy_ro, maturity, elapsed / kSecondsPerMa,
                    second.age_ma, "before_transition", 0);
 
-        Mesh2D new_mesh = make_mesh(second, options.cell_size, options.thin_layer_cell_fraction);
-        CellFields new_fields = make_cell_fields(new_mesh, second, input);
-        CellTransferMap transfer_map = make_cell_transfer_map(mesh, new_mesh);
-        for (const TQMesh::Facet* cell : new_mesh.cells()) {
-            const std::size_t index = static_cast<std::size_t>(cell->index());
-            if (transfer_map.donor_cells[index]) {
-                continue;
+        std::vector<LayeredCellId> new_layered_cell_ids;
+        Mesh2D new_mesh = [&]() {
+            if (options.layered_mesh) {
+                LayeredMesh layered = make_layered_mesh(second, *layered_layout);
+                new_layered_cell_ids = std::move(layered.cell_ids);
+                return std::move(layered.mesh);
             }
-            const auto& layer = second.layer(cell->color());
-            const bool existed = std::any_of(
-                first.layers.begin(), first.layers.end(),
-                [&layer](const BasinLayerProfile& old_layer) { return old_layer.id == layer.id; });
-            if (!existed) {
-                continue;
-            }
-            const Point2D target_point = transfer_map.target_points[index];
-            const double target_eta = new_fields.material_eta[index];
-            double nearest_distance = std::numeric_limits<double>::max();
-            std::optional<std::size_t> nearest;
-            for (const TQMesh::Facet* source_cell : mesh.cells()) {
-                const std::size_t source_index = static_cast<std::size_t>(source_cell->index());
-                if (static_cast<int>(fields.layer_id[source_index]) != layer.id) {
-                    continue;
-                }
-                const double horizontal =
-                    (source_cell->xy().x - target_point.x) / options.cell_size;
-                const double vertical = fields.material_eta[source_index] - target_eta;
-                const double distance = (horizontal * horizontal) + (vertical * vertical);
-                if (distance < nearest_distance) {
-                    nearest_distance = distance;
-                    nearest = source_index;
-                }
-            }
-            if (!nearest) {
-                throw std::runtime_error(
-                    "Cannot locate existing material: layer=" + std::to_string(layer.id) + " x=" +
-                    std::to_string(target_point.x) + " z=" + std::to_string(target_point.z));
-            }
-            transfer_map.donor_cells[index] = nearest;
-            transfer_map.target_points[index] = {mesh.cells()[*nearest]->xy().x,
-                                                 mesh.cells()[*nearest]->xy().y};
-        }
-        const CellFieldSampler temperature_sampler =
-            make_cell_field_sampler(mesh, values(temperature));
-        const auto initialize_temperature = [&](const std::size_t index, const Point2D point) {
-            const auto& layer = second.layer(new_mesh.cells()[index]->color());
-            const double top = layer.top_at(point.x);
-            const double bottom = layer.bottom_at(point.x);
-            const double eta = std::clamp((point.z - top) / (bottom - top), 0.0, 1.0);
-            const double surface = second.surface_temperature.at(point.x);
-            std::optional<double> contact;
-            for (int attempt = 0; attempt <= 10 && !contact; ++attempt) {
-                const double inward_offset = static_cast<double>(attempt) * 0.1 * options.cell_size;
-                contact = temperature_sampler({point.x, bottom + inward_offset});
-            }
-            if (!contact) {
-                throw std::runtime_error(
-                    "Cannot initialize material at contact: layer=" + std::to_string(layer.id) +
-                    " x=" + std::to_string(point.x) + " z=" + std::to_string(point.z) +
-                    " bottom=" + std::to_string(bottom));
-            }
-            return ((1.0 - eta) * surface) + (eta * *contact);
-        };
-        const std::vector<double> transferred_temperature =
-            transfer_cell_field(mesh, values(temperature), transfer_map, initialize_temperature);
-        Vector new_temperature(static_cast<Vector::Index>(new_mesh.cells().size()));
-        for (std::size_t index = 0; index < transferred_temperature.size(); ++index) {
-            new_temperature[static_cast<Vector::Index>(index)] = transferred_temperature[index];
-        }
+            return make_preferred_mesh(second, options.cell_size, options.thin_layer_cell_fraction,
+                                       options.quad_dominant);
+        }();
+        TransferredState transferred =
+            transfer_state(mesh, temperature, fields, maturity, std::move(new_mesh), first, second,
+                           input, easy_ro, options.cell_size, true);
+        accumulated_energy_imbalance += transferred.energy_imbalance;
+        result.global_energy_balance = std::abs(accumulated_energy_imbalance) /
+                                       std::max(std::abs(accumulated_basal_energy), 1.0);
+        output.transitions << std::setprecision(17) << second.age_ma << ',' << mesh.cells().size()
+                           << ',' << transferred.mesh.cells().size() << '\n';
+        output.energy_balance << std::setprecision(17) << elapsed / kSecondsPerMa << ','
+                              << second.age_ma << ",transition," << result.global_energy_balance
+                              << '\n';
 
-        std::vector<double> new_maturity = easy_ro.initial_state(new_mesh.cells().size());
-        for (std::size_t reaction = 0; reaction < easy_ro.reaction_count(); ++reaction) {
-            std::vector<double> old_reaction(mesh.cells().size());
-            for (std::size_t cell = 0; cell < old_reaction.size(); ++cell) {
-                old_reaction[cell] = maturity[(cell * easy_ro.reaction_count()) + reaction];
-            }
-            const std::vector<double> transferred = transfer_cell_field(
-                mesh, old_reaction, transfer_map, [](std::size_t, Point2D) { return 0.0; });
-            for (std::size_t cell = 0; cell < transferred.size(); ++cell) {
-                new_maturity[(cell * easy_ro.reaction_count()) + reaction] =
-                    std::max(0.0, transferred[cell]);
-            }
+        mesh = std::move(transferred.mesh);
+        if (options.layered_mesh) {
+            layered_cell_ids = std::move(new_layered_cell_ids);
         }
-        const double energy_error = transfer_energy_error(
-            mesh, temperature, fields, new_mesh, new_temperature, new_fields, transfer_map);
-        result.transfer_energy_error = std::max(result.transfer_energy_error, energy_error);
-        output.transitions << std::setprecision(17) << second.age_ma << ',' << energy_error << ','
-                           << mesh.cells().size() << ',' << new_mesh.cells().size() << '\n';
-
-        mesh = std::move(new_mesh);
-        fields = std::move(new_fields);
-        temperature = std::move(new_temperature);
-        maturity = std::move(new_maturity);
+        fields = std::move(transferred.fields);
+        temperature = std::move(transferred.temperature);
+        maturity = std::move(transferred.maturity);
         update_properties(values(temperature), fields);
         update_mesh_statistics(result, mesh);
         save_state(output, mesh, temperature, fields, easy_ro, maturity, elapsed / kSecondsPerMa,
@@ -766,7 +949,7 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
                       << result.accepted_steps - steps_before << ','
                       << result.nonlinear_iterations - nonlinear_before << ','
                       << result.linear_iterations - linear_before << ',' << old_cell_count << ','
-                      << mesh.cells().size() << ',' << energy_error << ',' << epoch_seconds << '\n';
+                      << mesh.cells().size() << ',' << epoch_seconds << '\n';
     }
 
     if (options.comparison_points) {
@@ -782,16 +965,20 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
     output.statistics.flush();
     output.epochs.flush();
     output.transitions.flush();
+    output.energy_balance.flush();
+    if (output.conditioning) {
+        output.conditioning.flush();
+    }
     const std::uintmax_t output_bytes = directory_size(output_directory);
     std::ofstream summary(output_directory / "summary.csv");
     summary << "configurations,accepted_steps,nonlinear_iterations,linear_iterations,final_age_ma,"
-               "transfer_energy_error,cells_min,cells_max,cell_diameter_max,wall_seconds,"
-               "output_bytes\n"
+               "global_energy_balance,cells_min,cells_max,"
+               "cell_diameter_max,wall_seconds,condition_estimate_max,output_bytes\n"
             << result.configurations << ',' << result.accepted_steps << ','
             << result.nonlinear_iterations << ',' << result.linear_iterations << ','
-            << result.final_age_ma << ',' << result.transfer_energy_error << ','
+            << result.final_age_ma << ',' << result.global_energy_balance << ','
             << result.minimum_cells << ',' << result.maximum_cells << ','
-            << result.maximum_cell_diameter << ',' << result.wall_seconds << ',' << output_bytes
-            << '\n';
+            << result.maximum_cell_diameter << ',' << result.wall_seconds << ','
+            << result.maximum_condition_estimate << ',' << output_bytes << '\n';
     return result;
 }

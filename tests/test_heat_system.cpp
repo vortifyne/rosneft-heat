@@ -5,11 +5,13 @@
 #include <array>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <limits>
 #include <vector>
 
 namespace {
 
-Mesh2D make_rectangular_mesh() {
+Mesh2D make_rectangular_mesh(const double cell_size = 0.5,
+                             const bool refine_to_quadrilateral = true) {
     const Mesh2D::Region region = {
         .vertices = {{0.0, 0.0}, {4.0, 0.0}, {4.0, 2.0}, {0.0, 2.0}},
         .edge_kinds = {BoundaryKind::top, BoundaryKind::right, BoundaryKind::bottom,
@@ -17,10 +19,11 @@ Mesh2D make_rectangular_mesh() {
         .id = 1,
     };
     return Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
-                            {.cell_size = [](Point2D) { return 0.5; },
+                            {.cell_size = [cell_size](Point2D) { return cell_size; },
                              .region_cell_size = {},
                              .smoothing_iterations = 2,
                              .make_quadrilateral = true,
+                             .refine_to_quadrilateral = refine_to_quadrilateral,
                              .diagnostic_vtu = std::nullopt});
 }
 
@@ -53,6 +56,43 @@ HeatSystem make_system(const Mesh2D& mesh, const double conductivity = 2.0,
                       {.surface_temperature =
                            [surface_temperature](Point2D, double) { return surface_temperature; },
                        .basal_heat_flux = [basal_flux](Point2D, double) { return basal_flux; }});
+}
+
+double solve_linear_steady_error(const Mesh2D& mesh) {
+    constexpr double conductivity = 2.0;
+    constexpr double gradient = 4.0;
+    const HeatSystem system =
+        make_system(mesh, conductivity, 3.0, 0.0, 300.0, conductivity * gradient);
+    Vector temperature(system.size());
+    temperature.set_constant(300.0);
+    Vector derivative(system.size());
+    derivative.set_zero();
+    UmfpackLinearSolver solver;
+
+    for (int iteration = 0; iteration < 40; ++iteration) {
+        Vector residual;
+        system.assemble_residual(0.0, temperature, derivative, residual);
+        if (residual.infinity_norm() < 1.0e-8) {
+            break;
+        }
+        SparseMatrix matrix(system.size(), system.size(), SparseStorageOrder::csc);
+        system.assemble_matrix(NonlinearMethod::picard, 0.0, temperature, derivative, 0.0, matrix);
+        Vector correction;
+        const LinearSolveResult result = solver.solve(
+            matrix, -residual, correction,
+            {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1});
+        if (result.status != LinearSolveStatus::converged) {
+            return std::numeric_limits<double>::infinity();
+        }
+        temperature += correction;
+    }
+
+    double error = 0.0;
+    for (const TQMesh::Facet* cell : mesh.cells()) {
+        error = std::max(error,
+                         std::abs(temperature[cell->index()] - (300.0 + gradient * cell->xy().y)));
+    }
+    return error;
 }
 
 } // namespace
@@ -88,6 +128,25 @@ TEST(HeatSystem, ReproducesLinearVerticalTemperatureWithNonorthogonalCorrection)
     system.assemble_residual(0.0, temperature, derivative, residual);
 
     EXPECT_LT(residual.infinity_norm(), 1.0e-9);
+}
+
+TEST(HeatSystem, ReportsWholeDomainEnergyRates) {
+    constexpr double conductivity = 2.0;
+    constexpr double gradient = 4.0;
+    constexpr double heat_production = 3.0;
+    const Mesh2D mesh = make_rectangular_mesh();
+    const HeatSystem system =
+        make_system(mesh, conductivity, 3.0, heat_production, 300.0, conductivity * gradient);
+    Vector temperature(system.size());
+    for (const TQMesh::Facet* cell : mesh.cells()) {
+        temperature[cell->index()] = 300.0 + gradient * cell->xy().y;
+    }
+
+    const HeatEnergyRates rates = system.energy_rates(0.0, temperature);
+
+    EXPECT_NEAR(rates.surface_outflow, conductivity * gradient * 4.0, 1.0e-9);
+    EXPECT_NEAR(rates.basal_inflow, conductivity * gradient * 4.0, 1.0e-12);
+    EXPECT_NEAR(rates.heat_production, heat_production * 4.0 * 2.0, 1.0e-12);
 }
 
 TEST(HeatSystem, UsesConservativeHarmonicFluxAcrossMaterialInterface) {
@@ -175,6 +234,16 @@ TEST(HeatSystem, SolvesConstantCoefficientSteadyProblemWithUmfpack) {
     for (const TQMesh::Facet* cell : mesh.cells()) {
         EXPECT_NEAR(temperature[cell->index()], 300.0 + gradient * cell->xy().y, 1.0e-7);
     }
+}
+
+TEST(HeatSystem, QuadDominantMeshImprovesSteadyLinearSolutionWhenRefined) {
+    const Mesh2D coarse = make_rectangular_mesh(0.5, false);
+    const Mesh2D fine = make_rectangular_mesh(0.25, false);
+
+    const double coarse_error = solve_linear_steady_error(coarse);
+    const double fine_error = solve_linear_steady_error(fine);
+
+    EXPECT_LT(fine_error, coarse_error);
 }
 
 TEST(HeatSystem, AdvancesOneBdf1StepWithPicardMethod) {

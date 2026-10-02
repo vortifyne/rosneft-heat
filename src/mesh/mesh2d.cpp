@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -19,6 +20,7 @@
 struct Mesh2D::Storage {
     std::vector<std::unique_ptr<TQMesh::Domain>> domains;
     TQMesh::MeshGenerator generator;
+    std::unique_ptr<TQMesh::Mesh> owned_mesh;
     TQMesh::Mesh* mesh = nullptr;
     double expected_area = 0.0;
     std::vector<const TQMesh::Facet*> cells;
@@ -66,6 +68,10 @@ void validate_generation_input(std::span<const Mesh2D::Region> regions,
     }
     if (options.smoothing_iterations < 0) {
         throw std::invalid_argument("Mesh2D smoothing iteration count cannot be negative");
+    }
+    if (options.refine_to_quadrilateral && !options.make_quadrilateral) {
+        throw std::invalid_argument(
+            "Quadrilateral refinement requires triangle-to-quad modification");
     }
 
     for (const auto& region : regions) {
@@ -132,6 +138,42 @@ std::uint64_t edge_key(std::size_t first, std::size_t second) {
     return (static_cast<std::uint64_t>(first) << 32U) | static_cast<std::uint64_t>(second);
 }
 
+template <typename Storage> void populate_views(Storage& storage) {
+    MeshCleanup::assign_mesh_indices(*storage.mesh);
+    MeshCleanup::setup_facet_connectivity(*storage.mesh);
+
+    storage.cells.resize(storage.mesh->n_elements());
+    for (const auto& cell : storage.mesh->quads()) {
+        storage.cells.at(static_cast<std::size_t>(cell->index())) = cell.get();
+    }
+    for (const auto& cell : storage.mesh->triangles()) {
+        storage.cells.at(static_cast<std::size_t>(cell->index())) = cell.get();
+    }
+
+    storage.internal_edges.reserve(storage.mesh->n_interior_edges());
+    for (const auto& edge : storage.mesh->interior_edges()) {
+        storage.internal_edges.push_back(edge.get());
+    }
+    for (const auto& edge : storage.mesh->boundary_edges()) {
+        switch (boundary_kind_from_color(edge->color())) {
+        case BoundaryKind::top:
+            storage.top_edges.push_back(edge.get());
+            break;
+        case BoundaryKind::bottom:
+            storage.bottom_edges.push_back(edge.get());
+            break;
+        case BoundaryKind::left:
+            storage.left_edges.push_back(edge.get());
+            break;
+        case BoundaryKind::right:
+            storage.right_edges.push_back(edge.get());
+            break;
+        case BoundaryKind::interface:
+            throw std::runtime_error("An unmerged interface remains on the mesh boundary");
+        }
+    }
+}
+
 } // namespace
 
 Mesh2D Mesh2D::generate(std::span<const Region> regions, const GenerationOptions& options) {
@@ -178,7 +220,8 @@ Mesh2D Mesh2D::generate(std::span<const Region> regions, const GenerationOptions
         }
         if (options.make_quadrilateral) {
             storage->generator.tri2quad_modification(mesh).modify();
-            if (!storage->generator.quad_refinement(mesh).refine()) {
+            if (options.refine_to_quadrilateral &&
+                !storage->generator.quad_refinement(mesh).refine()) {
                 throw std::runtime_error("TQMesh failed to create an all-quad mesh");
             }
         }
@@ -216,45 +259,116 @@ Mesh2D Mesh2D::generate(std::span<const Region> regions, const GenerationOptions
                 "TQMesh could not connect all mesh regions through shared edges");
         }
     }
-    MeshCleanup::assign_mesh_indices(*storage->mesh);
-    MeshCleanup::setup_facet_connectivity(*storage->mesh);
-
-    storage->cells.resize(storage->mesh->n_elements());
-    for (const auto& cell : storage->mesh->quads()) {
-        storage->cells.at(static_cast<std::size_t>(cell->index())) = cell.get();
-    }
-    for (const auto& cell : storage->mesh->triangles()) {
-        storage->cells.at(static_cast<std::size_t>(cell->index())) = cell.get();
-    }
-
-    storage->internal_edges.reserve(storage->mesh->n_interior_edges());
-    for (const auto& edge : storage->mesh->interior_edges()) {
-        storage->internal_edges.push_back(edge.get());
-    }
-    for (const auto& edge : storage->mesh->boundary_edges()) {
-        switch (boundary_kind_from_color(edge->color())) {
-        case BoundaryKind::top:
-            storage->top_edges.push_back(edge.get());
-            break;
-        case BoundaryKind::bottom:
-            storage->bottom_edges.push_back(edge.get());
-            break;
-        case BoundaryKind::left:
-            storage->left_edges.push_back(edge.get());
-            break;
-        case BoundaryKind::right:
-            storage->right_edges.push_back(edge.get());
-            break;
-        case BoundaryKind::interface:
-            throw std::runtime_error("An unmerged interface remains on the mesh boundary");
-        }
-    }
+    populate_views(*storage);
 
     Mesh2D result(std::move(storage));
     result.validate();
     if (options.diagnostic_vtu) {
         result.write_vtu(*options.diagnostic_vtu);
     }
+    return result;
+}
+
+Mesh2D Mesh2D::from_cells(const std::span<const Cell> cells) {
+    if (cells.empty()) {
+        throw std::invalid_argument("Mesh2D requires at least one cell");
+    }
+    double scale = 1.0;
+    for (const Cell& cell : cells) {
+        if (cell.vertices.size() != 3 && cell.vertices.size() != 4) {
+            throw std::invalid_argument("Mesh2D cell must have three or four vertices");
+        }
+        if (cell.edge_kinds.size() != cell.vertices.size()) {
+            throw std::invalid_argument("Mesh2D cell requires one kind per edge");
+        }
+        if (!(signed_polygon_area(cell.vertices) > 0.0)) {
+            throw std::invalid_argument("Mesh2D cell must be counter-clockwise and non-degenerate");
+        }
+        for (const Point2D point : cell.vertices) {
+            if (!std::isfinite(point.x) || !std::isfinite(point.z)) {
+                throw std::invalid_argument("Mesh2D cell coordinates must be finite");
+            }
+            scale = std::max({scale, std::abs(point.x), std::abs(point.z)});
+        }
+    }
+    TQMeshSetup::get_instance().set_quadtree_scale(4.2 * scale);
+
+    struct EdgeRecord {
+        std::size_t first = 0;
+        std::size_t second = 0;
+        BoundaryKind kind = BoundaryKind::interface;
+        int count = 0;
+    };
+    const double coordinate_tolerance = 1.0e-10 * scale;
+    const auto coordinate_key = [coordinate_tolerance](const Point2D point) {
+        return std::pair{static_cast<std::int64_t>(std::llround(point.x / coordinate_tolerance)),
+                         static_cast<std::int64_t>(std::llround(point.z / coordinate_tolerance))};
+    };
+
+    auto storage = std::make_unique<Storage>();
+    storage->owned_mesh = std::make_unique<Mesh>();
+    storage->mesh = storage->owned_mesh.get();
+    std::map<std::pair<std::int64_t, std::int64_t>, std::size_t> vertex_indices;
+    std::vector<TQMesh::Vertex*> vertices;
+    std::unordered_map<std::uint64_t, EdgeRecord> edges;
+
+    for (const Cell& cell : cells) {
+        std::vector<std::size_t> indices;
+        indices.reserve(cell.vertices.size());
+        for (const Point2D point : cell.vertices) {
+            const auto [position, inserted] =
+                vertex_indices.emplace(coordinate_key(point), vertices.size());
+            if (inserted) {
+                vertices.push_back(&storage->mesh->add_vertex({point.x, point.z}));
+            } else {
+                const auto& existing = vertices[position->second]->xy();
+                if (std::max(std::abs(existing.x - point.x), std::abs(existing.y - point.z)) >
+                    coordinate_tolerance) {
+                    throw std::runtime_error("Mesh2D coordinate key collision");
+                }
+            }
+            indices.push_back(position->second);
+        }
+        if (indices.size() == 3) {
+            storage->mesh->add_triangle(*vertices[indices[0]], *vertices[indices[1]],
+                                        *vertices[indices[2]], cell.id);
+        } else {
+            storage->mesh->add_quad(*vertices[indices[0]], *vertices[indices[1]],
+                                    *vertices[indices[2]], *vertices[indices[3]], cell.id);
+        }
+        storage->expected_area += signed_polygon_area(cell.vertices);
+        for (std::size_t edge = 0; edge < indices.size(); ++edge) {
+            const std::size_t first = indices[edge];
+            const std::size_t second = indices[(edge + 1) % indices.size()];
+            EdgeRecord& record = edges[edge_key(first, second)];
+            if (record.count == 0) {
+                record = {
+                    .first = first, .second = second, .kind = cell.edge_kinds[edge], .count = 1};
+            } else {
+                ++record.count;
+                if (record.count > 2) {
+                    throw std::runtime_error("Mesh2D cell edge belongs to more than two cells");
+                }
+            }
+        }
+    }
+
+    for (const auto& [key, edge] : edges) {
+        (void)key;
+        if (edge.count == 2) {
+            storage->mesh->add_interior_edge(*vertices[edge.first], *vertices[edge.second]);
+        } else {
+            if (edge.kind == BoundaryKind::interface) {
+                throw std::runtime_error("Mesh2D has an exposed interface edge");
+            }
+            storage->mesh->add_boundary_edge(*vertices[edge.first], *vertices[edge.second],
+                                             static_cast<int>(edge.kind));
+        }
+    }
+    populate_views(*storage);
+
+    Mesh2D result(std::move(storage));
+    result.validate();
     return result;
 }
 

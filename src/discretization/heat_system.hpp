@@ -16,6 +16,12 @@ struct HeatBoundaryConditions {
     std::function<double(Point2D, double)> basal_heat_flux;
 };
 
+struct HeatEnergyRates {
+    double surface_outflow = 0.0;
+    double basal_inflow = 0.0;
+    double heat_production = 0.0;
+};
+
 class HeatSystem final : public SemiDiscreteSystem {
 public:
     using PropertyUpdater = std::function<void(std::span<const double>, std::span<double>,
@@ -34,6 +40,8 @@ public:
     [[nodiscard]] std::span<const double> thermal_conductivity() const noexcept;
     [[nodiscard]] std::span<const double> volumetric_heat_capacity() const noexcept;
     [[nodiscard]] std::span<const double> heat_production() const noexcept;
+
+    [[nodiscard]] HeatEnergyRates energy_rates(double time, const Vector& solution) const;
 
     void assemble_residual(double time, const Vector& solution, const Vector& solution_derivative,
                            Vector& residual) const override;

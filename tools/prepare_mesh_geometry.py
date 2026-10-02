@@ -65,7 +65,24 @@ def sampling_points(snapshot: list[dict[str, object]], step: float) -> np.ndarra
         [coordinate for layer in snapshot for coordinate in (layer["x"][0], layer["x"][-1])],
         dtype=np.float64,
     )
-    return np.unique(np.clip(np.concatenate((regular, endpoints, [x_max])), x_min, x_max))
+    geometry_events: list[float] = []
+    for layer in snapshot:
+        x = np.asarray(layer["x"], dtype=np.float64)
+        thickness = np.asarray(layer["z_bot"], dtype=np.float64) - np.asarray(
+            layer["z_top"], dtype=np.float64
+        )
+        tolerance = 1.0e-10 * max(1.0, float(np.max(np.abs(thickness))))
+        for index in np.flatnonzero(thickness <= tolerance):
+            first = max(0, int(index) - 1)
+            last = min(len(x), int(index) + 2)
+            geometry_events.extend(x[first:last])
+    return np.unique(
+        np.clip(
+            np.concatenate((regular, endpoints, geometry_events, [x_max])),
+            x_min,
+            x_max,
+        )
+    )
 
 
 def sampled_layers(

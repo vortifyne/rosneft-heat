@@ -96,7 +96,7 @@ std::vector<Mesh2D::Region> read_regions(const std::filesystem::path& path) {
 int main(const int argc, const char* const argv[]) {
     if (argc < 4 || argc > 6) {
         std::cerr << "Usage: heat_mesh <regions.csv> <cell-size> <output.vtu> "
-                     "[quad] [spatial-check]\n";
+                     "[quad|quad-dominant] [spatial-check]\n";
         return EXIT_FAILURE;
     }
 
@@ -104,10 +104,14 @@ int main(const int argc, const char* const argv[]) {
         const std::vector<Mesh2D::Region> regions = read_regions(argv[1]);
         const double cell_size = std::stod(argv[2]);
         bool make_quadrilateral = false;
+        bool refine_to_quadrilateral = false;
         bool check_spatial_discretization = false;
         for (int index = 4; index < argc; ++index) {
             const std::string option = argv[index];
             if (option == "quad") {
+                make_quadrilateral = true;
+                refine_to_quadrilateral = true;
+            } else if (option == "quad-dominant") {
                 make_quadrilateral = true;
             } else if (option == "spatial-check") {
                 check_spatial_discretization = true;
@@ -121,6 +125,7 @@ int main(const int argc, const char* const argv[]) {
             Mesh2D::generate(regions, {.cell_size = [cell_size](Point2D) { return cell_size; },
                                        .region_cell_size = {},
                                        .make_quadrilateral = make_quadrilateral,
+                                       .refine_to_quadrilateral = refine_to_quadrilateral,
                                        .diagnostic_vtu = std::filesystem::path(argv[3])});
         const double seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();

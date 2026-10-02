@@ -33,6 +33,7 @@ struct [[nodiscard]] NonlinearSolveResult {
     double final_residual_norm;
     int linear_iterations = 0;
     std::optional<LinearSolveStatus> last_linear_status;
+    std::optional<double> minimum_reciprocal_condition_estimate;
 
     [[nodiscard]] constexpr bool converged() const noexcept {
         return status == NonlinearSolveStatus::converged_residual_absolute ||

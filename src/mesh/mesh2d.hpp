@@ -2,6 +2,7 @@
 
 #include "Mesh.h"
 
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -34,15 +35,23 @@ public:
         int id = 0;
     };
 
+    struct Cell {
+        std::vector<Point2D> vertices;
+        std::vector<BoundaryKind> edge_kinds;
+        int id = 0;
+    };
+
     struct GenerationOptions {
         std::function<double(Point2D)> cell_size;
         std::function<double(int, Point2D)> region_cell_size;
         int smoothing_iterations = 0;
         bool make_quadrilateral = false;
+        bool refine_to_quadrilateral = false;
         std::optional<std::filesystem::path> diagnostic_vtu;
     };
 
     static Mesh2D generate(std::span<const Region> regions, const GenerationOptions& options);
+    static Mesh2D from_cells(std::span<const Cell> cells);
 
     Mesh2D(Mesh2D&&) noexcept;
     Mesh2D& operator=(Mesh2D&&) noexcept;

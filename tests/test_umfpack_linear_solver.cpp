@@ -48,6 +48,22 @@ TEST(UmfpackLinearSolverTest, SolvesCscSystemAndReportsResidual) {
     EXPECT_NEAR(solution[2], 5.0, 1e-12);
 }
 
+TEST(UmfpackLinearSolverTest, EstimatesReciprocalConditionWhenRequested) {
+    const SparseMatrix matrix = make_test_matrix();
+    const Vector right_hand_side{15.0, 10.0, 10.0};
+    Vector solution;
+    UmfpackLinearSolver solver;
+    LinearSolveRequest request = kUnusedDirectSolveRequest;
+    request.estimate_condition = true;
+
+    const LinearSolveResult result = solver.solve(matrix, right_hand_side, solution, request);
+
+    ASSERT_EQ(result.status, LinearSolveStatus::converged);
+    ASSERT_TRUE(result.reciprocal_condition_estimate.has_value());
+    EXPECT_GT(*result.reciprocal_condition_estimate, 0.0);
+    EXPECT_LE(*result.reciprocal_condition_estimate, 1.0);
+}
+
 TEST(UmfpackLinearSolverTest, RejectsCsrWithoutImplicitConversion) {
     const SparseMatrix matrix = make_test_matrix(SparseStorageOrder::csr);
     const Vector right_hand_side{15.0, 10.0, 10.0};

@@ -60,7 +60,11 @@ TEST(Mesh2D, SupportsRegionSpecificCellSize) {
                                             called = true;
                                             EXPECT_EQ(region_id, 17);
                                             return 0.25;
-                                        }});
+                                        },
+                                    .smoothing_iterations = 0,
+                                    .make_quadrilateral = false,
+                                    .refine_to_quadrilateral = false,
+                                    .diagnostic_vtu = std::nullopt});
 
     EXPECT_TRUE(called);
     EXPECT_GT(mesh.cells().size(), 0U);
@@ -93,20 +97,28 @@ TEST(Mesh2D, MergesTwoRegionsAcrossLayerInterface) {
     }
 }
 
-TEST(Mesh2D, CanGenerateAllQuadrilateralDiagnosticMesh) {
+TEST(Mesh2D, CanGenerateQuadDominantDiagnosticMeshWithoutRefinement) {
     const Mesh2D::Region region = rectangle(
         0.0, 0.0, 2.0, 1.0, 3,
         {BoundaryKind::bottom, BoundaryKind::right, BoundaryKind::top, BoundaryKind::left});
     const std::filesystem::path output =
         std::filesystem::temp_directory_path() / "heat_mesh2d_rectangle.vtu";
+    const Mesh2D triangular = Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
+                                               {.cell_size = [](Point2D) { return 0.4; },
+                                                .region_cell_size = {},
+                                                .smoothing_iterations = 0,
+                                                .make_quadrilateral = false,
+                                                .refine_to_quadrilateral = false,
+                                                .diagnostic_vtu = std::nullopt});
     Mesh2D mesh = Mesh2D::generate(std::span<const Mesh2D::Region>(&region, 1),
                                    {.cell_size = [](Point2D) { return 0.4; },
                                     .region_cell_size = {},
                                     .make_quadrilateral = true,
+                                    .refine_to_quadrilateral = false,
                                     .diagnostic_vtu = output});
 
-    EXPECT_EQ(mesh.native().n_triangles(), 0U);
     EXPECT_GT(mesh.native().n_quads(), 0U);
+    EXPECT_LT(mesh.native().n_elements(), triangular.native().n_elements());
     EXPECT_TRUE(std::filesystem::is_regular_file(output));
     std::filesystem::remove(output);
 }
@@ -142,6 +154,26 @@ TEST(Mesh2D, UpdatesVertexCoordinatesWithoutChangingConnectivity) {
     EXPECT_EQ(mesh.cells().size(), cell_count);
     EXPECT_EQ(mesh.internal_edges().size(), edge_count);
     EXPECT_NEAR(mesh.area(), 10.0, 1.0e-9);
+    EXPECT_NO_THROW(mesh.validate());
+}
+
+TEST(Mesh2D, BuildsExplicitQuadrilateralAndTriangleCells) {
+    const std::vector<Mesh2D::Cell> cells = {
+        {.vertices = {{0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}},
+         .edge_kinds = {BoundaryKind::top, BoundaryKind::right, BoundaryKind::bottom,
+                        BoundaryKind::left},
+         .id = 11},
+        {.vertices = {{1.0, 0.0}, {2.0, 0.5}, {1.0, 1.0}},
+         .edge_kinds = {BoundaryKind::top, BoundaryKind::bottom, BoundaryKind::interface},
+         .id = 12},
+    };
+
+    Mesh2D mesh = Mesh2D::from_cells(cells);
+
+    EXPECT_EQ(mesh.native().n_quads(), 1U);
+    EXPECT_EQ(mesh.native().n_triangles(), 1U);
+    EXPECT_EQ(mesh.internal_edges().size(), 1U);
+    EXPECT_NEAR(mesh.area(), 1.5, 1.0e-12);
     EXPECT_NO_THROW(mesh.validate());
 }
 

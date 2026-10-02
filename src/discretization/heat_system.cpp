@@ -173,6 +173,37 @@ std::span<const double> HeatSystem::heat_production() const noexcept {
     return heat_production_;
 }
 
+HeatEnergyRates HeatSystem::energy_rates(const double time, const Vector& solution) const {
+    check_finite(time, "Energy-rate time must be finite");
+    if (solution.size() != size()) {
+        throw std::invalid_argument("Heat-system solution size does not match the mesh");
+    }
+    update_properties(solution);
+    prepare_gradients(time, solution);
+
+    HeatEnergyRates result;
+    for (std::size_t index = 0; index < surface_faces_.size(); ++index) {
+        const BoundaryFace& face = surface_faces_[index];
+        const double conductivity = thermal_conductivity_[face.cell];
+        const double coefficient = conductivity * face.length / face.normal_distance;
+        const double orthogonal_flux =
+            coefficient *
+            (solution[static_cast<Vector::Index>(face.cell)] - surface_temperatures_[index]);
+        const double correction_flux =
+            -conductivity * face.length * gradients_[face.cell].dot(face.correction);
+        result.surface_outflow += orthogonal_flux + correction_flux;
+    }
+    for (const BoundaryFace& face : basal_faces_) {
+        const double flux = boundary_conditions_.basal_heat_flux(face.center, time);
+        check_finite(flux, "Basal heat flux must be finite");
+        result.basal_inflow += flux * face.length;
+    }
+    for (std::size_t index = 0; index < heat_production_.size(); ++index) {
+        result.heat_production += heat_production_[index] / inverse_cell_area_[index];
+    }
+    return result;
+}
+
 void HeatSystem::set_implicit_nonorthogonal_correction(const bool enabled) noexcept {
     implicit_nonorthogonal_correction_ = enabled;
 }

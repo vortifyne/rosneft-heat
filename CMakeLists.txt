@@ -98,6 +98,7 @@ target_link_libraries(heat_core
 add_library(heat_forward_core STATIC
   src/forward/basin_forward_solver.cpp
   src/forward/basin_input.cpp
+  src/forward/layered_mesh.cpp
   src/forward/mesh_transfer.cpp
   src/forward/vtu_output.cpp
 )
@@ -227,6 +228,7 @@ gtest_discover_tests(model_unit_tests)
 add_executable(heat_unit_tests
   tests/test_easy_ro.cpp
   tests/test_heat_system.cpp
+  tests/test_layered_mesh.cpp
   tests/test_least_squares_gradient.cpp
   tests/test_mesh2d.cpp
   tests/test_mesh_transfer.cpp
