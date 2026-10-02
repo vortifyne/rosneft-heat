@@ -14,5 +14,5 @@
 - [user/forward-solver.md](user/forward-solver.md) — рабочая команда прямого расчёта.
 - [reference/architecture-overview.md](reference/architecture-overview.md) — устройство программы.
 - [reference/basin-forward-model.md](reference/basin-forward-model.md) — полный ход расчёта.
-- [dev/backlog.md](dev/backlog.md) — текущие и выполненные задачи.
+- [dev/backlog.md](dev/backlog.md) — незавершённые задачи.
 - [reference/problem-statement/](reference/problem-statement/README.md) — исходная постановка задачи.

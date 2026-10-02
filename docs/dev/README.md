@@ -6,5 +6,5 @@
 
 - [development-process.md](development-process.md) — порядок работы, сборка, проверки и стиль.
 - [roadmap.md](roadmap.md) — крупные направления развития.
-- [backlog.md](backlog.md) — актуальные и выполненные задачи.
+- [backlog.md](backlog.md) — незавершённые задачи.
 - [task-notes/](task-notes/README.md) — дополнительные материалы к отдельным задачам.
