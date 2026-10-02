@@ -230,6 +230,7 @@ add_executable(heat_unit_tests
   tests/test_heat_system.cpp
   tests/test_layered_mesh.cpp
   tests/test_least_squares_gradient.cpp
+  tests/test_manufactured_heat_solution.cpp
   tests/test_mesh2d.cpp
   tests/test_mesh_transfer.cpp
   tests/test_thermophysical_properties.cpp

@@ -597,6 +597,8 @@ LinearSolveRequest linear_request(const bool estimate_condition) {
 void accumulate_result(BasinForwardResult& total, const TimeIntegrationResult& step) {
     total.accepted_steps += step.accepted_steps;
     total.nonlinear_iterations += step.nonlinear_iterations;
+    total.maximum_nonlinear_iterations_per_step =
+        std::max(total.maximum_nonlinear_iterations_per_step, step.nonlinear_iterations);
     total.linear_iterations += step.linear_iterations;
     if (!step.completed()) {
         throw std::runtime_error(
@@ -971,14 +973,16 @@ BasinForwardResult run_basin_forward(const std::filesystem::path& input_director
     }
     const std::uintmax_t output_bytes = directory_size(output_directory);
     std::ofstream summary(output_directory / "summary.csv");
-    summary << "configurations,accepted_steps,nonlinear_iterations,linear_iterations,final_age_ma,"
+    summary << "configurations,accepted_steps,nonlinear_iterations,"
+               "maximum_nonlinear_iterations_per_step,linear_iterations,final_age_ma,"
                "global_energy_balance,cells_min,cells_max,"
                "cell_diameter_max,wall_seconds,condition_estimate_max,output_bytes\n"
             << result.configurations << ',' << result.accepted_steps << ','
-            << result.nonlinear_iterations << ',' << result.linear_iterations << ','
-            << result.final_age_ma << ',' << result.global_energy_balance << ','
-            << result.minimum_cells << ',' << result.maximum_cells << ','
-            << result.maximum_cell_diameter << ',' << result.wall_seconds << ','
-            << result.maximum_condition_estimate << ',' << output_bytes << '\n';
+            << result.nonlinear_iterations << ',' << result.maximum_nonlinear_iterations_per_step
+            << ',' << result.linear_iterations << ',' << result.final_age_ma << ','
+            << result.global_energy_balance << ',' << result.minimum_cells << ','
+            << result.maximum_cells << ',' << result.maximum_cell_diameter << ','
+            << result.wall_seconds << ',' << result.maximum_condition_estimate << ','
+            << output_bytes << '\n';
     return result;
 }

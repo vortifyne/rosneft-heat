@@ -12,6 +12,7 @@
 - [epoch-transition.md](epoch-transition.md) — перестроение сетки и перенос состояния.
 - [linear-system-conditioning.md](linear-system-conditioning.md) — диагностическая оценка обусловленности матриц метода Пикара.
 - [global-energy-balance.md](global-energy-balance.md) — единый баланс энергии всей расчётной области.
+- [manufactured-heat-solution.md](manufactured-heat-solution.md) — проверка пространственного и временного порядков на точном решении.
 - [full-history.md](full-history.md) — общий цикл конфигураций, движение сетки и полный временной ряд.
 - [easy-ro.md](easy-ro.md) — вычисление зрелости витринита EASY%Ro.
 - [easy-ro-stoichiometric-factors.md](easy-ro-stoichiometric-factors.md) — смысл коэффициентов реакций и исправленная формула EASY%Ro.

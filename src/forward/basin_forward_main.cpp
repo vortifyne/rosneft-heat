@@ -77,6 +77,8 @@ int main(const int argc, const char* const argv[]) {
         const BasinForwardResult result = run_basin_forward(argv[1], argv[2], options);
         std::cout << "accepted_steps=" << result.accepted_steps
                   << " nonlinear_iterations=" << result.nonlinear_iterations
+                  << " nonlinear_iterations_per_step_max="
+                  << result.maximum_nonlinear_iterations_per_step
                   << " linear_iterations=" << result.linear_iterations
                   << " configurations=" << result.configurations
                   << " final_age_ma=" << result.final_age_ma
