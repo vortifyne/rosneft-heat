@@ -109,16 +109,31 @@ void BasinForwardOutput::finish(const BasinForwardResult& result) {
     transitions_.flush();
     energy_balance_.flush();
     const std::uintmax_t output_bytes = directory_size(directory_);
+    const double measured_seconds = result.timings.mesh_seconds + result.timings.assembly_seconds +
+                                    result.timings.linear_solve_seconds +
+                                    result.timings.maturity_seconds +
+                                    result.timings.transfer_seconds + result.timings.output_seconds;
+    const double other_seconds = std::max(0.0, result.wall_seconds - measured_seconds);
+    std::ofstream timings(directory_ / "timings.csv");
+    timings << "mesh_seconds,assembly_seconds,linear_solve_seconds,"
+               "maturity_seconds,transfer_seconds,output_seconds,other_seconds,wall_seconds\n"
+            << std::setprecision(15) << result.timings.mesh_seconds << ','
+            << result.timings.assembly_seconds << ',' << result.timings.linear_solve_seconds << ','
+            << result.timings.maturity_seconds << ',' << result.timings.transfer_seconds << ','
+            << result.timings.output_seconds << ',' << other_seconds << ',' << result.wall_seconds
+            << '\n';
     std::ofstream summary(directory_ / "summary.csv");
     summary << "configurations,accepted_steps,nonlinear_iterations,"
                "maximum_nonlinear_iterations_per_step,linear_iterations,final_age_ma,"
                "topology_regularized_epochs,global_energy_balance,cells_min,cells_max,"
-               "cell_diameter_max,wall_seconds,output_bytes\n"
+               "cell_diameter_max,cell_thickness_min,cell_elongation_max,wall_seconds,"
+               "output_bytes\n"
             << result.configurations << ',' << result.accepted_steps << ','
             << result.nonlinear_iterations << ',' << result.maximum_nonlinear_iterations_per_step
             << ',' << result.linear_iterations << ',' << result.final_age_ma << ','
             << result.topology_regularized_epochs << ',' << result.global_energy_balance << ','
             << result.minimum_cells << ',' << result.maximum_cells << ','
-            << result.maximum_cell_diameter << ',' << result.wall_seconds << ',' << output_bytes
+            << result.maximum_cell_diameter << ',' << result.minimum_cell_thickness << ','
+            << result.maximum_cell_elongation << ',' << result.wall_seconds << ',' << output_bytes
             << '\n';
 }

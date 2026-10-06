@@ -215,7 +215,19 @@ BasinStateTransfer transfer_basin_state(const BasinState& old_state, Mesh2D new_
             contact = temperature_sampler({point.x, bottom + inward_offset});
         }
         if (!contact) {
-            throw std::runtime_error("Cannot initialize new material at its lower contact");
+            double nearest_distance = std::numeric_limits<double>::max();
+            for (const TQMesh::Facet* old_cell : old_state.mesh.cells()) {
+                const double dx = old_cell->xy().x - point.x;
+                const double dz = old_cell->xy().y - bottom;
+                const double distance = (dx * dx) + (dz * dz);
+                if (distance < nearest_distance) {
+                    nearest_distance = distance;
+                    contact = old_state.temperature[old_cell->index()];
+                }
+            }
+        }
+        if (!contact) {
+            throw std::runtime_error("Cannot initialize new material from the previous state");
         }
         return ((1.0 - eta) * surface) + (eta * *contact);
     };

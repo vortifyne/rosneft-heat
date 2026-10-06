@@ -13,16 +13,24 @@ namespace {
 constexpr double kMinimumTopologyThickness = 0.5;
 constexpr double kMinimumTopologyThicknessFraction = 0.001;
 
+double maximum_thickness(const BasinLayerProfile& layer) {
+    double result = 0.0;
+    for (std::size_t index = 0; index < layer.x.size(); ++index) {
+        result = std::max(result, layer.bottom[index] - layer.top[index]);
+    }
+    return result;
+}
+
 } // namespace
 
 BasinMeshMotion::BasinMeshMotion(Mesh2D& mesh, const BasinConfiguration& first,
                                  const BasinConfiguration& second, const double duration,
-                                 const bool preserve_topology)
+                                 const double cell_size, const bool preserve_topology)
     : mesh_(mesh), initial_(mesh.vertex_coordinates()), final_(initial_),
       porosity_first_(mesh.cells().size()), porosity_second_(mesh.cells().size()),
       velocity_z_(mesh.cells().size()) {
-    const auto target_interval = [&first, &second, preserve_topology](const int layer_id,
-                                                                      const double x) {
+    const auto target_interval = [&first, &second, cell_size, preserve_topology](const int layer_id,
+                                                                                 const double x) {
         const auto& requested = second.layer(layer_id);
         if (!preserve_topology) {
             return std::pair{requested.top_at(x), requested.bottom_at(x)};
@@ -48,11 +56,15 @@ BasinMeshMotion::BasinMeshMotion(Mesh2D& mesh, const BasinConfiguration& first,
                 found_first_material = true;
             }
             const double new_thickness = new_layer.bottom_at(x) - new_layer.top_at(x);
+            const std::size_t row_count = std::max<std::size_t>(
+                1, static_cast<std::size_t>(std::ceil(maximum_thickness(old_layer) / cell_size)));
+            const double minimum_layer_thickness =
+                static_cast<double>(row_count) * kMinimumTopologyThickness;
             const double retained_thickness =
                 new_thickness > 1.0e-10
                     ? new_thickness
                     : std::min(old_thickness,
-                               std::max(kMinimumTopologyThickness,
+                               std::max(minimum_layer_thickness,
                                         kMinimumTopologyThicknessFraction * old_thickness));
             const double top = boundary;
             boundary += retained_thickness;
@@ -95,6 +107,9 @@ BasinMeshMotion::BasinMeshMotion(Mesh2D& mesh, const BasinConfiguration& first,
                 const Point2D& current = coordinates[cell->vertex(vertex).index()];
                 const Point2D& next =
                     coordinates[cell->vertex((vertex + 1) % cell->n_vertices()).index()];
+                if (std::hypot(next.x - current.x, next.z - current.z) <= 1.0e-10) {
+                    return static_cast<std::size_t>(cell->index());
+                }
                 twice_area += (current.x * next.z) - (next.x * current.z);
             }
             if (!(twice_area > 0.0) || !std::isfinite(twice_area)) {

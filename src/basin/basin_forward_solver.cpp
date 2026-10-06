@@ -19,6 +19,10 @@ namespace {
 constexpr double kSecondsPerYear = 365.25 * 24.0 * 3600.0;
 constexpr double kSecondsPerMa = 1.0e6 * kSecondsPerYear;
 
+double elapsed_seconds(const std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
 HeatBoundaryConditions boundary_conditions(const ScalarProfile& first_surface_temperature,
                                            const ScalarProfile& second_surface_temperature,
                                            const ScalarProfile& first_basal_heat_flux,
@@ -78,26 +82,32 @@ void accumulate_result(BasinForwardResult& total, const TimeIntegrationResult& s
     }
 }
 
-double maximum_cell_diameter(const Mesh2D& mesh) {
-    double result = 0.0;
-    for (const TQMesh::Facet* cell : mesh.cells()) {
-        for (std::size_t first = 0; first < cell->n_vertices(); ++first) {
-            for (std::size_t second = first + 1; second < cell->n_vertices(); ++second) {
-                result =
-                    std::max(result, (cell->vertex(first).xy() - cell->vertex(second).xy()).norm());
-            }
-        }
-    }
-    return result;
-}
-
 void update_mesh_statistics(BasinForwardResult& result, const Mesh2D& mesh) {
     const std::size_t cells = mesh.cells().size();
     result.minimum_cells =
         result.minimum_cells == 0 ? cells : std::min(result.minimum_cells, cells);
     result.maximum_cells = std::max(result.maximum_cells, cells);
-    result.maximum_cell_diameter =
-        std::max(result.maximum_cell_diameter, maximum_cell_diameter(mesh));
+    for (const TQMesh::Facet* cell : mesh.cells()) {
+        double maximum_edge = 0.0;
+        double diameter = 0.0;
+        for (std::size_t first = 0; first < cell->n_vertices(); ++first) {
+            maximum_edge =
+                std::max(maximum_edge, (cell->vertex((first + 1) % cell->n_vertices()).xy() -
+                                        cell->vertex(first).xy())
+                                           .norm());
+            for (std::size_t second = first + 1; second < cell->n_vertices(); ++second) {
+                diameter = std::max(diameter,
+                                    (cell->vertex(first).xy() - cell->vertex(second).xy()).norm());
+            }
+        }
+        const double thickness = cell->area() / maximum_edge;
+        const double elongation = maximum_edge / thickness;
+        result.maximum_cell_diameter = std::max(result.maximum_cell_diameter, diameter);
+        result.minimum_cell_thickness = result.minimum_cell_thickness == 0.0
+                                            ? thickness
+                                            : std::min(result.minimum_cell_thickness, thickness);
+        result.maximum_cell_elongation = std::max(result.maximum_cell_elongation, elongation);
+    }
 }
 
 EasyRoModel make_easy_ro(const BasinInput& input) {
@@ -181,14 +191,18 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardParameters& param
 
     BasinForwardOutput output(output_directory);
     const BasinConfiguration& oldest = configurations.front();
-    BasinState state = make_initial_basin_state(
-        oldest, input, make_layered_mesh(oldest, impl_->layout), easy_ro,
-        parameters.surface_temperature.front(), parameters.basal_heat_flux.front());
-
     BasinForwardResult result;
     result.configurations = static_cast<int>(configurations.size());
+    auto operation_start = std::chrono::steady_clock::now();
+    Mesh2D initial_mesh = make_layered_mesh(oldest, impl_->layout);
+    result.timings.mesh_seconds += elapsed_seconds(operation_start);
+    BasinState state = make_initial_basin_state(oldest, input, std::move(initial_mesh), easy_ro,
+                                                parameters.surface_temperature.front(),
+                                                parameters.basal_heat_flux.front());
     update_mesh_statistics(result, state.mesh);
+    operation_start = std::chrono::steady_clock::now();
     output.save_state(state, easy_ro, 0.0, oldest.age_ma, "initial", 0);
+    result.timings.output_seconds += elapsed_seconds(operation_start);
     double elapsed = 0.0;
     double accumulated_energy_imbalance = 0.0;
     double accumulated_basal_energy = 0.0;
@@ -206,13 +220,17 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardParameters& param
 
         bool topology_regularized = false;
         std::unique_ptr<BasinMeshMotion> motion;
+        operation_start = std::chrono::steady_clock::now();
         try {
-            motion = std::make_unique<BasinMeshMotion>(state.mesh, first, second, duration);
+            motion = std::make_unique<BasinMeshMotion>(state.mesh, first, second, duration,
+                                                       settings.cell_size);
         } catch (const std::exception&) {
-            motion = std::make_unique<BasinMeshMotion>(state.mesh, first, second, duration, true);
+            motion = std::make_unique<BasinMeshMotion>(state.mesh, first, second, duration,
+                                                       settings.cell_size, true);
             topology_regularized = true;
             ++result.topology_regularized_epochs;
         }
+        result.timings.mesh_seconds += elapsed_seconds(operation_start);
         state.fields.velocity_z.assign(motion->velocity_z().begin(), motion->velocity_z().end());
         std::unique_ptr<HeatSystem> system = make_heat_system(
             state.mesh, state.fields,
@@ -228,15 +246,20 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardParameters& param
             Vector old_temperature = state.temperature;
             const double energy_before = total_energy(state);
             const double fraction = (target - elapsed) / duration;
+            operation_start = std::chrono::steady_clock::now();
             motion->set_position(fraction);
             motion->set_porosity(fraction, state.fields.porosity);
+            update_mesh_statistics(result, state.mesh);
             system->update_geometry(state.mesh);
+            result.timings.mesh_seconds += elapsed_seconds(operation_start);
 
             TimeIntegrator integrator;
             integrator.set_initial_solution(old_time, state.temperature);
             integrator.set_timestep(target - old_time);
             const TimeIntegrationResult step =
                 integrator.advance_to(*system, target, nonlinear_request(), linear_request());
+            result.timings.assembly_seconds += step.timings.assembly_seconds;
+            result.timings.linear_solve_seconds += step.timings.linear_solve_seconds;
             try {
                 accumulate_result(result, step);
             } catch (const std::exception& error) {
@@ -257,41 +280,58 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardParameters& param
             accumulated_basal_energy += step_duration * rates.basal_inflow;
             result.global_energy_balance = std::abs(accumulated_energy_imbalance) /
                                            std::max(std::abs(accumulated_basal_energy), 1.0);
+            operation_start = std::chrono::steady_clock::now();
             output.save_energy_balance(target / kSecondsPerMa,
                                        first.age_ma - ((target - elapsed) / kSecondsPerMa), "step",
                                        result.global_energy_balance);
+            result.timings.output_seconds += elapsed_seconds(operation_start);
+            operation_start = std::chrono::steady_clock::now();
             easy_ro.advance(vector_values(old_temperature), vector_values(state.temperature),
                             step_duration, state.maturity);
+            result.timings.maturity_seconds += elapsed_seconds(operation_start);
             current_time = target;
 
             if (target == epoch_end) {
+                operation_start = std::chrono::steady_clock::now();
                 output.save_state(state, easy_ro, target / kSecondsPerMa,
                                   first.age_ma - ((target - elapsed) / kSecondsPerMa), "epoch",
                                   step.nonlinear_iterations);
+                result.timings.output_seconds += elapsed_seconds(operation_start);
             }
         }
 
         elapsed = epoch_end;
         result.final_age_ma = second.age_ma;
+        operation_start = std::chrono::steady_clock::now();
         output.save_state(state, easy_ro, elapsed / kSecondsPerMa, second.age_ma,
                           "before_transition", 0);
+        result.timings.output_seconds += elapsed_seconds(operation_start);
 
-        BasinStateTransfer transferred = transfer_basin_state(
-            state, make_layered_mesh(second, impl_->layout), first, second, input, easy_ro,
-            parameters.surface_temperature[epoch + 1], settings.cell_size);
+        operation_start = std::chrono::steady_clock::now();
+        Mesh2D new_mesh = make_layered_mesh(second, impl_->layout);
+        result.timings.mesh_seconds += elapsed_seconds(operation_start);
+        operation_start = std::chrono::steady_clock::now();
+        BasinStateTransfer transferred =
+            transfer_basin_state(state, std::move(new_mesh), first, second, input, easy_ro,
+                                 parameters.surface_temperature[epoch + 1], settings.cell_size);
+        result.timings.transfer_seconds += elapsed_seconds(operation_start);
         accumulated_energy_imbalance += transferred.energy_imbalance;
         result.global_energy_balance = std::abs(accumulated_energy_imbalance) /
                                        std::max(std::abs(accumulated_basal_energy), 1.0);
+        operation_start = std::chrono::steady_clock::now();
         output.save_transition(second.age_ma, state.mesh.cells().size(),
                                transferred.state.mesh.cells().size());
         output.save_energy_balance(elapsed / kSecondsPerMa, second.age_ma, "transition",
                                    result.global_energy_balance);
+        result.timings.output_seconds += elapsed_seconds(operation_start);
 
         state = std::move(transferred.state);
         update_thermophysical_properties(vector_values(state.temperature), state.fields);
         update_mesh_statistics(result, state.mesh);
+        operation_start = std::chrono::steady_clock::now();
         output.save_state(state, easy_ro, elapsed / kSecondsPerMa, second.age_ma,
                           "after_transition", 0);
+        result.timings.output_seconds += elapsed_seconds(operation_start);
 
         const double epoch_seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - epoch_wall_start)

@@ -53,6 +53,8 @@ int main(const int argc, const char* const argv[]) {
                   << " global_energy_balance=" << result.global_energy_balance
                   << " cells_min=" << result.minimum_cells << " cells_max=" << result.maximum_cells
                   << " cell_diameter_max=" << result.maximum_cell_diameter
+                  << " cell_thickness_min=" << result.minimum_cell_thickness
+                  << " cell_elongation_max=" << result.maximum_cell_elongation
                   << " wall_seconds=" << result.wall_seconds << '\n';
     } catch (const std::exception& error) {
         std::cerr << "heat_forward: " << error.what() << '\n';

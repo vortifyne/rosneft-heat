@@ -2,6 +2,7 @@
 
 #include "linear/umfpack_linear_solver.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -23,8 +24,14 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
         !(nonlinear_request.backtracking_reduction < 1.0)) {
         throw std::invalid_argument("Invalid nonlinear solver iteration settings");
     }
+    SolverTimings timings;
+    const auto elapsed_seconds = [](const auto start) {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    };
     Vector residual;
+    auto operation_start = std::chrono::steady_clock::now();
     nonlinear_system.assemble_residual(x, residual);
+    timings.assembly_seconds += elapsed_seconds(operation_start);
 
     if (!residual.all_finite()) {
         return {
@@ -33,6 +40,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
             .final_residual_norm = std::numeric_limits<double>::infinity(),
             .linear_iterations = 0,
             .last_linear_status = std::nullopt,
+            .timings = timings,
         };
     }
 
@@ -44,6 +52,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
             .final_residual_norm = initial_residual_norm,
             .linear_iterations = 0,
             .last_linear_status = std::nullopt,
+            .timings = timings,
         };
     }
 
@@ -51,13 +60,17 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
     std::optional<LinearSolveStatus> last_linear_status;
     for (int iteration = 0; iteration < nonlinear_request.max_iterations; ++iteration) {
         SparseMatrix matrix(x.size(), x.size(), linear_solver_->required_storage_order());
+        operation_start = std::chrono::steady_clock::now();
         nonlinear_system.assemble_matrix(nonlinear_request.nonlinear_method, x, matrix);
+        timings.assembly_seconds += elapsed_seconds(operation_start);
 
         const Vector b = -residual;
         Vector delta_x;
         LinearSolveRequest current_linear_request = linear_request;
+        operation_start = std::chrono::steady_clock::now();
         const LinearSolveResult linear_result =
             linear_solver_->solve(matrix, b, delta_x, current_linear_request);
+        timings.linear_solve_seconds += elapsed_seconds(operation_start);
         linear_iterations += linear_result.iterations;
         last_linear_status = linear_result.status;
 
@@ -68,6 +81,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .final_residual_norm = residual.norm(),
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
+                .timings = timings,
             };
         }
 
@@ -75,7 +89,9 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
         Vector scaled_delta = delta_x;
         Vector x_candidate = x + scaled_delta;
         Vector candidate_residual;
+        operation_start = std::chrono::steady_clock::now();
         nonlinear_system.assemble_residual(x_candidate, candidate_residual);
+        timings.assembly_seconds += elapsed_seconds(operation_start);
 
         if (nonlinear_request.use_backtracking && candidate_residual.all_finite()) {
             const double current_norm = residual.norm();
@@ -85,7 +101,9 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 step_scale *= nonlinear_request.backtracking_reduction;
                 scaled_delta = delta_x * step_scale;
                 x_candidate = x + scaled_delta;
+                operation_start = std::chrono::steady_clock::now();
                 nonlinear_system.assemble_residual(x_candidate, candidate_residual);
+                timings.assembly_seconds += elapsed_seconds(operation_start);
                 ++backtracking_step;
                 if (!candidate_residual.all_finite()) {
                     continue;
@@ -100,6 +118,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .final_residual_norm = std::numeric_limits<double>::infinity(),
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
+                .timings = timings,
             };
         }
 
@@ -118,6 +137,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .final_residual_norm = residual_norm,
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
+                .timings = timings,
             };
         }
 
@@ -128,6 +148,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .final_residual_norm = residual_norm,
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
+                .timings = timings,
             };
         }
 
@@ -138,6 +159,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .final_residual_norm = residual_norm,
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
+                .timings = timings,
             };
         }
     }
@@ -148,6 +170,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
         .final_residual_norm = residual.norm(),
         .linear_iterations = linear_iterations,
         .last_linear_status = last_linear_status,
+        .timings = timings,
     };
 }
 

@@ -25,6 +25,7 @@ struct [[nodiscard]] TimeIntegrationResult {
     double last_residual_norm = 0.0;
     std::optional<NonlinearSolveStatus> last_nonlinear_status;
     std::optional<LinearSolveStatus> last_linear_status;
+    SolverTimings timings;
 
     [[nodiscard]] constexpr bool completed() const noexcept {
         return status == TimeIntegrationStatus::completed;

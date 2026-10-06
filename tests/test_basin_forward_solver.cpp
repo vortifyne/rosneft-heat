@@ -70,6 +70,9 @@ TEST_F(BasinForwardSolverTest, ReusesPreparedProblemForDifferentBoundaryParamete
     EXPECT_EQ(second.accepted_steps, 2);
     EXPECT_TRUE(std::filesystem::is_regular_file(directory_ / "first" / "summary.csv"));
     EXPECT_TRUE(std::filesystem::is_regular_file(directory_ / "second" / "summary.csv"));
+    EXPECT_TRUE(std::filesystem::is_regular_file(directory_ / "first" / "timings.csv"));
+    EXPECT_GT(first.timings.linear_solve_seconds, 0.0);
+    EXPECT_GT(first.timings.assembly_seconds, 0.0);
 }
 
 } // namespace

@@ -9,6 +9,7 @@
 namespace {
 
 constexpr double kRelativeThicknessTolerance = 1.0e-10;
+constexpr double kMinimumHorizontalInterval = 50.0;
 
 double maximum_thickness(const BasinLayerProfile& layer) {
     double result = 0.0;
@@ -26,12 +27,42 @@ void append_geometry_events(std::vector<double>& points, const BasinLayerProfile
         if (layer.bottom[index] - layer.top[index] > tolerance) {
             continue;
         }
-        const std::size_t first = index == 0 ? 0 : index - 1;
-        const std::size_t last = std::min(index + 1, layer.x.size() - 1);
-        for (std::size_t neighbor = first; neighbor <= last; ++neighbor) {
-            points.push_back(layer.x[neighbor]);
+        points.push_back(layer.x[index]);
+    }
+}
+
+std::vector<double> make_horizontal_axis(std::vector<double> events, const double minimum_x,
+                                         const double maximum_x, const double cell_size) {
+    std::sort(events.begin(), events.end());
+    events.erase(std::unique(events.begin(), events.end()), events.end());
+
+    const double minimum_interval = std::max(kMinimumHorizontalInterval, cell_size);
+    std::vector<double> separated;
+    separated.reserve(events.size());
+    separated.push_back(minimum_x);
+    for (const double event : events) {
+        if (event <= minimum_x || event >= maximum_x) {
+            continue;
+        }
+        if (event - separated.back() >= minimum_interval && maximum_x - event >= minimum_interval) {
+            separated.push_back(event);
         }
     }
+    separated.push_back(maximum_x);
+
+    std::vector<double> result;
+    for (std::size_t interval = 0; interval + 1 < separated.size(); ++interval) {
+        const double left = separated[interval];
+        const double right = separated[interval + 1];
+        const std::size_t count = std::max<std::size_t>(
+            1, static_cast<std::size_t>(std::ceil((right - left) / cell_size)));
+        for (std::size_t part = 0; part < count; ++part) {
+            const double fraction = static_cast<double>(part) / static_cast<double>(count);
+            result.push_back(((1.0 - fraction) * left) + (fraction * right));
+        }
+    }
+    result.push_back(maximum_x);
+    return result;
 }
 
 Point2D point(const double x, const double top, const double thickness, const double eta) {
@@ -80,8 +111,7 @@ LayeredMeshLayout make_layered_mesh_layout(const std::span<const BasinConfigurat
 
     double minimum_x = std::numeric_limits<double>::max();
     double maximum_x = std::numeric_limits<double>::lowest();
-    std::unordered_map<int, double> layer_thickness;
-    LayeredMeshLayout result;
+    std::vector<double> events;
     for (const BasinConfiguration& configuration : configurations) {
         for (const BasinLayerProfile& layer : configuration.layers) {
             if (layer.x.size() < 2 || layer.x.size() != layer.top.size() ||
@@ -90,25 +120,11 @@ LayeredMeshLayout make_layered_mesh_layout(const std::span<const BasinConfigurat
             }
             minimum_x = std::min(minimum_x, layer.x.front());
             maximum_x = std::max(maximum_x, layer.x.back());
-            layer_thickness[layer.id] =
-                std::max(layer_thickness[layer.id], maximum_thickness(layer));
-            append_geometry_events(result.x, layer);
+            append_geometry_events(events, layer);
         }
     }
-    const std::size_t regular_intervals = std::max<std::size_t>(
-        1, static_cast<std::size_t>(std::ceil((maximum_x - minimum_x) / cell_size)));
-    for (std::size_t interval = 0; interval <= regular_intervals; ++interval) {
-        const double fraction =
-            static_cast<double>(interval) / static_cast<double>(regular_intervals);
-        result.x.push_back(((1.0 - fraction) * minimum_x) + (fraction * maximum_x));
-    }
-    std::sort(result.x.begin(), result.x.end());
-    result.x.erase(std::unique(result.x.begin(), result.x.end()), result.x.end());
-    for (const auto& [layer_id, thickness] : layer_thickness) {
-        result.layer_rows[layer_id] =
-            std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(thickness / cell_size)));
-    }
-    return result;
+    return {.x = make_horizontal_axis(std::move(events), minimum_x, maximum_x, cell_size),
+            .cell_size = cell_size};
 }
 
 Mesh2D make_layered_mesh(const BasinConfiguration& configuration, const LayeredMeshLayout& layout) {
@@ -119,10 +135,8 @@ Mesh2D make_layered_mesh(const BasinConfiguration& configuration, const LayeredM
     std::vector<Mesh2D::Cell> triangles;
 
     for (const BasinLayerProfile& layer : configuration.layers) {
-        const auto row_count = layout.layer_rows.find(layer.id);
-        if (row_count == layout.layer_rows.end()) {
-            throw std::invalid_argument("Layer is absent from layered mesh layout");
-        }
+        const std::size_t row_count = std::max<std::size_t>(
+            1, static_cast<std::size_t>(std::ceil(maximum_thickness(layer) / layout.cell_size)));
         const double tolerance =
             kRelativeThicknessTolerance * std::max(1.0, maximum_thickness(layer));
         for (std::size_t column = 0; column + 1 < layout.x.size(); ++column) {
@@ -138,9 +152,9 @@ Mesh2D make_layered_mesh(const BasinConfiguration& configuration, const LayeredM
             if (left_thickness + right_thickness <= tolerance) {
                 continue;
             }
-            for (std::size_t row = 0; row < row_count->second; ++row) {
+            for (std::size_t row = 0; row < row_count; ++row) {
                 append_cell(quads, triangles, layer, row, left_x, right_x, left_top, right_top,
-                            left_thickness, right_thickness, row_count->second, tolerance);
+                            left_thickness, right_thickness, row_count, tolerance);
             }
         }
     }

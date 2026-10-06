@@ -4,12 +4,11 @@
 #include "mesh/mesh2d.hpp"
 
 #include <span>
-#include <unordered_map>
 #include <vector>
 
 struct LayeredMeshLayout {
     std::vector<double> x;
-    std::unordered_map<int, std::size_t> layer_rows;
+    double cell_size = 0.0;
 };
 
 [[nodiscard]] LayeredMeshLayout

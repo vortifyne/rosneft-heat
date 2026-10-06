@@ -9,7 +9,7 @@
 class BasinMeshMotion {
 public:
     BasinMeshMotion(Mesh2D& mesh, const BasinConfiguration& first, const BasinConfiguration& second,
-                    double duration, bool preserve_topology = false);
+                    double duration, double cell_size, bool preserve_topology = false);
 
     void set_position(double fraction);
     void set_porosity(double fraction, std::span<double> porosity) const;

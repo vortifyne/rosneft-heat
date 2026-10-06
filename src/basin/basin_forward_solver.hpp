@@ -16,6 +16,15 @@ struct BasinForwardParameters {
     std::vector<ScalarProfile> basal_heat_flux;
 };
 
+struct BasinForwardTimings {
+    double mesh_seconds = 0.0;
+    double assembly_seconds = 0.0;
+    double linear_solve_seconds = 0.0;
+    double maturity_seconds = 0.0;
+    double transfer_seconds = 0.0;
+    double output_seconds = 0.0;
+};
+
 struct BasinForwardResult {
     int accepted_steps = 0;
     int nonlinear_iterations = 0;
@@ -28,7 +37,10 @@ struct BasinForwardResult {
     std::size_t minimum_cells = 0;
     std::size_t maximum_cells = 0;
     double maximum_cell_diameter = 0.0;
+    double minimum_cell_thickness = 0.0;
+    double maximum_cell_elongation = 0.0;
     double wall_seconds = 0.0;
+    BasinForwardTimings timings;
 };
 
 class BasinForwardSolver {
