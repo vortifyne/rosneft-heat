@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Build Docker environment
         run: docker build -t heat-env .
@@ -28,10 +30,4 @@ jobs:
         run: |
           docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} heat-env bash -c "
             ctest --test-dir build/release --output-on-failure
-          "
-
-      - name: Run Executable
-        run: |
-          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} heat-env bash -c "
-            ./build/release/heat_solver
           "
