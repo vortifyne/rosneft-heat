@@ -1,6 +1,6 @@
-#include "forward/model_heat_forward_solver.hpp"
+#include "model/model_heat_forward_solver.hpp"
 
-#include "discretization/model_heat_system.hpp"
+#include "model/model_heat_system.hpp"
 
 #include <algorithm>
 #include <chrono>

@@ -30,9 +30,7 @@ bool matrix_values_are_finite(const SparseMatrix::CscNativeType& matrix) {
 } // namespace
 
 LinearSolveResult UmfpackLinearSolver::solve(const SparseMatrix& A, const Vector& b, Vector& x,
-                                             const LinearSolveRequest& request) {
-    static_cast<void>(request);
-
+                                             const LinearSolveRequest&) {
     if (A.storage_order() != SparseStorageOrder::csc || !A.is_compressed() || A.rows() == 0 ||
         A.rows() != A.cols() || A.rows() != b.size() || !b.all_finite()) {
         return failure(LinearSolveStatus::invalid_input);

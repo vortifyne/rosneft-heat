@@ -1,4 +1,4 @@
-#include "discretization/model_heat_system.hpp"
+#include "model/model_heat_system.hpp"
 
 #include <cmath>
 #include <stdexcept>

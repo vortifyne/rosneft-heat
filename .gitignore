@@ -31,6 +31,12 @@ vcpkg_installed/
 *.exe
 *.pdb
 
+# Local data folder
+local/
+.venv/
+__pycache__/
+*.py[cod]
+
 # Test and benchmark outputs
 *.profraw
 *.profdata

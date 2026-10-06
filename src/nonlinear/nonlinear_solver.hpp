@@ -13,6 +13,20 @@ struct NonlinearSolveRequest {
     double absolute_tolerance;
     double step_relative_tolerance;
     int max_iterations;
+    bool use_backtracking = false;
+    int max_backtracking_steps = 8;
+    double backtracking_reduction = 0.5;
+};
+
+struct SolverTimings {
+    double assembly_seconds = 0.0;
+    double linear_solve_seconds = 0.0;
+
+    SolverTimings& operator+=(const SolverTimings& other) noexcept {
+        assembly_seconds += other.assembly_seconds;
+        linear_solve_seconds += other.linear_solve_seconds;
+        return *this;
+    }
 };
 
 enum class NonlinearSolveStatus {
@@ -30,6 +44,7 @@ struct [[nodiscard]] NonlinearSolveResult {
     double final_residual_norm;
     int linear_iterations = 0;
     std::optional<LinearSolveStatus> last_linear_status;
+    SolverTimings timings;
 
     [[nodiscard]] constexpr bool converged() const noexcept {
         return status == NonlinearSolveStatus::converged_residual_absolute ||

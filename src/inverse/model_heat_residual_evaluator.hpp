@@ -1,8 +1,8 @@
 #pragma once
 
-#include "forward/model_heat_forward_solver.hpp"
 #include "inverse/model_heat_observation_data.hpp"
 #include "inverse/model_heat_parameter_space.hpp"
+#include "model/model_heat_forward_solver.hpp"
 
 struct [[nodiscard]] ModelHeatResidualResult {
     TimeIntegrationResult time_integration;

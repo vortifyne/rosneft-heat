@@ -235,4 +235,22 @@ TEST(NonlinearSolverTest, ReportsLinearSolveFailure) {
     EXPECT_DOUBLE_EQ(x[0], 0.0);
 }
 
+TEST(NonlinearSolverTest, BacktrackingRejectsAResidualIncreasingFullStep) {
+    ScalarNonlinearSystem system;
+    Vector x{0.1};
+    NonlinearSolver solver;
+    NonlinearSolveRequest request = kNewtonRequest;
+    request.relative_tolerance = 0.0;
+    request.absolute_tolerance = 0.0;
+    request.step_relative_tolerance = 0.0;
+    request.max_iterations = 1;
+    request.use_backtracking = true;
+
+    const NonlinearSolveResult result = solver.solve(system, x, request, kDirectLinearRequest);
+
+    EXPECT_EQ(result.status, NonlinearSolveStatus::max_iterations);
+    EXPECT_LT(result.final_residual_norm, 1.99);
+    EXPECT_LT(x[0], 2.0);
+}
+
 } // namespace

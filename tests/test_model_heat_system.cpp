@@ -1,5 +1,5 @@
-#include "discretization/model_heat_system.hpp"
 #include "linear/umfpack_linear_solver.hpp"
+#include "model/model_heat_system.hpp"
 
 #include <algorithm>
 #include <cmath>

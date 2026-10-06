@@ -1,0 +1,14 @@
+[project]
+name = "rosneft-heat-tools"
+version = "0.1.0"
+description = "Средства подготовки и визуальной проверки данных задачи теплопереноса"
+requires-python = ">=3.12"
+dependencies = [
+  "matplotlib>=3.10,<4",
+  "numpy>=2.3,<3",
+  "openpyxl>=3.1,<4",
+  "pandas>=2.3,<4",
+]
+
+[tool.uv]
+package = false
