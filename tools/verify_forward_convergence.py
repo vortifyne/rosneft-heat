@@ -230,7 +230,6 @@ def main() -> None:
             "tools/prepare_forward_data.py",
             str(arguments.data),
             str(shared_input),
-            "25",
         ],
         check=True,
     )

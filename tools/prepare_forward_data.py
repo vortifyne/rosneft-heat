@@ -8,13 +8,6 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
-import numpy as np
-
-from prepare_mesh_geometry import (
-    sampled_layers,
-    sampling_points,
-)
-
 
 def load_module(path: Path) -> ModuleType:
     specification = importlib.util.spec_from_file_location("organizer_basin_data", path)
@@ -32,21 +25,10 @@ def write_csv(path: Path, header: tuple[str, ...], rows: list[tuple[object, ...]
         writer.writerows(rows)
 
 
-def nearest_values(
-    source_x: np.ndarray, source_values: np.ndarray, target_x: np.ndarray
-) -> np.ndarray:
-    right = np.searchsorted(source_x, target_x, side="left")
-    right = np.clip(right, 0, len(source_x) - 1)
-    left = np.maximum(right - 1, 0)
-    use_left = np.abs(target_x - source_x[left]) <= np.abs(source_x[right] - target_x)
-    return source_values[np.where(use_left, left, right)]
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare compact forward-problem input")
     parser.add_argument("data_dir", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("cell_size", type=float)
     parser.add_argument(
         "--basin-data",
         type=Path,
@@ -66,25 +48,16 @@ def main() -> None:
     boundary_rows: list[tuple[object, ...]] = []
     for age in ages:
         snapshot = data.snapshot(age)
-        geometry = sampled_layers(snapshot, sampling_points(snapshot, arguments.cell_size))
         configuration_rows.append((f"{age:.15g}",))
 
-        for layer, sampled in zip(snapshot, geometry, strict=True):
+        for layer in snapshot:
             layer_id = layer_ids[str(layer["layer"])]
-            source_x = np.asarray(layer["x"], dtype=np.float64)
-            target_x = sampled["x"]
-            lithotypes = nearest_values(
-                source_x, np.asarray(layer["lith"], dtype=int), target_x
-            )
-            porosities = np.interp(
-                target_x, source_x, np.asarray(layer["porosity"], dtype=np.float64)
-            )
             for x, top, bottom, lithotype, porosity in zip(
-                target_x,
-                sampled["top"],
-                sampled["bottom"],
-                lithotypes,
-                porosities,
+                layer["x"],
+                layer["z_top"],
+                layer["z_bot"],
+                layer["lith"],
+                layer["porosity"],
                 strict=True,
             ):
                 layer_rows.append(
@@ -92,11 +65,11 @@ def main() -> None:
                         f"{age:.15g}",
                         layer_id,
                         layer["layer"],
-                        f"{float(x):.15g}",
-                        f"{float(top):.15g}",
-                        f"{float(bottom):.15g}",
+                        f"{float(x):.17g}",
+                        f"{float(top):.17g}",
+                        f"{float(bottom):.17g}",
                         int(lithotype),
-                        f"{0.01 * float(porosity):.15g}",
+                        f"{0.01 * float(porosity):.17g}",
                     )
                 )
 
@@ -167,7 +140,7 @@ def main() -> None:
 
     print(
         f"prepared={arguments.output} configurations={len(ages)} "
-        f"layers={len(layer_ids)} cell_size={arguments.cell_size:g}"
+        f"layers={len(layer_ids)} geometry=original"
     )
 
 

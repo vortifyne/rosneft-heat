@@ -2,14 +2,12 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <stdexcept>
 #include <utility>
 
 namespace {
 
 constexpr double kRelativeThicknessTolerance = 1.0e-10;
-constexpr double kMinimumHorizontalInterval = 50.0;
 
 double maximum_thickness(const BasinLayerProfile& layer) {
     double result = 0.0;
@@ -20,40 +18,19 @@ double maximum_thickness(const BasinLayerProfile& layer) {
 }
 
 void append_geometry_events(std::vector<double>& points, const BasinLayerProfile& layer) {
-    const double tolerance = kRelativeThicknessTolerance * std::max(1.0, maximum_thickness(layer));
-    points.push_back(layer.x.front());
-    points.push_back(layer.x.back());
-    for (std::size_t index = 0; index < layer.x.size(); ++index) {
-        if (layer.bottom[index] - layer.top[index] > tolerance) {
-            continue;
-        }
-        points.push_back(layer.x[index]);
-    }
+    // Geometry simplification belongs before meshing: dropping a profile endpoint can
+    // remove a whole strip of a layer and turn its contacts into external boundaries.
+    points.insert(points.end(), layer.x.begin(), layer.x.end());
 }
 
-std::vector<double> make_horizontal_axis(std::vector<double> events, const double minimum_x,
-                                         const double maximum_x, const double cell_size) {
+std::vector<double> make_horizontal_axis(std::vector<double> events, const double cell_size) {
     std::sort(events.begin(), events.end());
     events.erase(std::unique(events.begin(), events.end()), events.end());
 
-    const double minimum_interval = std::max(kMinimumHorizontalInterval, cell_size);
-    std::vector<double> separated;
-    separated.reserve(events.size());
-    separated.push_back(minimum_x);
-    for (const double event : events) {
-        if (event <= minimum_x || event >= maximum_x) {
-            continue;
-        }
-        if (event - separated.back() >= minimum_interval && maximum_x - event >= minimum_interval) {
-            separated.push_back(event);
-        }
-    }
-    separated.push_back(maximum_x);
-
     std::vector<double> result;
-    for (std::size_t interval = 0; interval + 1 < separated.size(); ++interval) {
-        const double left = separated[interval];
-        const double right = separated[interval + 1];
+    for (std::size_t interval = 0; interval + 1 < events.size(); ++interval) {
+        const double left = events[interval];
+        const double right = events[interval + 1];
         const std::size_t count = std::max<std::size_t>(
             1, static_cast<std::size_t>(std::ceil((right - left) / cell_size)));
         for (std::size_t part = 0; part < count; ++part) {
@@ -61,7 +38,7 @@ std::vector<double> make_horizontal_axis(std::vector<double> events, const doubl
             result.push_back(((1.0 - fraction) * left) + (fraction * right));
         }
     }
-    result.push_back(maximum_x);
+    result.push_back(events.back());
     return result;
 }
 
@@ -109,8 +86,6 @@ LayeredMeshLayout make_layered_mesh_layout(const std::span<const BasinConfigurat
         throw std::invalid_argument("Layered mesh cell size must be finite and positive");
     }
 
-    double minimum_x = std::numeric_limits<double>::max();
-    double maximum_x = std::numeric_limits<double>::lowest();
     std::vector<double> events;
     for (const BasinConfiguration& configuration : configurations) {
         for (const BasinLayerProfile& layer : configuration.layers) {
@@ -118,13 +93,10 @@ LayeredMeshLayout make_layered_mesh_layout(const std::span<const BasinConfigurat
                 layer.x.size() != layer.bottom.size()) {
                 throw std::invalid_argument("Invalid basin layer profile for layered mesh");
             }
-            minimum_x = std::min(minimum_x, layer.x.front());
-            maximum_x = std::max(maximum_x, layer.x.back());
             append_geometry_events(events, layer);
         }
     }
-    return {.x = make_horizontal_axis(std::move(events), minimum_x, maximum_x, cell_size),
-            .cell_size = cell_size};
+    return {.x = make_horizontal_axis(std::move(events), cell_size), .cell_size = cell_size};
 }
 
 Mesh2D make_layered_mesh(const BasinConfiguration& configuration, const LayeredMeshLayout& layout) {
@@ -165,5 +137,7 @@ Mesh2D make_layered_mesh(const BasinConfiguration& configuration, const LayeredM
                  std::make_move_iterator(quads.end()));
     cells.insert(cells.end(), std::make_move_iterator(triangles.begin()),
                  std::make_move_iterator(triangles.end()));
-    return Mesh2D::from_cells(cells);
+    Mesh2D mesh = Mesh2D::from_cells(cells);
+    validate_layered_mesh_coverage(mesh, configuration);
+    return mesh;
 }

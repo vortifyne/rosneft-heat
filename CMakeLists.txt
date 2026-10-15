@@ -75,6 +75,7 @@ add_library(basin_heat STATIC
   src/basin/basin_state.cpp
   src/basin/forward_output.cpp
   src/basin/layered_mesh.cpp
+  src/basin/layered_mesh_coverage.cpp
   src/basin/mesh_motion.cpp
   src/basin/vtu_output.cpp
   src/discretization/heat_system.cpp
