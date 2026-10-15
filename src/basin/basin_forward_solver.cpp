@@ -62,10 +62,6 @@ NonlinearSolveRequest nonlinear_request() {
     };
 }
 
-LinearSolveRequest linear_request() {
-    return {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1};
-}
-
 void accumulate_result(BasinForwardResult& total, const TimeIntegrationResult& step) {
     total.accepted_steps += step.accepted_steps;
     total.nonlinear_iterations += step.nonlinear_iterations;
@@ -77,6 +73,9 @@ void accumulate_result(BasinForwardResult& total, const TimeIntegrationResult& s
             "Nonlinear solution did not converge: nonlinear_status=" +
             std::to_string(
                 step.last_nonlinear_status ? static_cast<int>(*step.last_nonlinear_status) : -1) +
+            " linear_status=" +
+            std::to_string(step.last_linear_status ? static_cast<int>(*step.last_linear_status)
+                                                   : -1) +
             " nonlinear_iterations=" + std::to_string(step.nonlinear_iterations) +
             " residual=" + std::to_string(step.last_residual_norm));
     }
@@ -239,6 +238,9 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardParameters& param
                                 parameters.basal_heat_flux[epoch],
                                 parameters.basal_heat_flux[epoch + 1], elapsed, duration));
 
+        TimeIntegrator integrator;
+        integrator.set_initial_solution(elapsed, state.temperature);
+        integrator.set_linear_solver(settings.linear_solver);
         double current_time = elapsed;
         while (current_time < epoch_end) {
             const double old_time = current_time;
@@ -253,11 +255,9 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardParameters& param
             system->update_geometry(state.mesh);
             result.timings.mesh_seconds += elapsed_seconds(operation_start);
 
-            TimeIntegrator integrator;
-            integrator.set_initial_solution(old_time, state.temperature);
             integrator.set_timestep(target - old_time);
             const TimeIntegrationResult step =
-                integrator.advance_to(*system, target, nonlinear_request(), linear_request());
+                integrator.advance_to(*system, target, nonlinear_request(), settings.linear);
             result.timings.assembly_seconds += step.timings.assembly_seconds;
             result.timings.linear_solve_seconds += step.timings.linear_solve_seconds;
             try {

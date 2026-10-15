@@ -14,11 +14,9 @@ find_package(UMFPACK CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
 
-if(HEAT_BUILD_MODEL_INVERSE)
-  find_package(PkgConfig REQUIRED)
-  pkg_search_module(PETSc REQUIRED IMPORTED_TARGET PETSc petsc)
-  find_package(MPI REQUIRED)
-endif()
+find_package(PkgConfig REQUIRED)
+pkg_search_module(PETSc REQUIRED IMPORTED_TARGET PETSc petsc)
+find_package(MPI REQUIRED)
 
 set(TQMesh_VERSION_MAJOR 1)
 set(TQMesh_VERSION_MINOR 4)
@@ -39,6 +37,7 @@ target_include_directories(tqmesh_headers SYSTEM INTERFACE
 
 add_library(heat_numerics STATIC
   src/linear/umfpack_linear_solver.cpp
+  src/linear/petsc_krylov_linear_solver.cpp
   src/nonlinear/nonlinear_solver.cpp
   src/time/bdf1.cpp
   src/time/time_integrator.cpp
@@ -47,7 +46,7 @@ add_library(heat_numerics STATIC
 target_include_directories(heat_numerics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(heat_numerics
   PUBLIC Eigen3::Eigen
-  PRIVATE SuiteSparse::UMFPACK_static
+  PRIVATE SuiteSparse::UMFPACK_static PkgConfig::PETSc MPI::MPI_CXX
 )
 
 if(MSVC)
@@ -130,7 +129,7 @@ if(HEAT_BUILD_MODEL_INVERSE)
 endif()
 
 add_executable(heat_forward src/basin/main.cpp)
-target_link_libraries(heat_forward PRIVATE basin_heat)
+target_link_libraries(heat_forward PRIVATE basin_heat PkgConfig::PETSc MPI::MPI_CXX)
 
 if(MSVC)
   target_compile_options(heat_forward PRIVATE /W4 /permissive-)
@@ -149,6 +148,7 @@ add_executable(model_unit_tests
   tests/test_sparse_matrix.cpp
   tests/test_time_integrator.cpp
   tests/test_umfpack_linear_solver.cpp
+  tests/test_petsc_krylov_linear_solver.cpp
   tests/test_umfpack_smoke.cpp
   tests/test_vector.cpp
 )
@@ -158,6 +158,7 @@ target_link_libraries(model_unit_tests PRIVATE
   model_heat
   SuiteSparse::UMFPACK_static
   GTest::gtest_main
+  PkgConfig::PETSc MPI::MPI_CXX
 )
 
 if(HEAT_BUILD_MODEL_INVERSE)
@@ -199,6 +200,7 @@ add_executable(heat_unit_tests
 target_link_libraries(heat_unit_tests PRIVATE
   basin_heat
   GTest::gtest_main
+  PkgConfig::PETSc MPI::MPI_CXX
 )
 
 if(NOT MSVC)

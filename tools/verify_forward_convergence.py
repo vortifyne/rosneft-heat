@@ -218,7 +218,7 @@ def main() -> None:
     )
     parser.add_argument("data", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--solver", type=Path, default=Path("build/release/heat_forward"))
+    parser.add_argument("--solver", type=Path, default=Path("tools/run_heat_forward.sh"))
     arguments = parser.parse_args()
     if arguments.output.exists():
         raise RuntimeError(f"Output directory already exists: {arguments.output}")

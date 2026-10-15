@@ -1,6 +1,7 @@
 #pragma once
 
 #include "basin/basin_input.hpp"
+#include "linear/linear_solver.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -9,6 +10,8 @@
 struct BasinForwardSettings {
     double cell_size = 50.0;
     double timestep_ma = 0.25;
+    LinearSolverKind linear_solver = LinearSolverKind::umfpack_lu;
+    LinearSolveRequest linear{};
 };
 
 struct BasinForwardParameters {

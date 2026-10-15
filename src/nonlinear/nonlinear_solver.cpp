@@ -1,5 +1,6 @@
 #include "nonlinear/nonlinear_solver.hpp"
 
+#include "linear/petsc_krylov_linear_solver.hpp"
 #include "linear/umfpack_linear_solver.hpp"
 
 #include <chrono>
@@ -178,6 +179,41 @@ std::unique_ptr<LinearSolver> NonlinearSolver::make_linear_solver(LinearSolverKi
     switch (kind) {
     case LinearSolverKind::umfpack_lu:
         return std::make_unique<UmfpackLinearSolver>();
+    case LinearSolverKind::petsc_gmres_ilu:
+        return std::make_unique<PetscKrylovLinearSolver>();
+    case LinearSolverKind::petsc_gmres_ilu2:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::gmres,
+                                                         PetscPreconditioner::ilu2);
+    case LinearSolverKind::petsc_gmres_gamg:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::gmres,
+                                                         PetscPreconditioner::gamg);
+    case LinearSolverKind::petsc_gmres_boomeramg:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::gmres,
+                                                         PetscPreconditioner::boomeramg);
+    case LinearSolverKind::petsc_bicgstab_ilu:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
+                                                         PetscPreconditioner::ilu0);
+    case LinearSolverKind::petsc_bicgstab_ilu2:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
+                                                         PetscPreconditioner::ilu2);
+    case LinearSolverKind::petsc_bicgstab_gamg:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
+                                                         PetscPreconditioner::gamg);
+    case LinearSolverKind::petsc_bicgstab_boomeramg:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
+                                                         PetscPreconditioner::boomeramg);
+    case LinearSolverKind::petsc_gmres_gamg_reuse:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::gmres,
+                                                         PetscPreconditioner::gamg, true);
+    case LinearSolverKind::petsc_gmres_boomeramg_reuse:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::gmres,
+                                                         PetscPreconditioner::boomeramg, true);
+    case LinearSolverKind::petsc_bicgstab_gamg_reuse:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
+                                                         PetscPreconditioner::gamg, true);
+    case LinearSolverKind::petsc_bicgstab_boomeramg_reuse:
+        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
+                                                         PetscPreconditioner::boomeramg, true);
     }
 
     throw std::invalid_argument("Unknown linear solver kind");
