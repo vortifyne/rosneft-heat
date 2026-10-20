@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 
 namespace {
 
@@ -243,7 +245,16 @@ MultipointFlux::one_sided_flux(const std::size_t cell, const FaceReference& targ
         }
     }
     if (best_other == nullptr) {
-        throw std::runtime_error("No positive two-face stencil for multipoint flux");
+        std::ostringstream message;
+        message << "No positive two-face stencil for multipoint flux at cell " << cell
+                << ", center=(" << cell_centers_[cell].x() << ',' << cell_centers_[cell].y()
+                << "), conormal=(" << conormal.x() << ',' << conormal.y() << "), directions=";
+        for (const FaceReference& reference : incident) {
+            const Sample incident_sample = sample(cell, reference, conductivity, boundary_data);
+            message << " (" << incident_sample.displacement.x() << ','
+                    << incident_sample.displacement.y() << ')';
+        }
+        throw std::runtime_error(message.str());
     }
 
     const Sample other_sample = sample(cell, *best_other, conductivity, boundary_data);
