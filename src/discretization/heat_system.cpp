@@ -130,7 +130,11 @@ void HeatSystem::update_geometry(const Mesh2D& mesh) {
                                   .center = point(edge->xy()),
                                   .length = edge->length(),
                                   .normal_distance = normal_distance,
-                                  .correction = normal - (displacement / normal_distance)});
+                                  .correction = normal - (displacement / normal_distance),
+                                  .first_endpoint = point(edge->v1().xy()),
+                                  .second_endpoint = point(edge->v2().xy()),
+                                  .tangential_offset = displacement.dot(
+                                      vector(edge->v2().xy() - edge->v1().xy()) / edge->length())});
         surface_samples.push_back({cell_index, displacement});
     }
 
@@ -154,6 +158,7 @@ void HeatSystem::update_geometry(const Mesh2D& mesh) {
 
     gradient_reconstruction_.emplace(cell_count, connections, surface_samples);
     surface_temperatures_.assign(surface_faces_.size(), 0.0);
+    surface_tangential_increments_.assign(surface_faces_.size(), 0.0);
     gradients_.assign(cell_count, LeastSquaresGradient::Gradient::Zero());
 }
 
@@ -183,15 +188,7 @@ HeatEnergyRates HeatSystem::energy_rates(const double time, const Vector& soluti
 
     HeatEnergyRates result;
     for (std::size_t index = 0; index < surface_faces_.size(); ++index) {
-        const BoundaryFace& face = surface_faces_[index];
-        const double conductivity = thermal_conductivity_[face.cell];
-        const double coefficient = conductivity * face.length / face.normal_distance;
-        const double orthogonal_flux =
-            coefficient *
-            (solution[static_cast<Vector::Index>(face.cell)] - surface_temperatures_[index]);
-        const double correction_flux =
-            -conductivity * face.length * gradients_[face.cell].dot(face.correction);
-        result.surface_outflow += orthogonal_flux + correction_flux;
+        result.surface_outflow += surface_flux(index, solution);
     }
     for (const BoundaryFace& face : basal_faces_) {
         const double flux = boundary_conditions_.basal_heat_flux(face.center, time);
@@ -324,15 +321,8 @@ void HeatSystem::assemble_surface_boundary(ResidualAssembly& assembly, const dou
     static_cast<void>(solution_derivative);
     for (std::size_t index = 0; index < surface_faces_.size(); ++index) {
         const BoundaryFace& face = surface_faces_[index];
-        const double conductivity = thermal_conductivity_[face.cell];
-        const double coefficient = conductivity * face.length / face.normal_distance;
-        const double orthogonal_flux =
-            coefficient *
-            (solution[static_cast<Vector::Index>(face.cell)] - surface_temperatures_[index]);
-        const double correction_flux =
-            -conductivity * face.length * gradients_[face.cell].dot(face.correction);
         assembly.residual[static_cast<Vector::Index>(face.cell)] +=
-            (orthogonal_flux + correction_flux) * inverse_cell_area_[face.cell];
+            surface_flux(index, solution) * inverse_cell_area_[face.cell];
     }
 }
 
@@ -465,11 +455,24 @@ void HeatSystem::assemble_nonorthogonal_correction_matrix(MatrixAssembly& assemb
                      -common * neighbor_weight * inverse_cell_area_[face.neighbor]);
     }
 
-    for (const BoundaryFace& face : surface_faces_) {
-        const double factor =
-            -thermal_conductivity_[face.cell] * face.length * inverse_cell_area_[face.cell];
-        add_gradient(face.cell, face.cell, face.correction, factor);
-    }
+    // The prescribed surface tangential gradient is independent of the cell temperatures.
+    // Previous surface correction using the reconstructed cell gradient:
+    // for (const BoundaryFace& face : surface_faces_) {
+    //     const double factor =
+    //         -thermal_conductivity_[face.cell] * face.length * inverse_cell_area_[face.cell];
+    //     add_gradient(face.cell, face.cell, face.correction, factor);
+    // }
+}
+
+double HeatSystem::surface_flux(const std::size_t index, const Vector& solution) const {
+    const BoundaryFace& face = surface_faces_[index];
+    const double coefficient =
+        thermal_conductivity_[face.cell] * face.length / face.normal_distance;
+    // Previous correction: -conductivity * face.length *
+    // gradients_[face.cell].dot(face.correction). For d = face_center - cell_center, dT/dn = (T_D -
+    // T_C - d_t * dT_D/ds) / d_n.
+    return coefficient * (solution[static_cast<Vector::Index>(face.cell)] -
+                          surface_temperatures_[index] + surface_tangential_increments_[index]);
 }
 
 double HeatSystem::face_conductivity(const InternalFace& face) const noexcept {
@@ -506,6 +509,15 @@ void HeatSystem::prepare_gradients(const double time, const Vector& solution) co
         surface_temperatures_[index] =
             boundary_conditions_.surface_temperature(surface_faces_[index].center, time);
         check_finite(surface_temperatures_[index], "Surface temperature must be finite");
+        const BoundaryFace& face = surface_faces_[index];
+        const double first_temperature =
+            boundary_conditions_.surface_temperature(face.first_endpoint, time);
+        const double second_temperature =
+            boundary_conditions_.surface_temperature(face.second_endpoint, time);
+        check_finite(first_temperature, "Surface endpoint temperature must be finite");
+        check_finite(second_temperature, "Surface endpoint temperature must be finite");
+        const double tangential_derivative = (second_temperature - first_temperature) / face.length;
+        surface_tangential_increments_[index] = face.tangential_offset * tangential_derivative;
     }
     gradient_reconstruction_->reconstruct(
         std::span<const double>(solution.native().data(),

@@ -14,14 +14,16 @@ namespace {
 
 bool contains(const TQMesh::Facet& cell, const Point2D point) {
     double sign = 0.0;
-    double scale = 1.0;
     for (std::size_t index = 0; index < cell.n_vertices(); ++index) {
         const auto& first = cell.vertex(index).xy();
         const auto& second = cell.vertex((index + 1) % cell.n_vertices()).xy();
         const double cross = ((second.x - first.x) * (point.z - first.y)) -
                              ((second.y - first.y) * (point.x - first.x));
-        scale = std::max(scale, std::abs(first.x) + std::abs(first.y));
-        if (std::abs(cross) <= 1.0e-10 * scale) {
+        const double scale = std::max(
+            {1.0, std::abs(first.x), std::abs(first.y), std::abs(second.x), std::abs(second.y)});
+        const double roundoff = 64.0 * std::numeric_limits<double>::epsilon() * scale *
+                                std::hypot(second.x - first.x, second.y - first.y);
+        if (std::abs(cross) <= roundoff) {
             continue;
         }
         if (sign == 0.0) {

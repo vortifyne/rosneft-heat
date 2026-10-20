@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
 #include <limits>
 #include <set>
 #include <sstream>
@@ -44,8 +45,8 @@ std::pair<double, double> section(const TQMesh::Facet& cell, const double x) {
     return {top, bottom};
 }
 
-void validate_layer(const BasinLayerProfile& layer, const std::vector<const TQMesh::Facet*>& facets,
-                    const double tolerance) {
+void validate_layer(const BasinLayerGeometry& layer,
+                    const std::vector<const TQMesh::Facet*>& facets, const double tolerance) {
     std::vector<double> breaks = layer.x;
     std::vector<CoverageCell> cells;
     cells.reserve(facets.size());
@@ -136,17 +137,24 @@ void validate_layer(const BasinLayerProfile& layer, const std::vector<const TQMe
 
 } // namespace
 
-void validate_layered_mesh_coverage(const Mesh2D& mesh, const BasinConfiguration& configuration,
+void validate_layered_mesh_coverage(const Mesh2D& mesh, const BasinGeometry& configuration,
                                     const double tolerance) {
     if (!(tolerance > 0.0) || !std::isfinite(tolerance)) {
         throw std::invalid_argument("Coverage tolerance must be finite and positive");
     }
+    std::vector<BasinLayerGeometry> profiles;
     std::unordered_map<int, std::vector<const TQMesh::Facet*>> by_layer;
-    for (const auto* cell : mesh.cells()) {
-        (void)configuration.layer(cell->color());
-        by_layer[cell->color()].push_back(cell);
+    for (const auto& region : configuration.layers) {
+        profiles.push_back(configuration.layer(region.id));
+        by_layer.emplace(region.id, std::vector<const TQMesh::Facet*>{});
     }
-    for (const auto& layer : configuration.layers) {
+    for (const auto* cell : mesh.cells()) {
+        const auto found = by_layer.find(cell->color());
+        if (found == by_layer.end())
+            throw std::runtime_error("Unknown material in layer coverage check");
+        found->second.push_back(cell);
+    }
+    for (const auto& layer : profiles) {
         validate_layer(layer, by_layer[layer.id], tolerance);
     }
     // A complete partition of each layer can still have unmatched contact edges
@@ -157,7 +165,7 @@ void validate_layered_mesh_coverage(const Mesh2D& mesh, const BasinConfiguration
             const auto point = edge->xy();
             double top = std::numeric_limits<double>::infinity();
             double bottom = -top;
-            for (const auto& layer : configuration.layers) {
+            for (const auto& layer : profiles) {
                 if (point.x < layer.x.front() || point.x > layer.x.back()) {
                     continue;
                 }
@@ -170,8 +178,18 @@ void validate_layered_mesh_coverage(const Mesh2D& mesh, const BasinConfiguration
             }
             const double expected = kind == BoundaryKind::top ? top : bottom;
             if (!std::isfinite(expected) || std::abs(point.y - expected) > tolerance) {
-                throw std::runtime_error("Layer contact incorrectly appears as thermal boundary");
+                std::ostringstream message;
+                message << std::setprecision(17)
+                        << "Layer contact incorrectly appears as thermal boundary at (" << point.x
+                        << ',' << point.y << "), expected=" << expected
+                        << ", material=" << mesh.owner(*edge).color();
+                throw std::runtime_error(message.str());
             }
         }
     }
+}
+
+void validate_layered_mesh_coverage(const Mesh2D& mesh, const BasinConfiguration& configuration,
+                                    const double tolerance) {
+    validate_layered_mesh_coverage(mesh, make_basin_geometry(configuration), tolerance);
 }

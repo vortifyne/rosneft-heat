@@ -322,3 +322,52 @@ TEST(HeatSystem, RefreshesTemperatureDependentPropertiesForResidualAndMatrix) {
     EXPECT_DOUBLE_EQ(system.volumetric_heat_capacity().front(), 1350.0);
     EXPECT_DOUBLE_EQ(system.heat_production().front(), 1.0e-6);
 }
+
+TEST(HeatSystem, UsesPrescribedTangentialGradientOnSlopingSurface) {
+    const Mesh2D mesh = Mesh2D::from_cells(std::vector<Mesh2D::Cell>{
+        {.vertices = {{0.0, 0.0}, {2.0, 3.0}, {2.0, 5.0}, {0.0, 2.0}},
+         .edge_kinds = {BoundaryKind::top, BoundaryKind::right, BoundaryKind::bottom,
+                        BoundaryKind::left},
+         .id = 1},
+    });
+    constexpr double conductivity = 2.0;
+    constexpr double gradient = 4.0;
+    HeatSystem system(
+        mesh, std::vector<double>{conductivity}, std::vector<double>{3.0}, std::vector<double>{0.0},
+        {.surface_temperature = [](Point2D p,
+                                   double time) { return 300.0 + gradient * p.z + time; },
+         .basal_heat_flux =
+             [](Point2D, double) { return conductivity * gradient * 2.0 / std::sqrt(13.0); }});
+    system.set_implicit_nonorthogonal_correction(true);
+    constexpr double time = 2.0;
+    Vector temperature(1);
+    temperature[0] = 300.0 + gradient * mesh.cells()[0]->xy().y + time;
+    Vector derivative(1);
+    derivative.set_zero();
+    Vector residual;
+    system.assemble_residual(time, temperature, derivative, residual);
+    EXPECT_LT(residual.infinity_norm(), 1.0e-11);
+    EXPECT_NEAR(system.energy_rates(time, temperature).surface_outflow, 16.0, 1.0e-11);
+
+    SparseMatrix matrix;
+    system.assemble_matrix(NonlinearMethod::picard, time, temperature, derivative, 0.0, matrix);
+    constexpr double epsilon = 1.0e-3;
+    temperature[0] += epsilon;
+    Vector shifted;
+    system.assemble_residual(time, temperature, derivative, shifted);
+    EXPECT_NEAR((shifted[0] - residual[0]) / epsilon, matrix.coefficient(0, 0), 1.0e-8);
+}
+
+TEST(HeatSystem, WarmCellReleasesHeatThroughConstantSlopingSurface) {
+    const Mesh2D mesh = Mesh2D::from_cells(std::vector<Mesh2D::Cell>{
+        {.vertices = {{0.0, 0.0}, {2.0, 3.0}, {2.0, 5.0}, {0.0, 2.0}},
+         .edge_kinds = {BoundaryKind::top, BoundaryKind::right, BoundaryKind::bottom,
+                        BoundaryKind::left},
+         .id = 1},
+    });
+    const HeatSystem system = make_system(mesh);
+    Vector temperature(1);
+    temperature[0] = 310.0;
+    // The normal distance is 2/sqrt(13), so k*L*(T_C-T_D)/d_n = 130.
+    EXPECT_NEAR(system.energy_rates(0.0, temperature).surface_outflow, 130.0, 1.0e-11);
+}

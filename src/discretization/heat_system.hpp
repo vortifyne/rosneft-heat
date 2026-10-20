@@ -67,6 +67,9 @@ private:
         double length;
         double normal_distance;
         Eigen::Vector2d correction;
+        Point2D first_endpoint{};
+        Point2D second_endpoint{};
+        double tangential_offset = 0.0;
     };
 
     struct ResidualAssembly;
@@ -109,6 +112,7 @@ private:
     void assemble_orthogonal_diffusion_matrix(MatrixAssembly& assembly) const;
     void assemble_nonorthogonal_correction_matrix(MatrixAssembly& assembly) const;
 
+    [[nodiscard]] double surface_flux(std::size_t index, const Vector& solution) const;
     [[nodiscard]] double face_conductivity(const InternalFace& face) const noexcept;
     void check_vector_sizes(const Vector& solution, const Vector& solution_derivative) const;
     void update_properties(const Vector& solution) const;
@@ -128,6 +132,7 @@ private:
 
     std::optional<LeastSquaresGradient> gradient_reconstruction_;
     mutable std::vector<double> surface_temperatures_;
+    mutable std::vector<double> surface_tangential_increments_;
     mutable std::vector<LeastSquaresGradient::Gradient> gradients_;
     bool implicit_nonorthogonal_correction_ = false;
 };

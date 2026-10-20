@@ -104,3 +104,21 @@ TEST(MeshTransfer, ImprovesLinearFieldOverPiecewiseConstantTransfer) {
     }
     EXPECT_LT(linear_error, constant_error);
 }
+
+TEST(MeshTransfer, DistinguishesVeryThinAdjacentCellsAtLargeCoordinates) {
+    const double x = 487.5, z = 1950., width = 8.e-8;
+    const std::vector<Mesh2D::Cell> cells{
+        {{{x - 1., z - 9.}, {x, z - 9.}, {x, z}},
+         {BoundaryKind::top, BoundaryKind::right, BoundaryKind::left},
+         1},
+        {{{x, z}, {x, z - 9.}, {x + width, z}},
+         {BoundaryKind::top, BoundaryKind::right, BoundaryKind::left},
+         1}};
+    const auto mesh = Mesh2D::from_cells(cells);
+    const auto locate = make_cell_index_locator(mesh);
+    for (const auto* cell : mesh.cells()) {
+        const auto found = locate({cell->xy().x, cell->xy().y});
+        ASSERT_TRUE(found.has_value());
+        EXPECT_EQ(*found, static_cast<std::size_t>(cell->index()));
+    }
+}

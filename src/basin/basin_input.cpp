@@ -1,5 +1,7 @@
 #include "basin/basin_input.hpp"
 
+#include "basin/profile_interpolation.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -50,24 +52,6 @@ std::vector<std::vector<std::string>> read_csv(const std::filesystem::path& path
     return rows;
 }
 
-double interpolate(const std::span<const double> x, const std::span<const double> values,
-                   const double coordinate) {
-    if (x.empty() || x.size() != values.size()) {
-        throw std::logic_error("Invalid scalar profile");
-    }
-    if (coordinate <= x.front()) {
-        return values.front();
-    }
-    if (coordinate >= x.back()) {
-        return values.back();
-    }
-    const auto upper = std::upper_bound(x.begin(), x.end(), coordinate);
-    const std::size_t right = static_cast<std::size_t>(upper - x.begin());
-    const std::size_t left = right - 1;
-    const double fraction = (coordinate - x[left]) / (x[right] - x[left]);
-    return ((1.0 - fraction) * values[left]) + (fraction * values[right]);
-}
-
 BasinConfiguration& find_configuration(std::vector<BasinConfiguration>& configurations,
                                        const double age) {
     const auto found =
@@ -82,19 +66,19 @@ BasinConfiguration& find_configuration(std::vector<BasinConfiguration>& configur
 } // namespace
 
 double ScalarProfile::at(const double coordinate) const {
-    return interpolate(x, values, coordinate);
+    return basin_detail::interpolate(x, values, coordinate);
 }
 
 double BasinLayerProfile::top_at(const double coordinate) const {
-    return interpolate(x, top, coordinate);
+    return basin_detail::interpolate(x, top, coordinate);
 }
 
 double BasinLayerProfile::bottom_at(const double coordinate) const {
-    return interpolate(x, bottom, coordinate);
+    return basin_detail::interpolate(x, bottom, coordinate);
 }
 
 double BasinLayerProfile::porosity_at(const double coordinate) const {
-    return interpolate(x, porosity, coordinate);
+    return basin_detail::interpolate(x, porosity, coordinate);
 }
 
 int BasinLayerProfile::lithotype_at(const double coordinate) const {

@@ -56,9 +56,6 @@ NonlinearSolveRequest nonlinear_request() {
         .absolute_tolerance = 0.0,
         .step_relative_tolerance = 1.0e-8,
         .max_iterations = 200,
-        .use_backtracking = true,
-        .max_backtracking_steps = 20,
-        .backtracking_reduction = 0.5,
     };
 }
 

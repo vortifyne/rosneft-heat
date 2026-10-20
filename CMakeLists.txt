@@ -72,9 +72,12 @@ endif()
 add_library(basin_heat STATIC
   src/basin/basin_forward_solver.cpp
   src/basin/basin_input.cpp
+  src/basin/basin_geometry.cpp
   src/basin/basin_state.cpp
   src/basin/forward_output.cpp
   src/basin/layered_mesh.cpp
+  src/basin/variable_layered_mesh.cpp
+  src/basin/layer_strip_mesh.cpp
   src/basin/layered_mesh_coverage.cpp
   src/basin/mesh_motion.cpp
   src/basin/vtu_output.cpp
@@ -82,6 +85,7 @@ add_library(basin_heat STATIC
   src/discretization/least_squares_gradient.cpp
   src/mesh/mesh2d.cpp
   src/mesh/mesh_transfer.cpp
+  src/mesh/strip_mesh.cpp
   src/physics/easy_ro.cpp
   src/physics/thermophysical_properties.cpp
 )
@@ -191,10 +195,12 @@ add_executable(heat_unit_tests
   tests/test_easy_ro.cpp
   tests/test_heat_system.cpp
   tests/test_layered_mesh.cpp
+  tests/test_basin_geometry.cpp
   tests/test_least_squares_gradient.cpp
   tests/test_manufactured_heat_solution.cpp
   tests/test_mesh2d.cpp
   tests/test_mesh_transfer.cpp
+  tests/test_strip_mesh.cpp
   tests/test_thermophysical_properties.cpp
 )
 

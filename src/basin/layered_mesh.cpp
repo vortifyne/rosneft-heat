@@ -9,7 +9,7 @@ namespace {
 
 constexpr double kRelativeThicknessTolerance = 1.0e-10;
 
-double maximum_thickness(const BasinLayerProfile& layer) {
+double maximum_thickness(const BasinLayerGeometry& layer) {
     double result = 0.0;
     for (std::size_t index = 0; index < layer.x.size(); ++index) {
         result = std::max(result, layer.bottom[index] - layer.top[index]);
@@ -17,7 +17,7 @@ double maximum_thickness(const BasinLayerProfile& layer) {
     return result;
 }
 
-void append_geometry_events(std::vector<double>& points, const BasinLayerProfile& layer) {
+void append_geometry_events(std::vector<double>& points, const BasinLayerGeometry& layer) {
     // Geometry simplification belongs before meshing: dropping a profile endpoint can
     // remove a whole strip of a layer and turn its contacts into external boundaries.
     points.insert(points.end(), layer.x.begin(), layer.x.end());
@@ -47,7 +47,7 @@ Point2D point(const double x, const double top, const double thickness, const do
 }
 
 void append_cell(std::vector<Mesh2D::Cell>& quads, std::vector<Mesh2D::Cell>& triangles,
-                 const BasinLayerProfile& layer, const std::size_t row, const double left_x,
+                 const BasinLayerGeometry& layer, const std::size_t row, const double left_x,
                  const double right_x, const double left_top, const double right_top,
                  const double left_thickness, const double right_thickness, const std::size_t rows,
                  const double tolerance) {
@@ -77,7 +77,7 @@ void append_cell(std::vector<Mesh2D::Cell>& quads, std::vector<Mesh2D::Cell>& tr
 
 } // namespace
 
-LayeredMeshLayout make_layered_mesh_layout(const std::span<const BasinConfiguration> configurations,
+LayeredMeshLayout make_layered_mesh_layout(const std::span<const BasinGeometry> configurations,
                                            const double cell_size) {
     if (configurations.empty()) {
         throw std::invalid_argument("Layered mesh layout requires basin configurations");
@@ -87,8 +87,9 @@ LayeredMeshLayout make_layered_mesh_layout(const std::span<const BasinConfigurat
     }
 
     std::vector<double> events;
-    for (const BasinConfiguration& configuration : configurations) {
-        for (const BasinLayerProfile& layer : configuration.layers) {
+    for (const BasinGeometry& configuration : configurations) {
+        for (const auto& region : configuration.layers) {
+            const auto layer = configuration.layer(region.id);
             if (layer.x.size() < 2 || layer.x.size() != layer.top.size() ||
                 layer.x.size() != layer.bottom.size()) {
                 throw std::invalid_argument("Invalid basin layer profile for layered mesh");
@@ -96,17 +97,21 @@ LayeredMeshLayout make_layered_mesh_layout(const std::span<const BasinConfigurat
             append_geometry_events(events, layer);
         }
     }
+    if (events.size() < 2) {
+        throw std::invalid_argument("Layered mesh layout requires non-empty geometry");
+    }
     return {.x = make_horizontal_axis(std::move(events), cell_size), .cell_size = cell_size};
 }
 
-Mesh2D make_layered_mesh(const BasinConfiguration& configuration, const LayeredMeshLayout& layout) {
+Mesh2D make_layered_mesh(const BasinGeometry& configuration, const LayeredMeshLayout& layout) {
     if (layout.x.size() < 2) {
         throw std::invalid_argument("Layered mesh layout requires at least two x coordinates");
     }
     std::vector<Mesh2D::Cell> quads;
     std::vector<Mesh2D::Cell> triangles;
 
-    for (const BasinLayerProfile& layer : configuration.layers) {
+    for (const auto& region : configuration.layers) {
+        const auto layer = configuration.layer(region.id);
         const std::size_t row_count = std::max<std::size_t>(
             1, static_cast<std::size_t>(std::ceil(maximum_thickness(layer) / layout.cell_size)));
         const double tolerance =
@@ -140,4 +145,18 @@ Mesh2D make_layered_mesh(const BasinConfiguration& configuration, const LayeredM
     Mesh2D mesh = Mesh2D::from_cells(cells);
     validate_layered_mesh_coverage(mesh, configuration);
     return mesh;
+}
+
+LayeredMeshLayout make_layered_mesh_layout(const std::span<const BasinConfiguration> configurations,
+                                           const double cell_size) {
+    std::vector<BasinGeometry> geometries;
+    geometries.reserve(configurations.size());
+    for (const auto& configuration : configurations) {
+        geometries.push_back(make_basin_geometry(configuration));
+    }
+    return make_layered_mesh_layout(geometries, cell_size);
+}
+
+Mesh2D make_layered_mesh(const BasinConfiguration& configuration, const LayeredMeshLayout& layout) {
+    return make_layered_mesh(make_basin_geometry(configuration), layout);
 }

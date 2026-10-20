@@ -7,8 +7,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iomanip>
+#include <limits>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -149,7 +152,10 @@ Mesh2D Mesh2D::from_cells(const std::span<const Cell> cells) {
         BoundaryKind kind = BoundaryKind::interface;
         int count = 0;
     };
-    const double coordinate_tolerance = 1.0e-10 * scale;
+    // Match the clipping geometry's resolution. A coarser storage tolerance can
+    // collapse valid cut-cell edges after the generator has finished validation.
+    const double coordinate_tolerance =
+        std::max(1e-9, 128. * std::numeric_limits<double>::epsilon() * scale);
     const auto coordinate_key = [coordinate_tolerance](const Point2D point) {
         return std::pair{static_cast<std::int64_t>(std::llround(point.x / coordinate_tolerance)),
                          static_cast<std::int64_t>(std::llround(point.z / coordinate_tolerance))};
@@ -197,7 +203,27 @@ Mesh2D Mesh2D::from_cells(const std::span<const Cell> cells) {
             } else {
                 ++record.count;
                 if (record.count > 2) {
-                    throw std::runtime_error("Mesh2D cell edge belongs to more than two cells");
+                    const auto& a = vertices[first]->xy();
+                    const auto& b = vertices[second]->xy();
+                    std::ostringstream message;
+                    message << std::setprecision(17)
+                            << "Mesh2D cell edge belongs to more than two cells: (" << a.x << ','
+                            << a.y << ")--(" << b.x << ',' << b.y << "), material=" << cell.id;
+                    for (const auto& candidate : cells) {
+                        bool has_first = false, has_second = false;
+                        for (const auto p : candidate.vertices) {
+                            has_first =
+                                has_first || coordinate_key(p) == coordinate_key({a.x, a.y});
+                            has_second =
+                                has_second || coordinate_key(p) == coordinate_key({b.x, b.y});
+                        }
+                        if (has_first && has_second) {
+                            message << " cell " << candidate.id << ':';
+                            for (const auto p : candidate.vertices)
+                                message << " (" << p.x << ',' << p.z << ')';
+                        }
+                    }
+                    throw std::runtime_error(message.str());
                 }
             }
         }

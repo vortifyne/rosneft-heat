@@ -102,6 +102,24 @@ TEST(LayeredMesh, CoversLayerStartingInsideFormerCoarseColumn) {
     EXPECT_THROW(make_layered_mesh(basin, incomplete), std::runtime_error);
 }
 
+TEST(LayeredMesh, StripMeshCoversNearbyLayerStartAndSharedContacts) {
+    const auto geometry = make_basin_geometry(basin_with_nearby_layer_start());
+    const Mesh2D mesh = make_layer_strip_mesh(geometry, .25);
+    EXPECT_NEAR(mesh.area(), 6., 1e-10);
+    EXPECT_NO_THROW(validate_layered_mesh_coverage(mesh, geometry));
+}
+
+TEST(LayeredMesh, StripMeshSeparatesComponentsAtZeroThickness) {
+    auto lobes = layer(1, 0., 1.);
+    lobes.x = {0., 1., 2., 3., 4.};
+    lobes.top = {0., 0., 0., 0., 0.};
+    lobes.bottom = {0., 1., 0., 1., 0.};
+    const auto geometry = make_basin_geometry(configuration({lobes}));
+    const Mesh2D mesh = make_layer_strip_mesh(geometry, .25);
+    EXPECT_NEAR(mesh.area(), 2., 1e-10);
+    EXPECT_NO_THROW(validate_layered_mesh_coverage(mesh, geometry));
+}
+
 TEST(LayeredMesh, CoverageRejectsCompensatingOverlapAndGap) {
     const auto basin = configuration({layer(1, 0.0, 1.0)});
     const std::vector<Mesh2D::Cell> cells{
@@ -168,6 +186,75 @@ TEST(LayeredMesh, PreservesMinimumThicknessForEveryRowOfDisappearingLayer) {
         }
         EXPECT_GE(cell->area() / maximum_edge, 0.5 - 1.0e-12);
     }
+}
+
+TEST(LayeredMesh, VariableColumnsReduceRowsAndKeepSharedContactsConforming) {
+    auto upper = layer(1, 0., 5.);
+    upper.x = {0., 1., 2., 3., 4., 5., 6.};
+    upper.top.assign(upper.x.size(), 0.);
+    upper.bottom = {5., 5., 4., 3., 2., 1., 1.};
+    upper.lithotype.assign(upper.x.size(), 1);
+    upper.porosity.assign(upper.x.size(), .1);
+    auto lower = upper;
+    lower.id = 2;
+    lower.top = upper.bottom;
+    lower.bottom.assign(lower.x.size(), 8.);
+    const auto basin = configuration({upper, lower});
+    const auto layout = make_layered_mesh_layout({&basin, 1}, 1.);
+    const auto old_mesh = make_layered_mesh(basin, layout);
+    const auto mesh = make_variable_layered_mesh(basin, layout);
+
+    EXPECT_LT(mesh.cells().size(), old_mesh.cells().size());
+    EXPECT_GT(mesh.native().n_triangles(), 0U);
+    EXPECT_GT(mesh.native().n_quads(), 0U);
+    EXPECT_NEAR(mesh.area(), 48., 1e-10);
+    EXPECT_NO_THROW(validate_layered_mesh_coverage(mesh, basin));
+}
+
+TEST(LayeredMesh, VariableColumnsResolveTransverseRatherThanVerticalThickness) {
+    auto sheet = layer(1, 0., 4.);
+    sheet.x = {0., 10.};
+    sheet.top = {0., 200.};
+    sheet.bottom = {4., 204.};
+    const auto first = configuration({sheet});
+    sheet.top = {200., 100.};
+    sheet.bottom = {204., 104.};
+    const auto second = configuration({sheet});
+    const std::array configurations{first, second};
+    const auto layout = make_layered_mesh_layout(configurations, 1.);
+    auto mesh = make_variable_layered_mesh(first, layout);
+
+    EXPECT_EQ(mesh.cells().size(), layout.x.size() - 1);
+    EXPECT_EQ(mesh.native().n_triangles(), 0U);
+    EXPECT_NEAR(mesh.area(), 40., 1e-10);
+    const auto vertices = mesh.native().n_vertices();
+    BasinMeshMotion motion(mesh, first, second, 1., 1.);
+    for (const double fraction : {.25, .5, 1.}) {
+        EXPECT_NO_THROW(motion.set_position(fraction));
+        EXPECT_EQ(mesh.native().n_vertices(), vertices);
+        EXPECT_NEAR(mesh.area(), 40., 1e-10);
+    }
+    EXPECT_NO_THROW(validate_layered_mesh_coverage(mesh, second));
+}
+
+TEST(LayeredMesh, VariableColumnsPreservePinchesAndLayerSupports) {
+    const auto basin = basin_with_nearby_layer_start();
+    const auto layout = make_layered_mesh_layout({&basin, 1}, .25);
+    const auto mesh = make_variable_layered_mesh(basin, layout);
+    EXPECT_NEAR(mesh.area(), 6., 1e-10);
+    EXPECT_NO_THROW(validate_layered_mesh_coverage(mesh, basin));
+
+    auto lobes = layer(1, 0., 1.);
+    lobes.x = {0., 1., 2., 3., 4.};
+    lobes.top = {0., 0., 0., 0., 0.};
+    lobes.bottom = {0., 1., 0., 1., 0.};
+    lobes.lithotype.assign(5, 1);
+    lobes.porosity.assign(5, .1);
+    const auto separated = configuration({lobes});
+    const auto separated_layout = make_layered_mesh_layout({&separated, 1}, .25);
+    const auto separated_mesh = make_variable_layered_mesh(separated, separated_layout);
+    EXPECT_NEAR(separated_mesh.area(), 2., 1e-10);
+    EXPECT_NO_THROW(validate_layered_mesh_coverage(separated_mesh, separated));
 }
 
 } // namespace
