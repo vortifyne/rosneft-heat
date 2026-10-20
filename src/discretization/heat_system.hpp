@@ -1,6 +1,7 @@
 #pragma once
 
 #include "discretization/least_squares_gradient.hpp"
+#include "discretization/multipoint_flux.hpp"
 #include "discretization/semi_discrete_system.hpp"
 #include "mesh/mesh2d.hpp"
 
@@ -14,12 +15,27 @@
 struct HeatBoundaryConditions {
     std::function<double(Point2D, double)> surface_temperature;
     std::function<double(Point2D, double)> basal_heat_flux;
+    std::function<double(Point2D, double)> left_heat_flux{};
+    std::function<double(Point2D, double)> right_heat_flux{};
 };
 
 struct HeatEnergyRates {
     double surface_outflow = 0.0;
     double basal_inflow = 0.0;
+    double lateral_inflow = 0.0;
     double heat_production = 0.0;
+};
+
+struct HeatFluxDiagnostics {
+    std::size_t maximum_stencil_size = 0;
+    double internal_conservation_defect_linf = 0.0;
+};
+
+enum class HeatFluxScheme {
+    tpfa_nonorthogonal,
+    linear_multipoint,
+    nonlinear_multipoint_conservative,
+    nonlinear_multipoint_dmp,
 };
 
 class HeatSystem final : public SemiDiscreteSystem {
@@ -36,12 +52,14 @@ public:
 
     void update_geometry(const Mesh2D& mesh);
     void set_implicit_nonorthogonal_correction(bool enabled) noexcept;
+    void set_flux_scheme(HeatFluxScheme scheme) noexcept;
 
     [[nodiscard]] std::span<const double> thermal_conductivity() const noexcept;
     [[nodiscard]] std::span<const double> volumetric_heat_capacity() const noexcept;
     [[nodiscard]] std::span<const double> heat_production() const noexcept;
 
     [[nodiscard]] HeatEnergyRates energy_rates(double time, const Vector& solution) const;
+    [[nodiscard]] HeatFluxDiagnostics flux_diagnostics(double time, const Vector& solution) const;
 
     void assemble_residual(double time, const Vector& solution, const Vector& solution_derivative,
                            Vector& residual) const override;
@@ -113,6 +131,8 @@ private:
     void assemble_nonorthogonal_correction_matrix(MatrixAssembly& assembly) const;
 
     [[nodiscard]] double surface_flux(std::size_t index, const Vector& solution) const;
+    [[nodiscard]] MultipointBoundaryData multipoint_boundary_data(double time) const;
+    [[nodiscard]] MultipointFluxes multipoint_fluxes(double time, const Vector& solution) const;
     [[nodiscard]] double face_conductivity(const InternalFace& face) const noexcept;
     void check_vector_sizes(const Vector& solution, const Vector& solution_derivative) const;
     void update_properties(const Vector& solution) const;
@@ -128,11 +148,14 @@ private:
     std::vector<InternalFace> internal_faces_;
     std::vector<BoundaryFace> surface_faces_;
     std::vector<BoundaryFace> basal_faces_;
-    std::size_t lateral_face_count_ = 0;
+    std::vector<BoundaryFace> left_faces_;
+    std::vector<BoundaryFace> right_faces_;
 
     std::optional<LeastSquaresGradient> gradient_reconstruction_;
+    std::optional<MultipointFlux> multipoint_flux_;
     mutable std::vector<double> surface_temperatures_;
     mutable std::vector<double> surface_tangential_increments_;
     mutable std::vector<LeastSquaresGradient::Gradient> gradients_;
     bool implicit_nonorthogonal_correction_ = false;
+    HeatFluxScheme flux_scheme_ = HeatFluxScheme::tpfa_nonorthogonal;
 };

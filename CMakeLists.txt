@@ -83,6 +83,7 @@ add_library(basin_heat STATIC
   src/basin/vtu_output.cpp
   src/discretization/heat_system.cpp
   src/discretization/least_squares_gradient.cpp
+  src/discretization/multipoint_flux.cpp
   src/mesh/mesh2d.cpp
   src/mesh/mesh_transfer.cpp
   src/mesh/strip_mesh.cpp
@@ -140,6 +141,15 @@ if(MSVC)
   target_compile_options(heat_forward PRIVATE /W4 /permissive-)
 else()
   target_compile_options(heat_forward PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
+add_executable(discretization_verification tools/discretization_verification.cpp)
+target_link_libraries(discretization_verification PRIVATE basin_heat)
+
+if(MSVC)
+  target_compile_options(discretization_verification PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(discretization_verification PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
 enable_testing()

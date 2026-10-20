@@ -83,6 +83,70 @@ TEST(HeatSystem, ReproducesLinearVerticalTemperatureWithNonorthogonalCorrection)
     EXPECT_LT(residual.infinity_norm(), 1.0e-9);
 }
 
+TEST(HeatSystem, MultipointSchemesReproduceAffineTemperatureAndBoundaryFluxes) {
+    constexpr double conductivity_value = 2.0;
+    constexpr double x_gradient = 3.0;
+    constexpr double z_gradient = 4.0;
+    const Mesh2D mesh = make_rectangular_mesh();
+    const std::size_t count = mesh.cells().size();
+    const std::vector<double> conductivity(count, conductivity_value);
+    const std::vector<double> heat_capacity(count, 3.0);
+    const std::vector<double> source(count, 0.0);
+    for (const HeatFluxScheme scheme :
+         {HeatFluxScheme::linear_multipoint, HeatFluxScheme::nonlinear_multipoint_conservative,
+          HeatFluxScheme::nonlinear_multipoint_dmp}) {
+        SCOPED_TRACE(static_cast<int>(scheme));
+        HeatSystem system(
+            mesh, conductivity, heat_capacity, source,
+            {.surface_temperature =
+                 [](const Point2D point, double) {
+                     return 300.0 + (x_gradient * point.x) + (z_gradient * point.z);
+                 },
+             .basal_heat_flux = [](Point2D, double) { return conductivity_value * z_gradient; },
+             .left_heat_flux = [](Point2D, double) { return -conductivity_value * x_gradient; },
+             .right_heat_flux = [](Point2D, double) { return conductivity_value * x_gradient; }});
+        system.set_flux_scheme(scheme);
+        Vector temperature(system.size());
+        for (const TQMesh::Facet* cell : mesh.cells()) {
+            temperature[cell->index()] =
+                300.0 + (x_gradient * cell->xy().x) + (z_gradient * cell->xy().y);
+        }
+        Vector derivative(system.size());
+        derivative.set_zero();
+        Vector residual;
+
+        system.assemble_residual(0.0, temperature, derivative, residual);
+
+        EXPECT_LT(residual.infinity_norm(), 1.0e-9);
+    }
+}
+
+TEST(HeatSystem, LinearMultipointMatrixMatchesLinearResidual) {
+    const Mesh2D mesh = make_rectangular_mesh();
+    HeatSystem system = make_system(mesh, 2.0, 3.0, 0.0, 300.0, 0.0);
+    system.set_flux_scheme(HeatFluxScheme::linear_multipoint);
+    Vector temperature(system.size());
+    Vector direction(system.size());
+    for (Vector::Index index = 0; index < system.size(); ++index) {
+        temperature[index] = 300.0 + (0.1 * static_cast<double>(index));
+        direction[index] = std::sin(static_cast<double>(index) + 0.5);
+    }
+    Vector derivative(system.size());
+    derivative.set_zero();
+    SparseMatrix matrix;
+    system.assemble_matrix(NonlinearMethod::picard, 0.0, temperature, derivative, 0.0, matrix);
+    Vector residual;
+    Vector shifted_residual;
+    system.assemble_residual(0.0, temperature, derivative, residual);
+    constexpr double epsilon = 1.0e-3;
+    system.assemble_residual(0.0, temperature + (direction * epsilon), derivative,
+                             shifted_residual);
+    const Vector difference =
+        ((shifted_residual - residual) * (1.0 / epsilon)) - (matrix * direction);
+
+    EXPECT_LT(difference.infinity_norm(), 1.0e-7);
+}
+
 TEST(HeatSystem, ReportsWholeDomainEnergyRates) {
     constexpr double conductivity = 2.0;
     constexpr double gradient = 4.0;
@@ -100,6 +164,34 @@ TEST(HeatSystem, ReportsWholeDomainEnergyRates) {
     EXPECT_NEAR(rates.surface_outflow, conductivity * gradient * 4.0, 1.0e-9);
     EXPECT_NEAR(rates.basal_inflow, conductivity * gradient * 4.0, 1.0e-12);
     EXPECT_NEAR(rates.heat_production, heat_production * 4.0 * 2.0, 1.0e-12);
+}
+
+TEST(HeatSystem, AppliesOptionalLateralHeatFluxes) {
+    const Mesh2D mesh = make_rectangular_mesh();
+    const std::size_t count = mesh.cells().size();
+    const std::vector<double> conductivity(count, 2.0);
+    const std::vector<double> heat_capacity(count, 3.0);
+    const std::vector<double> source(count, 0.0);
+    const HeatSystem system(mesh, conductivity, heat_capacity, source,
+                            {.surface_temperature = [](Point2D, double) { return 300.0; },
+                             .basal_heat_flux = [](Point2D, double) { return 0.0; },
+                             .left_heat_flux = [](Point2D, double) { return 2.0; },
+                             .right_heat_flux = [](Point2D, double) { return -0.5; }});
+    Vector temperature(system.size());
+    temperature.set_constant(300.0);
+    Vector derivative(system.size());
+    derivative.set_zero();
+    Vector residual;
+
+    system.assemble_residual(0.0, temperature, derivative, residual);
+    double integrated_residual = 0.0;
+    for (const TQMesh::Facet* cell : mesh.cells()) {
+        integrated_residual += residual[cell->index()] * cell->area();
+    }
+    const HeatEnergyRates rates = system.energy_rates(0.0, temperature);
+
+    EXPECT_NEAR(rates.lateral_inflow, (2.0 - 0.5) * 2.0, 1.0e-12);
+    EXPECT_NEAR(integrated_residual, -rates.lateral_inflow, 1.0e-12);
 }
 
 TEST(HeatSystem, UsesConservativeHarmonicFluxAcrossMaterialInterface) {

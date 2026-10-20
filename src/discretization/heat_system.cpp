@@ -84,6 +84,8 @@ void HeatSystem::update_geometry(const Mesh2D& mesh) {
     internal_faces_.clear();
     surface_faces_.clear();
     basal_faces_.clear();
+    left_faces_.clear();
+    right_faces_.clear();
 
     std::vector<LeastSquaresConnection> connections;
     connections.reserve(mesh.internal_edges().size());
@@ -153,10 +155,23 @@ void HeatSystem::update_geometry(const Mesh2D& mesh) {
                                 .normal_distance = normal_distance,
                                 .correction = normal - (displacement / normal_distance)});
     }
-    lateral_face_count_ = mesh.boundary_edges(BoundaryKind::left).size() +
-                          mesh.boundary_edges(BoundaryKind::right).size();
+    const auto append_lateral_faces = [&mesh](const BoundaryKind kind,
+                                              std::vector<BoundaryFace>& faces) {
+        faces.reserve(mesh.boundary_edges(kind).size());
+        for (const TQMesh::Edge* edge : mesh.boundary_edges(kind)) {
+            const TQMesh::Facet& cell = mesh.owner(*edge);
+            faces.push_back({.cell = static_cast<std::size_t>(cell.index()),
+                             .center = point(edge->xy()),
+                             .length = edge->length(),
+                             .normal_distance = 0.0,
+                             .correction = Eigen::Vector2d::Zero()});
+        }
+    };
+    append_lateral_faces(BoundaryKind::left, left_faces_);
+    append_lateral_faces(BoundaryKind::right, right_faces_);
 
     gradient_reconstruction_.emplace(cell_count, connections, surface_samples);
+    multipoint_flux_.emplace(mesh);
     surface_temperatures_.assign(surface_faces_.size(), 0.0);
     surface_tangential_increments_.assign(surface_faces_.size(), 0.0);
     gradients_.assign(cell_count, LeastSquaresGradient::Gradient::Zero());
@@ -187,22 +202,67 @@ HeatEnergyRates HeatSystem::energy_rates(const double time, const Vector& soluti
     prepare_gradients(time, solution);
 
     HeatEnergyRates result;
-    for (std::size_t index = 0; index < surface_faces_.size(); ++index) {
-        result.surface_outflow += surface_flux(index, solution);
+    if (flux_scheme_ == HeatFluxScheme::tpfa_nonorthogonal) {
+        for (std::size_t index = 0; index < surface_faces_.size(); ++index) {
+            result.surface_outflow += surface_flux(index, solution);
+        }
+    } else {
+        const MultipointFluxes fluxes = multipoint_fluxes(time, solution);
+        for (const MultipointBoundaryFlux& flux : fluxes.surface) {
+            result.surface_outflow += flux.expression.value(
+                {solution.native().data(), static_cast<std::size_t>(solution.size())});
+        }
     }
     for (const BoundaryFace& face : basal_faces_) {
         const double flux = boundary_conditions_.basal_heat_flux(face.center, time);
         check_finite(flux, "Basal heat flux must be finite");
         result.basal_inflow += flux * face.length;
     }
+    const auto add_lateral_inflow = [time, &result](const auto& flux_function, const auto& faces) {
+        if (!flux_function) {
+            return;
+        }
+        for (const BoundaryFace& face : faces) {
+            const double flux = flux_function(face.center, time);
+            check_finite(flux, "Lateral heat flux must be finite");
+            result.lateral_inflow += flux * face.length;
+        }
+    };
+    add_lateral_inflow(boundary_conditions_.left_heat_flux, left_faces_);
+    add_lateral_inflow(boundary_conditions_.right_heat_flux, right_faces_);
     for (std::size_t index = 0; index < heat_production_.size(); ++index) {
         result.heat_production += heat_production_[index] / inverse_cell_area_[index];
     }
     return result;
 }
 
+HeatFluxDiagnostics HeatSystem::flux_diagnostics(const double time, const Vector& solution) const {
+    check_finite(time, "Flux-diagnostic time must be finite");
+    if (solution.size() != size()) {
+        throw std::invalid_argument("Heat-system solution size does not match the mesh");
+    }
+    if (flux_scheme_ == HeatFluxScheme::tpfa_nonorthogonal) {
+        return {.maximum_stencil_size = 2, .internal_conservation_defect_linf = 0.0};
+    }
+    update_properties(solution);
+    const MultipointFluxes fluxes = multipoint_fluxes(time, solution);
+    const auto values = std::span<const double>(solution.native().data(),
+                                                static_cast<std::size_t>(solution.size()));
+    HeatFluxDiagnostics result{.maximum_stencil_size = fluxes.maximum_stencil_size};
+    for (const MultipointInternalFlux& flux : fluxes.internal) {
+        result.internal_conservation_defect_linf = std::max(
+            result.internal_conservation_defect_linf,
+            std::abs(flux.owner_expression.value(values) - flux.neighbor_expression.value(values)));
+    }
+    return result;
+}
+
 void HeatSystem::set_implicit_nonorthogonal_correction(const bool enabled) noexcept {
     implicit_nonorthogonal_correction_ = enabled;
+}
+
+void HeatSystem::set_flux_scheme(const HeatFluxScheme scheme) noexcept {
+    flux_scheme_ = scheme;
 }
 
 void HeatSystem::assemble_residual(const double time, const Vector& solution,
@@ -278,8 +338,19 @@ void HeatSystem::assemble_accumulation(MatrixAssembly& assembly, const double ti
 void HeatSystem::assemble_internal_diffusion(ResidualAssembly& assembly, const double time,
                                              const Vector& solution,
                                              const Vector& solution_derivative) const {
-    static_cast<void>(time);
     static_cast<void>(solution_derivative);
+    if (flux_scheme_ != HeatFluxScheme::tpfa_nonorthogonal) {
+        const MultipointFluxes fluxes = multipoint_fluxes(time, solution);
+        const auto values = std::span<const double>(solution.native().data(),
+                                                    static_cast<std::size_t>(solution.size()));
+        for (const MultipointInternalFlux& flux : fluxes.internal) {
+            assembly.residual[static_cast<Vector::Index>(flux.owner)] +=
+                flux.owner_expression.value(values) * inverse_cell_area_[flux.owner];
+            assembly.residual[static_cast<Vector::Index>(flux.neighbor)] -=
+                flux.neighbor_expression.value(values) * inverse_cell_area_[flux.neighbor];
+        }
+        return;
+    }
     assemble_orthogonal_diffusion_residual(assembly, solution);
     assemble_nonorthogonal_correction_residual(assembly);
 }
@@ -287,9 +358,29 @@ void HeatSystem::assemble_internal_diffusion(ResidualAssembly& assembly, const d
 void HeatSystem::assemble_internal_diffusion(MatrixAssembly& assembly, const double time,
                                              const Vector& solution,
                                              const Vector& solution_derivative) const {
-    static_cast<void>(time);
-    static_cast<void>(solution);
     static_cast<void>(solution_derivative);
+    if (flux_scheme_ != HeatFluxScheme::tpfa_nonorthogonal) {
+        const MultipointFluxes fluxes = multipoint_fluxes(time, solution);
+        const auto add = [&assembly](const std::size_t row, const MultipointFluxTerm term,
+                                     const double factor) {
+            const double value = factor * term.coefficient;
+            if (row == term.cell) {
+                assembly.diagonal[row] += value;
+            } else {
+                assembly.triplets.emplace_back(static_cast<Vector::Index>(row),
+                                               static_cast<Vector::Index>(term.cell), value);
+            }
+        };
+        for (const MultipointInternalFlux& flux : fluxes.internal) {
+            for (const MultipointFluxTerm term : flux.owner_expression.terms) {
+                add(flux.owner, term, inverse_cell_area_[flux.owner]);
+            }
+            for (const MultipointFluxTerm term : flux.neighbor_expression.terms) {
+                add(flux.neighbor, term, -inverse_cell_area_[flux.neighbor]);
+            }
+        }
+        return;
+    }
     assemble_orthogonal_diffusion_matrix(assembly);
     if (implicit_nonorthogonal_correction_) {
         assemble_nonorthogonal_correction_matrix(assembly);
@@ -317,8 +408,17 @@ void HeatSystem::assemble_source(MatrixAssembly& assembly, const double time,
 void HeatSystem::assemble_surface_boundary(ResidualAssembly& assembly, const double time,
                                            const Vector& solution,
                                            const Vector& solution_derivative) const {
-    static_cast<void>(time);
     static_cast<void>(solution_derivative);
+    if (flux_scheme_ != HeatFluxScheme::tpfa_nonorthogonal) {
+        const MultipointFluxes fluxes = multipoint_fluxes(time, solution);
+        const auto values = std::span<const double>(solution.native().data(),
+                                                    static_cast<std::size_t>(solution.size()));
+        for (const MultipointBoundaryFlux& flux : fluxes.surface) {
+            assembly.residual[static_cast<Vector::Index>(flux.cell)] +=
+                flux.expression.value(values) * inverse_cell_area_[flux.cell];
+        }
+        return;
+    }
     for (std::size_t index = 0; index < surface_faces_.size(); ++index) {
         const BoundaryFace& face = surface_faces_[index];
         assembly.residual[static_cast<Vector::Index>(face.cell)] +=
@@ -329,9 +429,22 @@ void HeatSystem::assemble_surface_boundary(ResidualAssembly& assembly, const dou
 void HeatSystem::assemble_surface_boundary(MatrixAssembly& assembly, const double time,
                                            const Vector& solution,
                                            const Vector& solution_derivative) const {
-    static_cast<void>(time);
-    static_cast<void>(solution);
     static_cast<void>(solution_derivative);
+    if (flux_scheme_ != HeatFluxScheme::tpfa_nonorthogonal) {
+        const MultipointFluxes fluxes = multipoint_fluxes(time, solution);
+        for (const MultipointBoundaryFlux& flux : fluxes.surface) {
+            for (const MultipointFluxTerm term : flux.expression.terms) {
+                const double value = term.coefficient * inverse_cell_area_[flux.cell];
+                if (term.cell == flux.cell) {
+                    assembly.diagonal[flux.cell] += value;
+                } else {
+                    assembly.triplets.emplace_back(static_cast<Vector::Index>(flux.cell),
+                                                   static_cast<Vector::Index>(term.cell), value);
+                }
+            }
+        }
+        return;
+    }
     for (const BoundaryFace& face : surface_faces_) {
         const double coefficient = thermal_conductivity_[face.cell] * face.length /
                                    face.normal_distance * inverse_cell_area_[face.cell];
@@ -364,11 +477,21 @@ void HeatSystem::assemble_basal_boundary(MatrixAssembly& assembly, const double 
 void HeatSystem::assemble_lateral_boundaries(ResidualAssembly& assembly, const double time,
                                              const Vector& solution,
                                              const Vector& solution_derivative) const {
-    static_cast<void>(assembly);
-    static_cast<void>(time);
     static_cast<void>(solution);
     static_cast<void>(solution_derivative);
-    static_cast<void>(lateral_face_count_);
+    const auto add_flux = [&assembly, time, this](const auto& flux_function, const auto& faces) {
+        if (!flux_function) {
+            return;
+        }
+        for (const BoundaryFace& face : faces) {
+            const double flux = flux_function(face.center, time);
+            check_finite(flux, "Lateral heat flux must be finite");
+            assembly.residual[static_cast<Vector::Index>(face.cell)] -=
+                flux * face.length * inverse_cell_area_[face.cell];
+        }
+    };
+    add_flux(boundary_conditions_.left_heat_flux, left_faces_);
+    add_flux(boundary_conditions_.right_heat_flux, right_faces_);
 }
 
 void HeatSystem::assemble_lateral_boundaries(MatrixAssembly& assembly, const double time,
@@ -378,7 +501,6 @@ void HeatSystem::assemble_lateral_boundaries(MatrixAssembly& assembly, const dou
     static_cast<void>(time);
     static_cast<void>(solution);
     static_cast<void>(solution_derivative);
-    static_cast<void>(lateral_face_count_);
 }
 
 void HeatSystem::assemble_orthogonal_diffusion_residual(ResidualAssembly& assembly,
@@ -473,6 +595,36 @@ double HeatSystem::surface_flux(const std::size_t index, const Vector& solution)
     // T_C - d_t * dT_D/ds) / d_n.
     return coefficient * (solution[static_cast<Vector::Index>(face.cell)] -
                           surface_temperatures_[index] + surface_tangential_increments_[index]);
+}
+
+MultipointBoundaryData HeatSystem::multipoint_boundary_data(const double time) const {
+    const auto optional_flux = [time](const auto& function) {
+        return [time, function](const Point2D point) {
+            return function ? function(point, time) : 0.0;
+        };
+    };
+    return {
+        .surface_temperature =
+            [this, time](const Point2D point) {
+                return boundary_conditions_.surface_temperature(point, time);
+            },
+        .basal_inward_flux = optional_flux(boundary_conditions_.basal_heat_flux),
+        .left_inward_flux = optional_flux(boundary_conditions_.left_heat_flux),
+        .right_inward_flux = optional_flux(boundary_conditions_.right_heat_flux),
+    };
+}
+
+MultipointFluxes HeatSystem::multipoint_fluxes(const double time, const Vector& solution) const {
+    MultipointFluxScheme scheme = MultipointFluxScheme::linear;
+    if (flux_scheme_ == HeatFluxScheme::nonlinear_multipoint_conservative) {
+        scheme = MultipointFluxScheme::nonlinear_conservative;
+    } else if (flux_scheme_ == HeatFluxScheme::nonlinear_multipoint_dmp) {
+        scheme = MultipointFluxScheme::nonlinear_dmp;
+    }
+    return multipoint_flux_->compute(
+        scheme, thermal_conductivity_,
+        {solution.native().data(), static_cast<std::size_t>(solution.size())},
+        multipoint_boundary_data(time));
 }
 
 double HeatSystem::face_conductivity(const InternalFace& face) const noexcept {
