@@ -13,7 +13,6 @@ constexpr NonlinearSolveRequest kNewtonRequest{
     .nonlinear_method = NonlinearMethod::newton,
     .relative_tolerance = 1e-12,
     .absolute_tolerance = 1e-12,
-    .step_relative_tolerance = 1e-12,
     .max_iterations = 10,
 };
 
@@ -138,6 +137,21 @@ TEST(TimeIntegratorTest, CanUseSuccessiveAdvanceTargetsAsExactEventTimes) {
     EXPECT_TRUE(final_result.completed());
     EXPECT_EQ(final_result.accepted_steps, 2);
     EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 0.8);
+}
+
+TEST(TimeIntegratorTest, DoesNotCreateRoundoffSizedFinalStep) {
+    TimeIntegrator integrator;
+    integrator.set_initial_solution(0.0, Vector{1.0});
+    integrator.set_timestep(0.025);
+    DecaySystem system(1.0);
+
+    const TimeIntegrationResult result =
+        integrator.advance_to(system, 0.2, kNewtonRequest, kDirectLinearRequest);
+
+    EXPECT_TRUE(result.completed());
+    EXPECT_EQ(result.accepted_steps, 8);
+    EXPECT_EQ(result.rejected_steps, 0);
+    EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 0.2);
 }
 
 TEST(TimeIntegratorTest, StopsAtFirstNonlinearFailureAndKeepsAcceptedState) {

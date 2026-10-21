@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -80,7 +81,9 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
     while (time_history_.current().time < final_time) {
         const double current_time = time_history_.current().time;
         const double remaining_time = final_time - current_time;
-        const bool reaches_final_time = remaining_time <= dt_;
+        const double step_tolerance =
+            8.0 * std::numeric_limits<double>::epsilon() * std::max(dt_, remaining_time);
+        const bool reaches_final_time = remaining_time <= dt_ + step_tolerance;
         const double step_end_time =
             reaches_final_time ? final_time : current_time + std::min(dt_, remaining_time);
 

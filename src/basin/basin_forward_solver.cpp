@@ -54,7 +54,6 @@ NonlinearSolveRequest nonlinear_request() {
         .nonlinear_method = NonlinearMethod::picard,
         .relative_tolerance = 1.0e-6,
         .absolute_tolerance = 0.0,
-        .step_relative_tolerance = 1.0e-8,
         .max_iterations = 200,
     };
 }

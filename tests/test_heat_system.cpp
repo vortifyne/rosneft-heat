@@ -121,6 +121,29 @@ TEST(HeatSystem, MultipointSchemesReproduceAffineTemperatureAndBoundaryFluxes) {
     }
 }
 
+TEST(HeatSystem, MultipointStencilAuditChecksCompleteLocalPairs) {
+    const Mesh2D mesh = make_rectangular_mesh();
+    std::vector<double> conductivity(mesh.cells().size());
+    for (const TQMesh::Facet* cell : mesh.cells()) {
+        conductivity[static_cast<std::size_t>(cell->index())] = 1.0 + 0.2 * cell->xy().x;
+    }
+    const MultipointFlux flux(mesh);
+    const MultipointStencilAudit audit = flux.audit_stencils(
+        conductivity,
+        {.surface_temperature = [](Point2D) { return 300.0; },
+         .basal_inward_flux = [](Point2D) { return 0.0; },
+         .left_inward_flux = [](Point2D) { return 0.0; },
+         .right_inward_flux = [](Point2D) { return 0.0; }});
+
+    EXPECT_FALSE(audit.entries.empty());
+    EXPECT_EQ(audit.restricted_failures, 0U);
+    EXPECT_EQ(audit.general_failures, 0U);
+    EXPECT_EQ(audit.target_harmonic_points_outside_faces, 0U);
+    EXPECT_EQ(audit.selected_harmonic_points_outside_faces, 0U);
+    EXPECT_TRUE(std::isfinite(audit.maximum_qtkq_condition));
+    EXPECT_LT(audit.maximum_relative_reconstruction_defect, 1.0e-12);
+}
+
 TEST(HeatSystem, LinearMultipointMatrixMatchesLinearResidual) {
     const Mesh2D mesh = make_rectangular_mesh();
     HeatSystem system = make_system(mesh, 2.0, 3.0, 0.0, 300.0, 0.0);
@@ -295,7 +318,6 @@ TEST(HeatSystem, AdvancesOneBdf1StepWithPicardMethod) {
         {.nonlinear_method = NonlinearMethod::picard,
          .relative_tolerance = 1.0e-10,
          .absolute_tolerance = 1.0e-9,
-         .step_relative_tolerance = 1.0e-12,
          .max_iterations = 20},
         {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1});
 
@@ -327,7 +349,6 @@ TEST(HeatSystem, KeepsConstantTemperatureWhileMeshMoves) {
             {.nonlinear_method = NonlinearMethod::picard,
              .relative_tolerance = 1.0e-10,
              .absolute_tolerance = 1.0e-9,
-             .step_relative_tolerance = 1.0e-12,
              .max_iterations = 20},
             {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1});
         ASSERT_TRUE(result.completed());

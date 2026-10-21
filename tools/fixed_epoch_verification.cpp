@@ -195,7 +195,7 @@ SolveResult solve_stationary(const Mesh2D& mesh, HeatSystem& system, Vector temp
             std::cerr << "picard iteration=" << iteration << " residual=" << current_residual
                       << " correction=" << result.final_correction_linf << '\n';
         }
-        if (current_residual <= 1.0e-8 || result.final_correction_linf <= 1.0e-7) {
+        if (current_residual <= 1.0e-8) {
             return result;
         }
 

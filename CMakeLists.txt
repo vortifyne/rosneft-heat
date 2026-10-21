@@ -152,6 +152,9 @@ target_link_libraries(discretization_verification PRIVATE basin_heat)
 add_executable(fixed_epoch_verification tools/fixed_epoch_verification.cpp)
 target_link_libraries(fixed_epoch_verification PRIVATE basin_heat)
 
+add_executable(multipoint_stencil_audit tools/multipoint_stencil_audit.cpp)
+target_link_libraries(multipoint_stencil_audit PRIVATE basin_heat)
+
 add_executable(nonmatching_discretization_verification
   tools/nonmatching_discretization_verification.cpp)
 target_link_libraries(nonmatching_discretization_verification PRIVATE basin_heat)
@@ -163,11 +166,13 @@ target_link_libraries(nonmatching_fixed_epoch_verification PRIVATE basin_heat)
 if(MSVC)
   target_compile_options(discretization_verification PRIVATE /W4 /permissive-)
   target_compile_options(fixed_epoch_verification PRIVATE /W4 /permissive-)
+  target_compile_options(multipoint_stencil_audit PRIVATE /W4 /permissive-)
   target_compile_options(nonmatching_discretization_verification PRIVATE /W4 /permissive-)
   target_compile_options(nonmatching_fixed_epoch_verification PRIVATE /W4 /permissive-)
 else()
   target_compile_options(discretization_verification PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   target_compile_options(fixed_epoch_verification PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+  target_compile_options(multipoint_stencil_audit PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   target_compile_options(nonmatching_discretization_verification
     PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   target_compile_options(nonmatching_fixed_epoch_verification

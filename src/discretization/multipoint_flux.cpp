@@ -1,8 +1,10 @@
 #include "discretization/multipoint_flux.hpp"
 
+#include <Eigen/Eigenvalues>
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -195,6 +197,194 @@ MultipointFlux::Sample MultipointFlux::sample(const std::size_t cell,
     add_term(value, cell, 1.0);
     value.constant = normal_distance * inward_flux / conductivity[cell];
     return {normal_distance * face.outward_normal, std::move(value), face.outward_normal, 0.0};
+}
+
+MultipointStencilAudit MultipointFlux::audit_stencils(
+    const std::span<const double> conductivity,
+    const MultipointBoundaryData& boundary_data) const {
+    if (conductivity.size() != cell_centers_.size()) {
+        throw std::invalid_argument("Multipoint audit conductivity size does not match the mesh");
+    }
+    for (const double value : conductivity) {
+        if (!std::isfinite(value) || !(value > 0.0)) {
+            throw std::invalid_argument("Multipoint audit conductivity must be positive");
+        }
+    }
+
+    struct Candidate {
+        std::size_t first = 0;
+        std::size_t second = 0;
+        double first_coefficient = 0.0;
+        double second_coefficient = 0.0;
+        double score = 0.0;
+        double condition = std::numeric_limits<double>::infinity();
+    };
+    struct ReferencedSample {
+        FaceReference reference;
+        Sample sample;
+    };
+
+    const auto same_reference = [](const FaceReference& lhs, const FaceReference& rhs) {
+        return lhs.internal == rhs.internal && lhs.index == rhs.index &&
+               lhs.owner_side == rhs.owner_side;
+    };
+    const auto better = [](const Candidate& candidate, const Candidate& current) {
+        const double score_tolerance = 1.0e-12 * std::max(1.0, current.score);
+        return candidate.score < current.score - score_tolerance ||
+               (std::abs(candidate.score - current.score) <= score_tolerance &&
+                candidate.condition < current.condition);
+    };
+    const auto point_on_face = [this](const std::size_t cell, const ReferencedSample& value) {
+        Eigen::Vector2d center;
+        Eigen::Vector2d normal;
+        double length = 0.0;
+        if (value.reference.internal) {
+            const InternalFace& face = internal_faces_[value.reference.index];
+            center = face.center;
+            normal = value.reference.owner_side ? face.owner_normal : -face.owner_normal;
+            length = face.length;
+        } else {
+            const BoundaryFace& face = boundary_faces_[value.reference.index];
+            center = face.center;
+            normal = face.outward_normal;
+            length = face.length;
+        }
+        const Eigen::Vector2d point = cell_centers_[cell] + value.sample.displacement;
+        const Eigen::Vector2d tangent{-normal.y(), normal.x()};
+        const Eigen::Vector2d offset = point - center;
+        const double scale = std::max({1.0, length, point.norm(), center.norm()});
+        const double tolerance = 1.0e-10 * scale;
+        return std::abs(normal.dot(offset)) <= tolerance &&
+               std::abs(tangent.dot(offset)) <= (0.5 * length) + tolerance;
+    };
+
+    MultipointStencilAudit result;
+    result.entries.reserve((2 * internal_faces_.size()) + surface_faces_.size());
+    const auto append_target = [&](const std::size_t cell, const FaceReference& target) {
+        std::vector<ReferencedSample> samples;
+        samples.reserve(incident_faces_[cell].size());
+        std::size_t target_sample_index = 0;
+        bool target_sample_found = false;
+        for (const FaceReference& reference : incident_faces_[cell]) {
+            if (same_reference(reference, target)) {
+                target_sample_index = samples.size();
+                target_sample_found = true;
+            }
+            samples.push_back({reference, sample(cell, reference, conductivity, boundary_data)});
+        }
+        if (!target_sample_found) {
+            throw std::logic_error("Multipoint audit target is not incident to its cell");
+        }
+
+        const Eigen::Vector2d conormal =
+            conductivity[cell] * samples[target_sample_index].sample.outward_normal;
+        std::optional<Candidate> best_general;
+        bool restricted_found = false;
+        double closest_negative = std::numeric_limits<double>::infinity();
+        for (std::size_t first = 0; first < samples.size(); ++first) {
+            for (std::size_t second = first + 1; second < samples.size(); ++second) {
+                const Eigen::Vector2d& a = samples[first].sample.displacement;
+                const Eigen::Vector2d& b = samples[second].sample.displacement;
+                const double determinant = (a.x() * b.y()) - (a.y() * b.x());
+                const double direction_scale = a.norm() * b.norm();
+                if (!(direction_scale > 0.0) ||
+                    std::abs(determinant) <= 1.0e-12 * direction_scale) {
+                    continue;
+                }
+                double first_coefficient =
+                    ((conormal.x() * b.y()) - (conormal.y() * b.x())) / determinant;
+                double second_coefficient =
+                    ((a.x() * conormal.y()) - (a.y() * conormal.x())) / determinant;
+                const double coefficient_scale =
+                    std::max({1.0, std::abs(first_coefficient), std::abs(second_coefficient)});
+                closest_negative =
+                    std::min(closest_negative,
+                             std::max({0.0, -first_coefficient, -second_coefficient}) /
+                                 coefficient_scale);
+                if (first_coefficient < -1.0e-10 * coefficient_scale ||
+                    second_coefficient < -1.0e-10 * coefficient_scale) {
+                    continue;
+                }
+                first_coefficient = std::max(0.0, first_coefficient);
+                second_coefficient = std::max(0.0, second_coefficient);
+                const bool uses_target = first == target_sample_index || second == target_sample_index;
+                restricted_found = restricted_found || uses_target;
+
+                Eigen::Matrix2d directions;
+                directions.row(0) = a.transpose();
+                directions.row(1) = b.transpose();
+                const Eigen::Matrix2d inverse = directions.inverse();
+                const Eigen::Matrix2d qtkq =
+                    conductivity[cell] * inverse.transpose() * inverse;
+                const Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> eigenvalues(qtkq);
+                double condition = std::numeric_limits<double>::infinity();
+                if (eigenvalues.info() == Eigen::Success &&
+                    eigenvalues.eigenvalues().minCoeff() > 0.0) {
+                    condition = eigenvalues.eigenvalues().maxCoeff() /
+                                eigenvalues.eigenvalues().minCoeff();
+                }
+                const Candidate candidate{.first = first,
+                                          .second = second,
+                                          .first_coefficient = first_coefficient,
+                                          .second_coefficient = second_coefficient,
+                                          .score = first_coefficient + second_coefficient,
+                                          .condition = condition};
+                if (!best_general || better(candidate, *best_general)) {
+                    best_general = candidate;
+                }
+            }
+        }
+
+        MultipointStencilAuditEntry entry{
+            .cell = cell,
+            .target_face = target.index,
+            .target_is_internal = target.internal,
+            .restricted_pair_found = restricted_found,
+            .general_pair_found = best_general.has_value(),
+            .target_harmonic_point_on_face = point_on_face(cell, samples[target_sample_index]),
+            .closest_normalized_negative_coefficient = closest_negative,
+        };
+        if (best_general) {
+            const Candidate& selected = *best_general;
+            entry.general_pair_uses_target = selected.first == target_sample_index ||
+                                             selected.second == target_sample_index;
+            entry.general_harmonic_points_on_faces =
+                point_on_face(cell, samples[selected.first]) &&
+                point_on_face(cell, samples[selected.second]);
+            entry.general_coefficient_sum = selected.score;
+            entry.general_qtkq_condition = selected.condition;
+            const Eigen::Vector2d reconstructed =
+                selected.first_coefficient * samples[selected.first].sample.displacement +
+                selected.second_coefficient * samples[selected.second].sample.displacement;
+            entry.general_relative_reconstruction_defect =
+                (reconstructed - conormal).norm() / std::max(1.0, conormal.norm());
+        }
+
+        result.restricted_failures += static_cast<std::size_t>(!entry.restricted_pair_found);
+        result.general_failures += static_cast<std::size_t>(!entry.general_pair_found);
+        result.general_pairs_without_target +=
+            static_cast<std::size_t>(entry.general_pair_found && !entry.general_pair_uses_target);
+        result.target_harmonic_points_outside_faces +=
+            static_cast<std::size_t>(!entry.target_harmonic_point_on_face);
+        result.selected_harmonic_points_outside_faces += static_cast<std::size_t>(
+            entry.general_pair_found && !entry.general_harmonic_points_on_faces);
+        result.maximum_qtkq_condition =
+            std::max(result.maximum_qtkq_condition, entry.general_qtkq_condition);
+        result.maximum_relative_reconstruction_defect = std::max(
+            result.maximum_relative_reconstruction_defect,
+            entry.general_relative_reconstruction_defect);
+        result.entries.push_back(entry);
+    };
+
+    for (std::size_t index = 0; index < internal_faces_.size(); ++index) {
+        const InternalFace& face = internal_faces_[index];
+        append_target(face.owner, {true, index, true});
+        append_target(face.neighbor, {true, index, false});
+    }
+    for (const FaceReference& reference : surface_faces_) {
+        append_target(boundary_faces_[reference.index].cell, reference);
+    }
+    return result;
 }
 
 MultipointFlux::OneSidedFlux

@@ -83,7 +83,7 @@ Solution solve(NonmatchingColumnHeatSystem& system, Vector temperature,
         if (linear.status != LinearSolveStatus::converged) {
             throw std::runtime_error("UMFPACK failed on nonmatching-column verification");
         }
-        if (current <= 1.0e-10 || correction.infinity_norm() <= 1.0e-9) {
+        if (current <= 1.0e-10) {
             return result;
         }
         if (scheme == MultipointFluxScheme::nonlinear_dmp) {

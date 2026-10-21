@@ -51,6 +51,32 @@ struct MultipointFluxes {
     std::size_t maximum_stencil_size = 0;
 };
 
+struct MultipointStencilAuditEntry {
+    std::size_t cell = 0;
+    std::size_t target_face = 0;
+    bool target_is_internal = false;
+    bool restricted_pair_found = false;
+    bool general_pair_found = false;
+    bool general_pair_uses_target = false;
+    bool target_harmonic_point_on_face = false;
+    bool general_harmonic_points_on_faces = false;
+    double general_coefficient_sum = 0.0;
+    double general_qtkq_condition = 0.0;
+    double general_relative_reconstruction_defect = 0.0;
+    double closest_normalized_negative_coefficient = 0.0;
+};
+
+struct MultipointStencilAudit {
+    std::vector<MultipointStencilAuditEntry> entries;
+    std::size_t restricted_failures = 0;
+    std::size_t general_failures = 0;
+    std::size_t general_pairs_without_target = 0;
+    std::size_t target_harmonic_points_outside_faces = 0;
+    std::size_t selected_harmonic_points_outside_faces = 0;
+    double maximum_qtkq_condition = 0.0;
+    double maximum_relative_reconstruction_defect = 0.0;
+};
+
 class MultipointFlux {
 public:
     explicit MultipointFlux(const Mesh2D& mesh);
@@ -59,6 +85,13 @@ public:
                                            std::span<const double> conductivity,
                                            std::span<const double> solution,
                                            const MultipointBoundaryData& boundary_data) const;
+
+    // Compares the historical target+other restriction with the complete local
+    // two-direction search used by the 2D specialization of the reference method.
+    // It does not alter the flux used by compute().
+    [[nodiscard]] MultipointStencilAudit
+    audit_stencils(std::span<const double> conductivity,
+                   const MultipointBoundaryData& boundary_data) const;
 
 private:
     enum class BoundarySide {

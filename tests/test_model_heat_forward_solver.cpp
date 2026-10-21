@@ -12,7 +12,6 @@ constexpr NonlinearSolveRequest kNewtonRequest{
     .nonlinear_method = NonlinearMethod::newton,
     .relative_tolerance = 1e-12,
     .absolute_tolerance = 1e-12,
-    .step_relative_tolerance = 1e-12,
     .max_iterations = 5,
 };
 

@@ -125,11 +125,15 @@ double transient_error(const double timestep) {
         system, final_time,
         {.nonlinear_method = NonlinearMethod::picard,
          .relative_tolerance = 1.0e-12,
-         .absolute_tolerance = 1.0e-12,
-         .step_relative_tolerance = 1.0e-13,
+         // The raw extensive residual reaches a roundoff floor near 1e-8 for
+         // this 128-cell system after the exact linear solve.
+         .absolute_tolerance = 1.0e-8,
          .max_iterations = 10},
         {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1});
-    EXPECT_TRUE(result.completed());
+    EXPECT_TRUE(result.completed())
+        << "residual=" << result.last_residual_norm
+        << ", nonlinear_iterations=" << result.nonlinear_iterations
+        << ", accepted_steps=" << result.accepted_steps;
     const auto exact = [](double, const double z) {
         return kBaseTemperature + amplitude * std::exp(-decay * final_time) * std::sin(kz * z);
     };

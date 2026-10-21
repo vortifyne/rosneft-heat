@@ -116,7 +116,7 @@ SolveResult solve(NonmatchingColumnHeatSystem& system, Vector temperature,
             std::cerr << "picard iteration=" << iteration << " residual=" << current
                       << " correction=" << result.final_correction_linf << '\n';
         }
-        if (current <= 1.0e-8 || result.final_correction_linf <= 1.0e-7) {
+        if (current <= 1.0e-8) {
             return result;
         }
         if (scheme == MultipointFluxScheme::nonlinear_dmp) {
