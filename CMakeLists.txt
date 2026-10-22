@@ -87,6 +87,7 @@ add_library(basin_heat STATIC
   src/discretization/multipoint_flux.cpp
   src/discretization/nonmatching_column_flux.cpp
   src/discretization/nonmatching_column_heat_system.cpp
+  src/discretization/nonmatching_column_transient_system.cpp
   src/discretization/nonmatching_column_hfv_system.cpp
   src/mesh/mesh2d.cpp
   src/mesh/mesh_transfer.cpp
@@ -251,6 +252,7 @@ add_executable(heat_unit_tests
   tests/test_mesh2d.cpp
   tests/test_mesh_transfer.cpp
   tests/test_nonmatching_column_grid.cpp
+  tests/test_nonmatching_column_transient_system.cpp
   tests/test_strip_mesh.cpp
   tests/test_thermophysical_properties.cpp
 )
