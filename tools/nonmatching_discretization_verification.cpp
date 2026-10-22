@@ -1,5 +1,6 @@
 #include "basin/nonmatching_column_grid.hpp"
 #include "discretization/nonmatching_column_heat_system.hpp"
+#include "discretization/nonmatching_column_hfv_system.hpp"
 #include "linear/umfpack_linear_solver.hpp"
 
 #include <algorithm>
@@ -28,7 +29,10 @@ constexpr double kNormalizedResidualTolerance = 1.0e-9;
 
 using ExactTemperature = std::function<double(double, double, int)>;
 
-enum class NonlinearStrategy { residual_line_search, picard };
+enum class NonlinearStrategy {
+    residual_line_search,
+    picard
+};
 
 struct Solution {
     Vector temperature;
@@ -140,8 +144,7 @@ Solution solve(NonmatchingColumnHeatSystem& system, Vector temperature,
         const double current = residual_linf(result.residual);
         if (current / characteristic_rate <= kNormalizedResidualTolerance) {
             const auto end = std::chrono::steady_clock::now();
-            result.elapsed_ms =
-                std::chrono::duration<double, std::milli>(end - start).count();
+            result.elapsed_ms = std::chrono::duration<double, std::milli>(end - start).count();
             return result;
         }
         if (iteration == maximum_iterations) {
@@ -192,13 +195,36 @@ Solution solve(NonmatchingColumnHeatSystem& system, Vector temperature,
     throw std::runtime_error("Nonmatching-column iteration did not reach residual tolerance");
 }
 
+Solution solve_hfv(NonmatchingColumnHfvSystem& system, Vector linearization) {
+    const auto start = std::chrono::steady_clock::now();
+    Solution result{.temperature = {},
+                    .residual = {},
+                    .matrix = {},
+                    .nonlinear_updates = 0,
+                    .residual_assemblies = 1,
+                    .matrix_assemblies = 1,
+                    .elapsed_ms = 0.0};
+    Vector rhs;
+    system.assemble_system(linearization, result.matrix, rhs);
+    const LinearSolveResult linear = UmfpackLinearSolver{}.solve(
+        result.matrix, rhs, result.temperature,
+        {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1});
+    if (linear.status != LinearSolveStatus::converged || !result.temperature.all_finite()) {
+        throw std::runtime_error("UMFPACK failed on analytical HFV verification");
+    }
+    system.assemble_residual(result.temperature, result.residual);
+    result.elapsed_ms =
+        1000.0 * std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    return result;
+}
+
 double region_mean(const NonmatchingColumnGrid& grid, const Vector& solution, const double x_left,
                    const double x_right) {
     double integral = 0.0;
     double area = 0.0;
     for (const NonmatchingColumnCell& cell : grid.cells) {
-        const double overlap = std::max(0.0, std::min(cell.x_right, x_right) -
-                                                std::max(cell.x_left, x_left));
+        const double overlap =
+            std::max(0.0, std::min(cell.x_right, x_right) - std::max(cell.x_left, x_left));
         const double overlap_area = overlap * cell.height();
         integral += overlap_area * solution[static_cast<Vector::Index>(cell.index)];
         area += overlap_area;
@@ -265,9 +291,8 @@ double material_interface_outflow(const NonmatchingColumnGrid& grid,
             face.length / ((upper_distance / conductivity[face.upper_cell]) +
                            (lower_distance / conductivity[face.lower_cell]));
         const double upper_to_lower =
-            transmissibility *
-            (temperature[static_cast<Vector::Index>(face.upper_cell)] -
-             temperature[static_cast<Vector::Index>(face.lower_cell)]);
+            transmissibility * (temperature[static_cast<Vector::Index>(face.upper_cell)] -
+                                temperature[static_cast<Vector::Index>(face.lower_cell)]);
         if (upper_layer == layer) {
             result += upper_to_lower;
         } else if (lower_layer == layer) {
@@ -292,8 +317,7 @@ std::string_view name(const MultipointFluxScheme scheme) {
 }
 
 std::string_view name(const NonlinearStrategy strategy) {
-    return strategy == NonlinearStrategy::residual_line_search ? "residual_line_search"
-                                                                : "picard";
+    return strategy == NonlinearStrategy::residual_line_search ? "residual_line_search" : "picard";
 }
 
 VerificationCase smooth_constant_case() {
@@ -309,12 +333,10 @@ VerificationCase smooth_constant_case() {
         return conductivity_value * smooth_negative_laplacian(point.x, point.z);
     };
     result.boundary_data = {
-        .surface_temperature = [](const Point2D point) {
-            return smooth_temperature(point.x, point.z);
-        },
-        .basal_inward_flux = [](const Point2D point) {
-            return conductivity_value * smooth_dz(point.x, point.z);
-        }};
+        .surface_temperature =
+            [](const Point2D point) { return smooth_temperature(point.x, point.z); },
+        .basal_inward_flux =
+            [](const Point2D point) { return conductivity_value * smooth_dz(point.x, point.z); }};
     result.delta_temperature = 2.0 * kAmplitude;
     result.characteristic_rate = 1000.0;
     return result;
@@ -328,22 +350,20 @@ VerificationCase smooth_variable_case() {
     };
     VerificationCase result;
     result.name = "smooth_variable_lambda";
-    result.geometry = one_layer_geometry([](double) { return 0.0; },
-                                         [](double) { return kDepth; });
+    result.geometry = one_layer_geometry([](double) { return 0.0; }, [](double) { return kDepth; });
     result.exact = [](const double x, const double z, int) { return smooth_temperature(x, z); };
     result.conductivity = conductivity;
     result.source = [conductivity](const Point2D point, int layer) {
         return conductivity(point, layer) * smooth_negative_laplacian(point.x, point.z) -
-               grad_k_x * smooth_dx(point.x, point.z) -
-               grad_k_z * smooth_dz(point.x, point.z);
+               grad_k_x * smooth_dx(point.x, point.z) - grad_k_z * smooth_dz(point.x, point.z);
     };
     result.boundary_data = {
-        .surface_temperature = [](const Point2D point) {
-            return smooth_temperature(point.x, point.z);
-        },
-        .basal_inward_flux = [conductivity](const Point2D point) {
-            return conductivity(point, 1) * smooth_dz(point.x, point.z);
-        }};
+        .surface_temperature =
+            [](const Point2D point) { return smooth_temperature(point.x, point.z); },
+        .basal_inward_flux =
+            [conductivity](const Point2D point) {
+                return conductivity(point, 1) * smooth_dz(point.x, point.z);
+            }};
     result.delta_temperature = 2.0 * kAmplitude;
     result.characteristic_rate = 1000.0;
     return result;
@@ -361,12 +381,10 @@ VerificationCase sloped_surface_case() {
         return conductivity_value * smooth_negative_laplacian(point.x, point.z);
     };
     result.boundary_data = {
-        .surface_temperature = [](const Point2D point) {
-            return smooth_temperature(point.x, point.z);
-        },
-        .basal_inward_flux = [](const Point2D point) {
-            return conductivity_value * smooth_dz(point.x, point.z);
-        }};
+        .surface_temperature =
+            [](const Point2D point) { return smooth_temperature(point.x, point.z); },
+        .basal_inward_flux =
+            [](const Point2D point) { return conductivity_value * smooth_dz(point.x, point.z); }};
     result.delta_temperature = 2.0 * kAmplitude;
     result.characteristic_rate = 1000.0;
     return result;
@@ -378,8 +396,7 @@ VerificationCase horizontal_contact_case(const double contrast) {
     VerificationCase result;
     result.name = "horizontal_contact";
     result.parameter = contrast;
-    result.geometry = two_layer_geometry([](double) { return contact; },
-                                         [](double) { return 0.0; },
+    result.geometry = two_layer_geometry([](double) { return contact; }, [](double) { return 0.0; },
                                          [](double) { return kDepth; });
     result.exact = [contrast](const double, const double z, const int layer) {
         const double conductivity = layer == 1 ? 1.0 : contrast;
@@ -390,9 +407,8 @@ VerificationCase horizontal_contact_case(const double contrast) {
     };
     result.source = [](Point2D, int) { return 0.0; };
     result.boundary_data = {
-        .surface_temperature = [exact = result.exact](const Point2D point) {
-            return exact(point.x, point.z, 1);
-        },
+        .surface_temperature =
+            [exact = result.exact](const Point2D point) { return exact(point.x, point.z, 1); },
         .basal_inward_flux = [](Point2D) { return flux_scale; }};
     result.delta_temperature = 20.0;
     result.characteristic_rate = flux_scale * kWidth;
@@ -409,8 +425,7 @@ VerificationCase tilted_contact_case(const double contrast) {
     result.name = "tilted_contact";
     result.parameter = contrast;
     result.geometry = two_layer_geometry([](const double x) { return intercept + slope * x; },
-                                         [](double) { return 0.0; },
-                                         [](double) { return 2.6; });
+                                         [](double) { return 0.0; }, [](double) { return 2.6; });
     result.exact = [contrast](const double x, const double z, const int layer) {
         const double signed_coordinate = z - (intercept + slope * x);
         const double conductivity = layer == 1 ? 1.0 : contrast;
@@ -421,9 +436,8 @@ VerificationCase tilted_contact_case(const double contrast) {
     };
     result.source = [](Point2D, int) { return 0.0; };
     result.boundary_data = {
-        .surface_temperature = [exact = result.exact](const Point2D point) {
-            return exact(point.x, point.z, 1);
-        },
+        .surface_temperature =
+            [exact = result.exact](const Point2D point) { return exact(point.x, point.z, 1); },
         .basal_inward_flux = [](Point2D) { return flux_scale; },
         .left_inward_flux = [](Point2D) { return slope * flux_scale; },
         .right_inward_flux = [](Point2D) { return -slope * flux_scale; }};
@@ -452,13 +466,13 @@ void print_case(const VerificationCase& definition, const double hx, const doubl
     system.set_flux_scheme(scheme);
     Solution solution =
         solve(system, std::move(initial), scheme, definition.characteristic_rate, strategy);
-    const Metrics error = error_metrics(grid, solution.temperature, definition.exact,
-                                        definition.delta_temperature);
+    const Metrics error =
+        error_metrics(grid, solution.temperature, definition.exact, definition.delta_temperature);
     const NonmatchingColumnEnergyRates rates = system.energy_rates(solution.temperature);
     const NonmatchingColumnFluxDiagnostics diagnostics =
         system.flux_diagnostics(solution.temperature);
-    const double global_balance = rates.surface_outflow - rates.basal_inflow -
-                                  rates.lateral_inflow - rates.heat_production;
+    const double global_balance =
+        rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow - rates.heat_production;
     double minimum_subface = std::numeric_limits<double>::infinity();
     double maximum_dx = 0.0;
     double maximum_dz = 0.0;
@@ -469,23 +483,77 @@ void print_case(const VerificationCase& definition, const double hx, const doubl
     for (const NonmatchingVerticalSubface& face : grid.vertical_subfaces) {
         minimum_subface = std::min(minimum_subface, face.length());
     }
-    const double interface_outflow = definition.interface_layer
-                                         ? material_interface_outflow(
-                                               grid, system.thermal_conductivity(),
-                                               solution.temperature, definition.boundary_data,
-                                               scheme, *definition.interface_layer)
-                                         : std::numeric_limits<double>::quiet_NaN();
+    const double interface_outflow =
+        definition.interface_layer
+            ? material_interface_outflow(grid, system.thermal_conductivity(), solution.temperature,
+                                         definition.boundary_data, scheme,
+                                         *definition.interface_layer)
+            : std::numeric_limits<double>::quiet_NaN();
     std::cout << definition.name << ',' << name(scheme) << ',' << name(strategy) << ','
               << initial_offset << ',' << hx << ',' << hz << ',' << phase << ','
-              << definition.parameter << ',' << grid.columns.size() << ','
+              << definition.parameter << ',' << grid.columns.size() << ',' << grid.cells.size()
+              << ',' << grid.vertical_subfaces.size() << ',' << grid.surface_vertical_faces.size()
+              << ',' << grid.basal_vertical_faces.size() << ',' << solution.matrix.nonzero_count()
+              << ',' << solution.nonlinear_updates << ',' << solution.residual_assemblies << ','
+              << solution.matrix_assemblies << ',' << solution.elapsed_ms << ','
+              << diagnostics.maximum_stencil_size << ','
+              << diagnostics.internal_conservation_defect_linf << ',' << error.e2 << ',' << error.l2
+              << ',' << error.linf << ',' << error.minimum << ',' << error.maximum << ','
+              << error.left_mean << ',' << error.right_mean << ','
+              << residual_linf(solution.residual) << ','
+              << residual_linf(solution.residual) / definition.characteristic_rate << ','
+              << global_balance << ',' << global_balance / definition.characteristic_rate << ','
+              << rates.surface_outflow << ',' << rates.basal_inflow << ',' << rates.lateral_inflow
+              << ',' << rates.heat_production << ',' << interface_outflow << ','
+              << definition.expected_interface_outflow << ',' << minimum_subface << ','
+              << maximum_dx << ',' << maximum_dz << '\n';
+}
+
+void print_hfv_case(const VerificationCase& definition, const double hx, const double hz,
+                    const double phase, const double initial_offset) {
+    const LayeredMeshLayout layout =
+        make_nonmatching_column_layout(definition.geometry, hx, hz, phase);
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(definition.geometry, layout);
+    std::vector<double> conductivity(grid.cells.size());
+    std::vector<double> source(grid.cells.size());
+    for (const NonmatchingColumnCell& cell : grid.cells) {
+        conductivity[cell.index] = definition.conductivity(cell.center(), cell.layer_id);
+        source[cell.index] = definition.source(cell.center(), cell.layer_id);
+    }
+    NonmatchingColumnHfvSystem system(grid, conductivity, source, definition.boundary_data);
+    Vector initial =
+        system.interpolate([initial_offset](Point2D) { return kBaseTemperature + initial_offset; });
+    Solution solution = solve_hfv(system, std::move(initial));
+    const Metrics error =
+        error_metrics(grid, solution.temperature, definition.exact, definition.delta_temperature);
+    const NonmatchingHfvEnergyRates rates = system.energy_rates(solution.temperature);
+    const NonmatchingHfvDiagnostics diagnostics = system.diagnostics(solution.temperature);
+    const double global_balance =
+        rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow - rates.heat_production;
+    double minimum_subface = std::numeric_limits<double>::infinity();
+    double maximum_dx = 0.0;
+    double maximum_dz = 0.0;
+    for (const NonmatchingColumnCell& cell : grid.cells) {
+        maximum_dx = std::max(maximum_dx, cell.width());
+        maximum_dz = std::max(maximum_dz, cell.height());
+    }
+    for (const NonmatchingVerticalSubface& face : grid.vertical_subfaces) {
+        minimum_subface = std::min(minimum_subface, face.length());
+    }
+    const double interface_outflow =
+        definition.interface_layer
+            ? system.material_interface_outflow(solution.temperature, *definition.interface_layer)
+            : std::numeric_limits<double>::quiet_NaN();
+    std::cout << definition.name << ",sushi_hfv,linear," << initial_offset << ',' << hx << ',' << hz
+              << ',' << phase << ',' << definition.parameter << ',' << grid.columns.size() << ','
               << grid.cells.size() << ',' << grid.vertical_subfaces.size() << ','
               << grid.surface_vertical_faces.size() << ',' << grid.basal_vertical_faces.size()
               << ',' << solution.matrix.nonzero_count() << ',' << solution.nonlinear_updates << ','
               << solution.residual_assemblies << ',' << solution.matrix_assemblies << ','
-              << solution.elapsed_ms << ',' << diagnostics.maximum_stencil_size << ','
-              << diagnostics.internal_conservation_defect_linf << ',' << error.e2 << ','
-              << error.l2 << ',' << error.linf << ',' << error.minimum << ',' << error.maximum
-              << ',' << error.left_mean << ',' << error.right_mean << ','
+              << solution.elapsed_ms << ',' << diagnostics.maximum_cell_faces << ','
+              << diagnostics.internal_conservation_defect_linf << ',' << error.e2 << ',' << error.l2
+              << ',' << error.linf << ',' << error.minimum << ',' << error.maximum << ','
+              << error.left_mean << ',' << error.right_mean << ','
               << residual_linf(solution.residual) << ','
               << residual_linf(solution.residual) / definition.characteristic_rate << ','
               << global_balance << ',' << global_balance / definition.characteristic_rate << ','
@@ -509,11 +577,15 @@ std::vector<VerificationCase> cases() {
 
 void run_setting(const double hx, const double hz, const double phase,
                  const NonlinearStrategy strategy, const double initial_offset) {
+    const std::vector<VerificationCase> definitions = cases();
     for (const MultipointFluxScheme scheme :
-        {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
-        for (const VerificationCase& definition : cases()) {
+         {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
+        for (const VerificationCase& definition : definitions) {
             print_case(definition, hx, hz, phase, scheme, strategy, initial_offset);
         }
+    }
+    for (const VerificationCase& definition : definitions) {
+        print_hfv_case(definition, hx, hz, phase, initial_offset);
     }
 }
 
@@ -531,15 +603,16 @@ NonlinearStrategy parse_strategy(const std::string_view value) {
 
 int main(int argc, char** argv) {
     try {
-        std::cout << std::setprecision(17)
-                  << "test,scheme,nonlinear_strategy,initial_offset,hx,hz,phase,parameter,columns,cells,"
-                     "vertical_subfaces,"
-                     "surface_steps,basal_steps,nnz,nonlinear_updates,residual_assemblies,"
-                     "matrix_assemblies,elapsed_ms,maximum_stencil,internal_flux_mismatch,E2,l2,"
-                     "linf,Tmin,Tmax,left_mean,right_mean,residual_linf,residual_normalized,"
-                     "global_balance,balance_normalized,surface_outflow,basal_inflow,"
-                     "lateral_inflow,production,material_interface_outflow,"
-                     "expected_material_interface_outflow,minimum_subface,max_dx,max_dz\n";
+        std::cout
+            << std::setprecision(17)
+            << "test,scheme,nonlinear_strategy,initial_offset,hx,hz,phase,parameter,columns,cells,"
+               "vertical_subfaces,"
+               "surface_steps,basal_steps,nnz,nonlinear_updates,residual_assemblies,"
+               "matrix_assemblies,elapsed_ms,maximum_stencil,internal_flux_mismatch,E2,l2,"
+               "linf,Tmin,Tmax,left_mean,right_mean,residual_linf,residual_normalized,"
+               "global_balance,balance_normalized,surface_outflow,basal_inflow,"
+               "lateral_inflow,production,material_interface_outflow,"
+               "expected_material_interface_outflow,minimum_subface,max_dx,max_dz\n";
         if (argc >= 4 && argc <= 6) {
             const NonlinearStrategy selected_strategy =
                 argc >= 5 ? parse_strategy(argv[4]) : NonlinearStrategy::residual_line_search;
@@ -551,9 +624,8 @@ int main(int argc, char** argv) {
                 run_setting(h, h, 0.0, NonlinearStrategy::residual_line_search, 0.0);
             }
         } else {
-            throw std::invalid_argument(
-                "usage: nonmatching_discretization_verification "
-                "[HX HZ PHASE [line_search|picard [INITIAL_OFFSET]]]");
+            throw std::invalid_argument("usage: nonmatching_discretization_verification "
+                                        "[HX HZ PHASE [line_search|picard [INITIAL_OFFSET]]]");
         }
         return 0;
     } catch (const std::exception& error) {

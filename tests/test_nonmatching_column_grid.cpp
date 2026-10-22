@@ -1,6 +1,8 @@
 #include "basin/nonmatching_column_grid.hpp"
 #include "discretization/nonmatching_column_flux.hpp"
 #include "discretization/nonmatching_column_heat_system.hpp"
+#include "discretization/nonmatching_column_hfv_system.hpp"
+#include "linear/umfpack_linear_solver.hpp"
 
 #include <gtest/gtest.h>
 #include <map>
@@ -70,12 +72,11 @@ TEST(NonmatchingColumnGrid, LayoutRetainsContourSamplesAndPhasesOnlyInsertedLine
 
 TEST(NonmatchingColumnGrid, RepresentsVerticalOuterBoundarySteps) {
     const std::vector<double> x{0.0, 1.0, 2.0};
-    const BasinGeometry source{
-        .age_ma = 0.0,
-        .boundaries = {{profile(x, {0.0, 0.4, 0.8})},
-                       {profile(x, {1.0, 1.4, 1.8})},
-                       {profile(x, {2.0, 2.4, 2.8})}},
-        .layers = {{1, 0, 1, 0.0, 2.0}, {2, 1, 2, 0.0, 2.0}}};
+    const BasinGeometry source{.age_ma = 0.0,
+                               .boundaries = {{profile(x, {0.0, 0.4, 0.8})},
+                                              {profile(x, {1.0, 1.4, 1.8})},
+                                              {profile(x, {2.0, 2.4, 2.8})}},
+                               .layers = {{1, 0, 1, 0.0, 2.0}, {2, 1, 2, 0.0, 2.0}}};
     const LayeredMeshLayout layout{.x = {0.0, 1.0, 2.0}, .cell_size = 0.55};
     const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
 
@@ -92,8 +93,7 @@ TEST(NonmatchingColumnHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
     const std::vector<double> x{0.0, 1.0, 2.0};
     const BasinGeometry source{
         .age_ma = 0.0,
-        .boundaries = {{profile(x, {0.0, 0.4, 0.8})},
-                       {profile(x, {3.0, 3.0, 3.0})}},
+        .boundaries = {{profile(x, {0.0, 0.4, 0.8})}, {profile(x, {3.0, 3.0, 3.0})}},
         .layers = {{1, 0, 1, 0.0, 2.0}}};
     const LayeredMeshLayout layout{.x = {0.0, 1.0, 2.0}, .cell_size = 0.45};
     const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
@@ -127,8 +127,8 @@ TEST(NonmatchingColumnHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
         system.assemble_residual(temperature, residual);
         EXPECT_LT(residual.infinity_norm(), 2.0e-11);
         const NonmatchingColumnEnergyRates rates = system.energy_rates(temperature);
-        EXPECT_NEAR(rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow,
-                    0.0, 2.0e-11);
+        EXPECT_NEAR(rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow, 0.0,
+                    2.0e-11);
     }
 }
 
@@ -244,4 +244,100 @@ TEST(NonmatchingColumnHeatSystem, LinearMatrixMatchesResidualAndDmpMatrixIsMonot
             }
         }
     }
+}
+
+TEST(NonmatchingColumnHfvSystem, ReproducesAffineFieldOnNonmatchingSurfaceStaircase) {
+    BasinGeometry source = geometry();
+    source.boundaries.back().depth.values = {2.4, 2.4, 2.4};
+    const LayeredMeshLayout layout{.x = {0.0, 0.6, 1.0, 2.0}, .cell_size = 0.43};
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+    constexpr double conductivity_value = 2.5;
+    constexpr double x_gradient = 3.0;
+    constexpr double z_gradient = 1.25;
+    const auto exact = [](const Point2D point) {
+        return 300.0 + x_gradient * point.x + z_gradient * point.z;
+    };
+    const std::vector<double> conductivity(grid.cells.size(), conductivity_value);
+    const std::vector<double> production(grid.cells.size(), 0.0);
+    NonmatchingColumnHfvSystem system(
+        grid, conductivity, production,
+        {.surface_temperature = exact,
+         .basal_inward_flux = [](Point2D) { return conductivity_value * z_gradient; },
+         .left_inward_flux = [](Point2D) { return -conductivity_value * x_gradient; },
+         .right_inward_flux = [](Point2D) { return conductivity_value * x_gradient; }});
+    const Vector interpolated = system.interpolate(exact);
+    Vector residual;
+    system.assemble_residual(interpolated, residual);
+    EXPECT_LT(residual.infinity_norm(), 2.0e-11);
+
+    SparseMatrix matrix;
+    Vector rhs;
+    system.assemble_system(interpolated, matrix, rhs);
+    const Eigen::MatrixXd dense(matrix.native_csc());
+    EXPECT_LT((dense - dense.transpose()).norm(), 2.0e-12);
+    Vector solved;
+    const LinearSolveResult solve = UmfpackLinearSolver{}.solve(
+        matrix, rhs, solved,
+        {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1});
+    ASSERT_EQ(solve.status, LinearSolveStatus::converged);
+    EXPECT_LT((solved - interpolated).infinity_norm(), 5.0e-11);
+
+    const NonmatchingHfvEnergyRates rates = system.energy_rates(solved);
+    EXPECT_NEAR(rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow, 0.0, 2.0e-11);
+    const NonmatchingHfvDiagnostics diagnostics = system.diagnostics(solved);
+    EXPECT_GT(diagnostics.face_unknowns, 0U);
+    EXPECT_LT(diagnostics.internal_conservation_defect_linf, 2.0e-11);
+}
+
+TEST(NonmatchingColumnHfvSystem, ReproducesPiecewiseAffineFieldAcrossConductivityJump) {
+    NonmatchingColumnGrid grid{.x = {0.0, 1.0},
+                               .cells = {{.index = 0,
+                                          .column = 0,
+                                          .layer_id = 1,
+                                          .x_left = 0.0,
+                                          .x_right = 1.0,
+                                          .z_top = 0.0,
+                                          .z_bottom = 1.0,
+                                          .upward = std::nullopt,
+                                          .downward = 1},
+                                         {.index = 1,
+                                          .column = 0,
+                                          .layer_id = 2,
+                                          .x_left = 0.0,
+                                          .x_right = 1.0,
+                                          .z_top = 1.0,
+                                          .z_bottom = 2.0,
+                                          .upward = 0,
+                                          .downward = std::nullopt}},
+                               .columns = {{0, 1}},
+                               .horizontal_faces = {{0, 1, 1.0, 1.0}},
+                               .vertical_subfaces = {},
+                               .surface_vertical_faces = {},
+                               .basal_vertical_faces = {},
+                               .top_cells = {0},
+                               .bottom_cells = {1}};
+    const std::vector<double> conductivity{1.0, 100.0};
+    const std::vector<double> production{0.0, 0.0};
+    constexpr double inward_flux = 5.0;
+    const auto exact = [](const Point2D point) {
+        return point.z <= 1.0 ? 300.0 + inward_flux * point.z
+                              : 305.0 + inward_flux / 100.0 * (point.z - 1.0);
+    };
+    NonmatchingColumnHfvSystem system(
+        grid, conductivity, production,
+        {.surface_temperature = exact, .basal_inward_flux = [](Point2D) { return inward_flux; }});
+    const Vector interpolated = system.interpolate(exact);
+    Vector residual;
+    system.assemble_residual(interpolated, residual);
+    EXPECT_LT(residual.infinity_norm(), 2.0e-11);
+
+    SparseMatrix matrix;
+    Vector rhs;
+    system.assemble_system(interpolated, matrix, rhs);
+    Vector solved;
+    const LinearSolveResult solve = UmfpackLinearSolver{}.solve(
+        matrix, rhs, solved,
+        {.relative_tolerance = 1.0e-12, .absolute_tolerance = 1.0e-12, .max_iterations = 1});
+    ASSERT_EQ(solve.status, LinearSolveStatus::converged);
+    EXPECT_LT((solved - interpolated).infinity_norm(), 5.0e-11);
 }

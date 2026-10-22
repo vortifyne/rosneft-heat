@@ -87,6 +87,7 @@ add_library(basin_heat STATIC
   src/discretization/multipoint_flux.cpp
   src/discretization/nonmatching_column_flux.cpp
   src/discretization/nonmatching_column_heat_system.cpp
+  src/discretization/nonmatching_column_hfv_system.cpp
   src/mesh/mesh2d.cpp
   src/mesh/mesh_transfer.cpp
   src/mesh/strip_mesh.cpp
@@ -164,7 +165,8 @@ target_link_libraries(nonmatching_geometry_audit PRIVATE basin_heat)
 
 add_executable(nonmatching_fixed_epoch_verification
   tools/nonmatching_fixed_epoch_verification.cpp)
-target_link_libraries(nonmatching_fixed_epoch_verification PRIVATE basin_heat)
+target_link_libraries(nonmatching_fixed_epoch_verification
+  PRIVATE basin_heat PkgConfig::PETSc MPI::MPI_CXX)
 
 add_executable(compare_nonmatching_cell_fields
   tools/compare_nonmatching_cell_fields.cpp)
