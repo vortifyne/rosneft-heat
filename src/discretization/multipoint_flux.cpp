@@ -1,4 +1,5 @@
 #include "discretization/multipoint_flux.hpp"
+#include "mesh/mesh2d.hpp"
 
 #include <Eigen/Eigenvalues>
 #include <algorithm>
@@ -76,14 +77,6 @@ struct MultipointFlux::OneSidedFlux {
     MultipointFluxExpression expression;
     double direct_coefficient = 0.0;
 };
-
-double MultipointFluxExpression::value(const std::span<const double> solution) const {
-    double result = constant;
-    for (const MultipointFluxTerm term : terms) {
-        result += term.coefficient * solution[term.cell];
-    }
-    return result;
-}
 
 MultipointFlux::MultipointFlux(const Mesh2D& mesh) {
     const std::size_t cell_count = mesh.cells().size();

@@ -1,16 +1,12 @@
 #pragma once
 
 #include "Mesh.h"
+#include "mesh/point2d.hpp"
 
 #include <array>
 #include <memory>
 #include <span>
 #include <vector>
-
-struct Point2D {
-    double x = 0.0;
-    double z = 0.0;
-};
 
 enum class BoundaryKind : int {
     top = 1,

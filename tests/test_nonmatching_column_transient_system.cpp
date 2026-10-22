@@ -61,6 +61,28 @@ double integrate_decay(double timestep) {
     return integrator.current_snapshot().solution[0];
 }
 
+double integrate_moving_quadratic(double timestep) {
+    double temperature = 0.0;
+    const int steps = static_cast<int>(std::round(1.0 / timestep));
+    for (int step = 1; step <= steps; ++step) {
+        const double time = static_cast<double>(step) * timestep;
+        const NonmatchingColumnGrid grid = single_cell_grid(1.0 + 0.5 * time);
+        const std::vector<double> conductivity{1.0};
+        const std::vector<double> source{2.0 * time};
+        const std::vector<double> capacity{1.0};
+        NonmatchingColumnTransientSystem system(grid, conductivity, source, capacity,
+                                                boundary(time * time));
+        TimeIntegrator integrator;
+        integrator.set_initial_solution(0.0, Vector{temperature});
+        integrator.set_timestep(timestep);
+        const TimeIntegrationResult result =
+            integrator.advance_to(system, timestep, kPicard, kDirect);
+        EXPECT_TRUE(result.completed());
+        temperature = integrator.current_snapshot().solution[0];
+    }
+    return temperature;
+}
+
 Vector solve_temperature_dependent_case(double timestep, LinearSolverKind linear_solver) {
     const std::vector<double> x{0.0, 1.0, 2.0};
     const BasinGeometry geometry{
@@ -108,6 +130,14 @@ TEST(NonmatchingColumnTransientSystem, Bdf1ConvergesAtFirstOrderForDiscreteDecay
     const double exact = std::exp(-2.0);
     const double coarse_error = std::abs(integrate_decay(0.1) - exact);
     const double fine_error = std::abs(integrate_decay(0.05) - exact);
+    EXPECT_GT(coarse_error / fine_error, 1.7);
+    EXPECT_LT(coarse_error / fine_error, 2.1);
+}
+
+TEST(NonmatchingColumnTransientSystem, MovingCellBdf1ConvergesAtFirstOrder) {
+    // T=t^2, source=2t, surface T=t^2, basal flux=0 on a growing cell.
+    const double coarse_error = std::abs(integrate_moving_quadratic(0.1) - 1.0);
+    const double fine_error = std::abs(integrate_moving_quadratic(0.05) - 1.0);
     EXPECT_GT(coarse_error / fine_error, 1.7);
     EXPECT_LT(coarse_error / fine_error, 2.1);
 }

@@ -1,12 +1,14 @@
 #pragma once
 
-#include "mesh/mesh2d.hpp"
+#include "mesh/point2d.hpp"
 
 #include <Eigen/Core>
 #include <cstddef>
 #include <functional>
 #include <span>
 #include <vector>
+
+class Mesh2D;
 
 enum class MultipointFluxScheme {
     linear,

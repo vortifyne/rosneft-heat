@@ -69,10 +69,35 @@ else()
   target_compile_options(model_heat PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
-add_library(basin_heat STATIC
-  src/basin/basin_forward_solver.cpp
+add_library(basin_column STATIC
   src/basin/basin_input.cpp
   src/basin/basin_geometry.cpp
+  src/basin/basin_geometry_rdp.cpp
+  src/basin/column_epoch_geometry.cpp
+  src/basin/column_epoch_grid.cpp
+  src/basin/column_field_transfer.cpp
+  src/basin/column_basin_solver.cpp
+  src/basin/column_basin_binary.cpp
+  src/basin/nonmatching_column_grid.cpp
+  src/discretization/multipoint_flux_expression.cpp
+  src/discretization/nonmatching_column_flux.cpp
+  src/discretization/nonmatching_column_heat_system.cpp
+  src/discretization/nonmatching_column_transient_system.cpp
+  src/physics/easy_ro.cpp
+  src/physics/thermophysical_properties.cpp
+)
+
+target_include_directories(basin_column PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(basin_column PUBLIC heat_numerics)
+
+if(MSVC)
+  target_compile_options(basin_column PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(basin_column PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
+add_library(basin_heat STATIC
+  src/basin/basin_forward_solver.cpp
   src/basin/basin_state.cpp
   src/basin/forward_output.cpp
   src/basin/layered_mesh.cpp
@@ -80,24 +105,18 @@ add_library(basin_heat STATIC
   src/basin/layer_strip_mesh.cpp
   src/basin/layered_mesh_coverage.cpp
   src/basin/mesh_motion.cpp
-  src/basin/nonmatching_column_grid.cpp
   src/basin/vtu_output.cpp
   src/discretization/heat_system.cpp
   src/discretization/least_squares_gradient.cpp
   src/discretization/multipoint_flux.cpp
-  src/discretization/nonmatching_column_flux.cpp
-  src/discretization/nonmatching_column_heat_system.cpp
-  src/discretization/nonmatching_column_transient_system.cpp
   src/discretization/nonmatching_column_hfv_system.cpp
   src/mesh/mesh2d.cpp
   src/mesh/mesh_transfer.cpp
   src/mesh/strip_mesh.cpp
-  src/physics/easy_ro.cpp
-  src/physics/thermophysical_properties.cpp
 )
 
 target_include_directories(basin_heat PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(basin_heat PUBLIC heat_numerics TQMesh::TQMesh)
+target_link_libraries(basin_heat PUBLIC basin_column TQMesh::TQMesh)
 
 if(MSVC)
   target_compile_options(basin_heat PRIVATE /W4 /permissive-)
@@ -140,12 +159,16 @@ if(HEAT_BUILD_MODEL_INVERSE)
 endif()
 
 add_executable(heat_forward src/basin/main.cpp)
+add_executable(column_heat_forward src/basin/column_main.cpp)
+target_link_libraries(column_heat_forward PRIVATE basin_column PkgConfig::PETSc MPI::MPI_CXX)
 target_link_libraries(heat_forward PRIVATE basin_heat PkgConfig::PETSc MPI::MPI_CXX)
 
 if(MSVC)
   target_compile_options(heat_forward PRIVATE /W4 /permissive-)
+  target_compile_options(column_heat_forward PRIVATE /W4 /permissive-)
 else()
   target_compile_options(heat_forward PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+  target_compile_options(column_heat_forward PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
 add_executable(discretization_verification tools/discretization_verification.cpp)
@@ -247,6 +270,9 @@ add_executable(heat_unit_tests
   tests/test_heat_system.cpp
   tests/test_layered_mesh.cpp
   tests/test_basin_geometry.cpp
+  tests/test_column_epoch_geometry.cpp
+  tests/test_column_field_transfer.cpp
+  tests/test_column_basin_solver.cpp
   tests/test_least_squares_gradient.cpp
   tests/test_manufactured_heat_solution.cpp
   tests/test_mesh2d.cpp

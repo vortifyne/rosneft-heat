@@ -1,7 +1,8 @@
 #pragma once
 
 #include "basin/basin_geometry.hpp"
-#include "basin/layered_mesh.hpp"
+#include "basin/column_layout.hpp"
+#include "mesh/point2d.hpp"
 
 #include <cstddef>
 #include <optional>
@@ -66,6 +67,9 @@ struct NonmatchingColumnGrid {
 
     [[nodiscard]] double area() const noexcept;
 };
+
+// Rebuild contacts after the depths of material cells change, keeping indices.
+void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& grid);
 
 // Each geological boundary is replaced in a column by its exact mean depth on
 // that x interval. Therefore every layer area is preserved before the independent

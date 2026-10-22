@@ -113,6 +113,118 @@ double NonmatchingColumnGrid::area() const noexcept {
     return result;
 }
 
+void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& result) {
+    result.horizontal_faces.clear();
+    result.vertical_subfaces.clear();
+    result.surface_vertical_faces.clear();
+    result.basal_vertical_faces.clear();
+    result.top_cells.resize(result.columns.size());
+    result.bottom_cells.resize(result.columns.size());
+    for (NonmatchingColumnCell& cell : result.cells) {
+        cell.upward.reset();
+        cell.downward.reset();
+    }
+    for (std::size_t column = 0; column < result.columns.size(); ++column) {
+        auto& column_cells = result.columns[column];
+        const double right = result.x[column + 1];
+        if (column_cells.empty()) {
+            throw std::runtime_error("Nonmatching column contains no material");
+        }
+        std::sort(column_cells.begin(), column_cells.end(), [&result](const auto a, const auto b) {
+            if (result.cells[a].z_top != result.cells[b].z_top) {
+                return result.cells[a].z_top < result.cells[b].z_top;
+            }
+            return result.cells[a].z_bottom < result.cells[b].z_bottom;
+        });
+        const double scale = std::max(1.0, result.cells[column_cells.back()].z_bottom -
+                                               result.cells[column_cells.front()].z_top);
+        const double tolerance = 1.0e-10 * scale;
+        for (std::size_t row = 1; row < column_cells.size(); ++row) {
+            NonmatchingColumnCell& upper = result.cells[column_cells[row - 1]];
+            NonmatchingColumnCell& lower = result.cells[column_cells[row]];
+            if (std::abs(upper.z_bottom - lower.z_top) > tolerance) {
+                throw std::runtime_error("Nonmatching column has a vertical gap or overlap");
+            }
+            const double interface = 0.5 * (upper.z_bottom + lower.z_top);
+            upper.z_bottom = interface;
+            lower.z_top = interface;
+            upper.downward = lower.index;
+            lower.upward = upper.index;
+            result.horizontal_faces.push_back({upper.index, lower.index, interface,
+                                               right - result.x[column]});
+        }
+        result.top_cells[column] = column_cells.front();
+        result.bottom_cells[column] = column_cells.back();
+    }
+    for (std::size_t interface = 1; interface < result.columns.size(); ++interface) {
+        const auto& left_cells = result.columns[interface - 1];
+        const auto& right_cells = result.columns[interface];
+        const double depth_scale = std::max({1.0, result.cells[left_cells.back()].z_bottom,
+                                             result.cells[right_cells.back()].z_bottom});
+        const double tolerance = 1.0e-10 * depth_scale;
+        const double left_top = result.cells[left_cells.front()].z_top;
+        const double right_top = result.cells[right_cells.front()].z_top;
+        const double left_bottom = result.cells[left_cells.back()].z_bottom;
+        const double right_bottom = result.cells[right_cells.back()].z_bottom;
+        const double common_top = std::max(left_top, right_top);
+        const double common_bottom = std::min(left_bottom, right_bottom);
+        if (common_bottom < common_top - tolerance) {
+            throw std::runtime_error("Neighbouring nonmatching columns do not overlap");
+        }
+
+        const auto append_boundary_faces = [&result, tolerance](
+                                               const std::vector<std::size_t>& column,
+                                               const double z_top, const double z_bottom,
+                                               const double x, const double outward_x,
+                                               auto& output) {
+            for (const std::size_t cell_index : column) {
+                const NonmatchingColumnCell& cell = result.cells[cell_index];
+                const double top = std::max(z_top, cell.z_top);
+                const double bottom = std::min(z_bottom, cell.z_bottom);
+                if (bottom - top > tolerance) {
+                    output.push_back({cell_index, x, top, bottom, outward_x});
+                }
+            }
+        };
+        const double interface_x = result.x[interface];
+        if (left_top < right_top - tolerance) {
+            append_boundary_faces(left_cells, left_top, right_top, interface_x, 1.0,
+                                  result.surface_vertical_faces);
+        } else if (right_top < left_top - tolerance) {
+            append_boundary_faces(right_cells, right_top, left_top, interface_x, -1.0,
+                                  result.surface_vertical_faces);
+        }
+        if (left_bottom > right_bottom + tolerance) {
+            append_boundary_faces(left_cells, right_bottom, left_bottom, interface_x, 1.0,
+                                  result.basal_vertical_faces);
+        } else if (right_bottom > left_bottom + tolerance) {
+            append_boundary_faces(right_cells, left_bottom, right_bottom, interface_x, -1.0,
+                                  result.basal_vertical_faces);
+        }
+
+        std::size_t left_row = 0;
+        std::size_t right_row = 0;
+        while (left_row < left_cells.size() && right_row < right_cells.size()) {
+            const NonmatchingColumnCell& left_cell = result.cells[left_cells[left_row]];
+            const NonmatchingColumnCell& right_cell = result.cells[right_cells[right_row]];
+            const double top = std::max(left_cell.z_top, right_cell.z_top);
+            const double bottom = std::min(left_cell.z_bottom, right_cell.z_bottom);
+            if (bottom - top > tolerance) {
+                result.vertical_subfaces.push_back(
+                    {left_cell.index, right_cell.index, interface_x, top, bottom});
+            }
+            if (left_cell.z_bottom < right_cell.z_bottom - tolerance) {
+                ++left_row;
+            } else if (right_cell.z_bottom < left_cell.z_bottom - tolerance) {
+                ++right_row;
+            } else {
+                ++left_row;
+                ++right_row;
+            }
+        }
+    }
+}
+
 NonmatchingColumnGrid make_nonmatching_column_grid(const BasinGeometry& geometry,
                                                    const LayeredMeshLayout& layout) {
     if (layout.x.size() < 2 || !std::isfinite(layout.cell_size) || !(layout.cell_size > 0.0)) {
@@ -168,95 +280,8 @@ NonmatchingColumnGrid make_nonmatching_column_grid(const BasinGeometry& geometry
         if (column_cells.empty()) {
             throw std::runtime_error("Nonmatching column contains no material");
         }
-        std::sort(column_cells.begin(), column_cells.end(), [&result](const auto a, const auto b) {
-            return result.cells[a].z_top < result.cells[b].z_top;
-        });
-        const double scale = std::max(1.0, result.cells[column_cells.back()].z_bottom -
-                                               result.cells[column_cells.front()].z_top);
-        const double tolerance = 1.0e-10 * scale;
-        for (std::size_t row = 1; row < column_cells.size(); ++row) {
-            NonmatchingColumnCell& upper = result.cells[column_cells[row - 1]];
-            NonmatchingColumnCell& lower = result.cells[column_cells[row]];
-            if (std::abs(upper.z_bottom - lower.z_top) > tolerance) {
-                throw std::runtime_error("Nonmatching column has a vertical gap or overlap");
-            }
-            const double interface = 0.5 * (upper.z_bottom + lower.z_top);
-            upper.z_bottom = interface;
-            lower.z_top = interface;
-            upper.downward = lower.index;
-            lower.upward = upper.index;
-            result.horizontal_faces.push_back({upper.index, lower.index, interface, right - left});
-        }
-        result.top_cells[column] = column_cells.front();
-        result.bottom_cells[column] = column_cells.back();
     }
 
-    for (std::size_t interface = 1; interface < result.columns.size(); ++interface) {
-        const auto& left_cells = result.columns[interface - 1];
-        const auto& right_cells = result.columns[interface];
-        const double depth_scale = std::max({1.0, result.cells[left_cells.back()].z_bottom,
-                                             result.cells[right_cells.back()].z_bottom});
-        const double tolerance = 1.0e-10 * depth_scale;
-        const double left_top = result.cells[left_cells.front()].z_top;
-        const double right_top = result.cells[right_cells.front()].z_top;
-        const double left_bottom = result.cells[left_cells.back()].z_bottom;
-        const double right_bottom = result.cells[right_cells.back()].z_bottom;
-        const double common_top = std::max(left_top, right_top);
-        const double common_bottom = std::min(left_bottom, right_bottom);
-        if (common_bottom < common_top - tolerance) {
-            throw std::runtime_error("Neighbouring nonmatching columns do not overlap");
-        }
-
-        const auto append_boundary_faces = [&result, tolerance](
-                                               const std::vector<std::size_t>& column,
-                                               const double z_top, const double z_bottom,
-                                               const double x, const double outward_x,
-                                               auto& output) {
-            for (const std::size_t cell_index : column) {
-                const NonmatchingColumnCell& cell = result.cells[cell_index];
-                const double top = std::max(z_top, cell.z_top);
-                const double bottom = std::min(z_bottom, cell.z_bottom);
-                if (bottom - top > tolerance) {
-                    output.push_back({cell_index, x, top, bottom, outward_x});
-                }
-            }
-        };
-        const double interface_x = layout.x[interface];
-        if (left_top < right_top - tolerance) {
-            append_boundary_faces(left_cells, left_top, right_top, interface_x, 1.0,
-                                  result.surface_vertical_faces);
-        } else if (right_top < left_top - tolerance) {
-            append_boundary_faces(right_cells, right_top, left_top, interface_x, -1.0,
-                                  result.surface_vertical_faces);
-        }
-        if (left_bottom > right_bottom + tolerance) {
-            append_boundary_faces(left_cells, right_bottom, left_bottom, interface_x, 1.0,
-                                  result.basal_vertical_faces);
-        } else if (right_bottom > left_bottom + tolerance) {
-            append_boundary_faces(right_cells, left_bottom, right_bottom, interface_x, -1.0,
-                                  result.basal_vertical_faces);
-        }
-
-        std::size_t left_row = 0;
-        std::size_t right_row = 0;
-        while (left_row < left_cells.size() && right_row < right_cells.size()) {
-            const NonmatchingColumnCell& left_cell = result.cells[left_cells[left_row]];
-            const NonmatchingColumnCell& right_cell = result.cells[right_cells[right_row]];
-            const double top = std::max(left_cell.z_top, right_cell.z_top);
-            const double bottom = std::min(left_cell.z_bottom, right_cell.z_bottom);
-            if (bottom - top > tolerance) {
-                result.vertical_subfaces.push_back(
-                    {left_cell.index, right_cell.index, interface_x, top, bottom});
-            }
-            if (left_cell.z_bottom < right_cell.z_bottom - tolerance) {
-                ++left_row;
-            } else if (right_cell.z_bottom < left_cell.z_bottom - tolerance) {
-                ++right_row;
-            } else {
-                ++left_row;
-                ++right_row;
-            }
-        }
-    }
+    rebuild_nonmatching_column_faces(result);
     return result;
 }
