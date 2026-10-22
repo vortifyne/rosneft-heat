@@ -70,7 +70,8 @@ ColumnEpochGeometry make_column_epoch_geometry(const BasinConfiguration& first,
 }
 
 std::vector<double> make_column_epoch_axis(const ColumnEpochGeometry& epoch,
-                                           double horizontal_step) {
+                                           double horizontal_step,
+                                           std::span<const double> required_x) {
     if (!std::isfinite(horizontal_step) || !(horizontal_step > 0.0)) {
         throw std::invalid_argument("Column width must be positive");
     }
@@ -83,6 +84,15 @@ std::vector<double> make_column_epoch_axis(const ColumnEpochGeometry& epoch,
             events.push_back(layer.x_min);
             events.push_back(layer.x_max);
         }
+    }
+    const double domain_left = epoch.start.boundaries.front().depth.x.front();
+    const double domain_right = epoch.start.boundaries.front().depth.x.back();
+    for (const double coordinate : required_x) {
+        if (!std::isfinite(coordinate) || coordinate < domain_left ||
+            coordinate > domain_right) {
+            throw std::invalid_argument("Required column coordinate is outside the domain");
+        }
+        events.push_back(coordinate);
     }
     std::sort(events.begin(), events.end());
     events.erase(std::unique(events.begin(), events.end()), events.end());

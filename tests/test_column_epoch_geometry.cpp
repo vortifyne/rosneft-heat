@@ -126,6 +126,30 @@ TEST(ColumnEpochGeometry, RdpRetainsPinchoutAndLocalOwner) {
     EXPECT_NE(std::find(axis.begin(), axis.end(), 1.0), axis.end());
     const auto right = sample_column_epoch(reduced, 1.0, 2.0, 1.0);
     EXPECT_NEAR(right.boundaries[1], 0.8, 1.0e-12);
+    const auto original_on_reduced_axis =
+        make_column_epoch_grid(original, 10.0, 0.4, 1.0e-4, 0.5);
+    EXPECT_NE(std::find(original_on_reduced_axis.x.begin(),
+                        original_on_reduced_axis.x.end(), 1.0),
+              original_on_reduced_axis.x.end());
+}
+
+TEST(ColumnEpochGeometry, ReducedAxisIntegratesOriginalContactBetweenOmittedKnots) {
+    const BasinConfiguration first{
+        .age_ma = 1.0,
+        .layers = {layer(1, {0.0, 1.0, 2.0}, {0.0, 0.1, 0.0},
+                         {2.0, 2.1, 2.0})},
+        .surface_temperature = {}, .basal_heat_flux = {}};
+    BasinConfiguration second = first;
+    second.age_ma = 0.0;
+    const auto geometry = make_column_epoch_geometry(first, second);
+    const auto fine_axis = make_column_epoch_grid(geometry, 10.0, 3.0, 0.0);
+    const auto reduced_axis = make_column_epoch_grid(geometry, 10.0, 3.0, 0.0, 1.0);
+    EXPECT_EQ(fine_axis.x, (std::vector<double>{0.0, 1.0, 2.0}));
+    EXPECT_EQ(reduced_axis.x, (std::vector<double>{0.0, 2.0}));
+    const auto grid = reduced_axis.at(0.0);
+    ASSERT_EQ(grid.cells.size(), 1U);
+    EXPECT_NEAR(grid.cells.front().z_top, 0.05, 1.0e-12);
+    EXPECT_NEAR(grid.cells.front().z_bottom, 2.05, 1.0e-12);
 }
 
 TEST(ColumnEpochGeometry, ExactZeroRemovesCollapsedRowsAndRejoinsNeighbors) {

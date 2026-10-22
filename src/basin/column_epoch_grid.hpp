@@ -4,6 +4,8 @@
 #include "basin/nonmatching_column_grid.hpp"
 
 #include <cstddef>
+#include <optional>
+#include <span>
 #include <vector>
 
 struct ColumnEpochGrid {
@@ -26,4 +28,7 @@ struct ColumnEpochGrid {
 [[nodiscard]] ColumnEpochGrid make_column_epoch_grid(ColumnEpochGeometry geometry,
                                                      double horizontal_step,
                                                      double vertical_step,
-                                                     double minimum_cell_height);
+                                                     double minimum_cell_height,
+                                                     std::optional<double> axis_rdp_tolerance =
+                                                         std::nullopt,
+                                                     std::span<const double> required_x = {});

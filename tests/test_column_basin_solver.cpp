@@ -1,5 +1,6 @@
 #include "basin/column_basin_solver.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -25,9 +26,10 @@ TEST(ColumnBasinSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
     write_file(directory / "configurations.csv", "age_ma\n1\n0\n");
     write_file(directory / "layers.csv",
                "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity\n"
-               "1,2,old,0,0,2,1,0.1\n1,2,old,2,0,2,1,0.1\n"
+               "1,2,old,0,0,2,1,0.1\n1,2,old,1,0,2,2,0.1\n"
+               "1,2,old,2,0,2,2,0.1\n"
                "0,1,new,0,0,0.5,1,0.1\n0,1,new,2,0,0.5,1,0.1\n"
-               "0,2,old,0,0.5,2,1,0.1\n0,2,old,2,0.5,2,1,0.1\n");
+               "0,2,old,0,0.5,2,1,0.1\n0,2,old,2,0.5,2,2,0.1\n");
     write_file(directory / "boundaries.csv",
                "age_ma,kind,x,value_si\n"
                "1,surface_temperature,0,300\n1,surface_temperature,2,300\n"
@@ -36,18 +38,26 @@ TEST(ColumnBasinSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
                "0,basal_heat_flux,0,0\n0,basal_heat_flux,2,0\n");
     write_file(directory / "lithotypes.csv",
                "code,name,solid_density,conductivity_20,specific_heat_20,heat_production\n"
-               "1,rock,2600,2.5,900,0\n");
+               "1,rock,2600,2.5,900,0\n"
+               "2,rock2,2600,2.5,900,0\n");
     write_file(directory / "kinetics.csv",
                "preexponential,activation_energy,weight,gas_constant\n"
                "1e-15,1,1,8.314\n");
     const BasinInput input = BasinInput::read(directory);
     bool saw_final = false;
+    bool saw_initial_axis = false;
     const ColumnBasinResult result = solve_column_basin(
-        input, {.horizontal_step = 1.0, .vertical_step = 1.0,
-                .minimum_cell_height = 1.0e-4, .timestep_ma = 0.5},
+        input, {.horizontal_step = 10.0, .vertical_step = 1.0,
+                .minimum_cell_height = 1.0e-4, .timestep_ma = 0.5,
+                .axis_rdp_tolerance = 5.0},
         [&](const ColumnBasinSnapshot& snapshot) {
+            if (snapshot.kind == ColumnBasinSnapshot::Kind::initial) {
+                saw_initial_axis = true;
+                EXPECT_EQ(snapshot.grid.x, (std::vector<double>{0.0, 0.5, 1.0, 2.0}));
+            }
             if (snapshot.kind != ColumnBasinSnapshot::Kind::after_event) return;
             saw_final = true;
+            EXPECT_EQ(snapshot.grid.x, (std::vector<double>{0.0, 1.0, 2.0}));
             ASSERT_EQ(snapshot.maturity_integrals.size(), snapshot.grid.cells.size());
             for (const auto& cell : snapshot.grid.cells) {
                 EXPECT_NEAR(snapshot.temperature[cell.index], 300.0, 1.0e-8);
@@ -62,6 +72,7 @@ TEST(ColumnBasinSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
             }
         });
     EXPECT_TRUE(saw_final);
+    EXPECT_TRUE(saw_initial_axis);
     EXPECT_EQ(result.accepted_steps, 2);
     EXPECT_LT(result.maximum_cell_residual, 1.0e-8);
     EXPECT_LT(result.maximum_global_balance, 1.0e-8);

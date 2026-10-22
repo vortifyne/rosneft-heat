@@ -1,4 +1,5 @@
 #include "basin/column_epoch_grid.hpp"
+#include "basin/basin_geometry_rdp.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -7,15 +8,28 @@
 
 ColumnEpochGrid make_column_epoch_grid(ColumnEpochGeometry geometry,
                                        double horizontal_step, double vertical_step,
-                                       double minimum_cell_height) {
+                                       double minimum_cell_height,
+                                       std::optional<double> axis_rdp_tolerance,
+                                       std::span<const double> required_x) {
     if (!std::isfinite(vertical_step) || !(vertical_step > 0.0) ||
-        !std::isfinite(minimum_cell_height) || minimum_cell_height < 0.0) {
+        !std::isfinite(minimum_cell_height) || minimum_cell_height < 0.0 ||
+        (axis_rdp_tolerance &&
+         (!std::isfinite(*axis_rdp_tolerance) || *axis_rdp_tolerance < 0.0))) {
         throw std::invalid_argument("Epoch grid requires a positive vertical step and nonnegative minimum");
     }
     ColumnEpochGrid result{.geometry = std::move(geometry),
                            .x = {}, .rows = {},
                            .minimum_cell_height = minimum_cell_height};
-    result.x = make_column_epoch_axis(result.geometry, horizontal_step);
+    if (axis_rdp_tolerance) {
+        const ColumnEpochGeometry axis_geometry{
+            .start = simplify_basin_geometry_rdp(result.geometry.start, *axis_rdp_tolerance),
+            .after_event = simplify_basin_geometry_rdp(result.geometry.after_event,
+                                                       *axis_rdp_tolerance),
+            .born_layer_id = result.geometry.born_layer_id};
+        result.x = make_column_epoch_axis(axis_geometry, horizontal_step, required_x);
+    } else {
+        result.x = make_column_epoch_axis(result.geometry, horizontal_step, required_x);
+    }
     result.rows.resize(result.x.size() - 1);
     for (std::size_t column = 0; column < result.rows.size(); ++column) {
         const auto start = sample_column_epoch(result.geometry, result.x[column],

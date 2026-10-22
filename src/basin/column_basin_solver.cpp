@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -21,6 +22,25 @@ constexpr double kSecondsPerMa = 1.0e6 * 365.25 * 24.0 * 3600.0;
 constexpr FluidThermophysicalProperties kFluid{.thermal_conductivity = 0.7,
                                                .density = 1040.0,
                                                .specific_heat = 4184.0};
+
+std::vector<double> lithotype_breakpoints(const BasinConfiguration& first,
+                                          const BasinConfiguration* second = nullptr) {
+    std::vector<double> result;
+    const auto append = [&result](const BasinConfiguration& configuration) {
+        for (const auto& layer : configuration.layers) {
+            for (std::size_t i = 1; i < layer.x.size(); ++i) {
+                if (layer.lithotype[i - 1] != layer.lithotype[i]) {
+                    result.push_back(std::midpoint(layer.x[i - 1], layer.x[i]));
+                }
+            }
+        }
+    };
+    append(first);
+    if (second) append(*second);
+    std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    return result;
+}
 
 std::span<const double> values(const Vector& v) {
     return {v.native().data(), static_cast<std::size_t>(v.size())};
@@ -158,7 +178,7 @@ State transfer_state(const State& old, NonmatchingColumnGrid new_grid,
 NonlinearSolveRequest nonlinear_request(double relative_tolerance) {
     return {.nonlinear_method = NonlinearMethod::picard,
             .relative_tolerance = relative_tolerance,
-            .absolute_tolerance = 0.0,
+            .absolute_tolerance = 1.0e-8,
             .max_iterations = 200};
 }
 
@@ -178,10 +198,13 @@ ColumnBasinResult solve_column_basin(const BasinInput& input,
     const EasyRoModel easy_ro = make_easy_ro(input);
     const double minimum_height = settings.pinchout == ColumnBasinSettings::Pinchout::exact_zero
                                       ? 0.0 : settings.minimum_cell_height;
+    const auto first_material_x = lithotype_breakpoints(configurations[0],
+                                                        &configurations[1]);
     const auto first_epoch = make_column_epoch_grid(
         make_column_epoch_geometry(configurations[0], configurations[1],
                                    settings.rdp_tolerance),
-        settings.horizontal_step, settings.vertical_step, minimum_height);
+        settings.horizontal_step, settings.vertical_step, minimum_height,
+        settings.axis_rdp_tolerance, first_material_x);
     State state = initial_state(first_epoch, configurations[0], input, easy_ro);
     ColumnBasinResult result;
     observe_state(state, easy_ro, ColumnBasinSnapshot::Kind::initial,
@@ -193,9 +216,10 @@ ColumnBasinResult solve_column_basin(const BasinInput& input,
         if (!(first.age_ma > second.age_ma)) {
             throw std::invalid_argument("C-basin ages must decrease");
         }
+        const auto material_x = lithotype_breakpoints(first, &second);
         const ColumnEpochGrid epoch = epoch_index == 0 ? first_epoch : make_column_epoch_grid(
             make_column_epoch_geometry(first, second, settings.rdp_tolerance), settings.horizontal_step,
-            settings.vertical_step, minimum_height);
+            settings.vertical_step, minimum_height, settings.axis_rdp_tolerance, material_x);
         const double duration = (first.age_ma - second.age_ma) * kSecondsPerMa;
         const double timestep = settings.timestep_ma * kSecondsPerMa;
         double elapsed = 0.0;
@@ -316,15 +340,25 @@ ColumnBasinResult solve_column_basin(const BasinInput& input,
         if (last) {
             const BasinGeometry after_geometry = simplify_basin_geometry_rdp(
                 make_basin_geometry(second), settings.rdp_tolerance);
-            const LayeredMeshLayout layout = make_nonmatching_column_layout(
-                after_geometry, settings.horizontal_step, settings.vertical_step, 0.0);
+            const BasinGeometry axis_geometry = settings.axis_rdp_tolerance ?
+                simplify_basin_geometry_rdp(after_geometry, *settings.axis_rdp_tolerance) :
+                after_geometry;
+            const ColumnEpochGeometry final_axis_geometry{.start = axis_geometry,
+                                                          .after_event = axis_geometry,
+                                                          .born_layer_id = std::nullopt};
+            const auto final_material_x = lithotype_breakpoints(second);
+            const LayeredMeshLayout layout{
+                .x = make_column_epoch_axis(final_axis_geometry, settings.horizontal_step,
+                                            final_material_x),
+                .cell_size = settings.vertical_step};
             after_grid = make_nonmatching_column_grid(after_geometry, layout);
         } else {
             after_grid = make_column_epoch_grid(
                 make_column_epoch_geometry(second, configurations[epoch_index + 2],
                                            settings.rdp_tolerance),
                 settings.horizontal_step, settings.vertical_step,
-                minimum_height).at(0.0);
+                minimum_height, settings.axis_rdp_tolerance,
+                lithotype_breakpoints(second, &configurations[epoch_index + 2])).at(0.0);
         }
         const int born = epoch.geometry.born_layer_id.value_or(-1);
         state = transfer_state(state, std::move(after_grid), easy_ro, born);

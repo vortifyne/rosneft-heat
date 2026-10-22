@@ -36,7 +36,8 @@ int main(int argc, const char* const argv[]) {
     if (argc < 3) {
         std::cerr << "Usage: column_heat_forward <input-dir> <output-dir> "
                      "[--dx m] [--dz m] [--dt-ma Ma] [--picard-rtol tolerance] [--min-height m] "
-                     "[--rdp-tol m] [--pinchout positive|zero] [--scheme linear|nmpfa] "
+                     "[--rdp-tol m] [--axis-rdp-tol m] [--pinchout positive|zero] "
+                     "[--scheme linear|nmpfa] "
                      "[--linear-solver umfpack|gamg|boomeramg]\n";
         return EXIT_FAILURE;
     }
@@ -54,6 +55,9 @@ int main(int argc, const char* const argv[]) {
             }
             else if (option == "--rdp-tol") {
                 settings.rdp_tolerance = std::stod(std::string(setting));
+            }
+            else if (option == "--axis-rdp-tol") {
+                settings.axis_rdp_tolerance = std::stod(std::string(setting));
             }
             else if (option == "--min-height") {
                 settings.minimum_cell_height = std::stod(std::string(setting));
@@ -89,7 +93,29 @@ int main(int argc, const char* const argv[]) {
                 write_column_basin_binary(output / name.str(), snapshot);
             });
         std::ofstream summary(output / "summary.txt");
-        summary << "accepted_steps=" << result.accepted_steps << '\n'
+        summary << std::setprecision(17)
+                << "dx=" << settings.horizontal_step << '\n'
+                << "dz=" << settings.vertical_step << '\n'
+                << "dt_ma=" << settings.timestep_ma << '\n'
+                << "rdp_tol=" << settings.rdp_tolerance << '\n'
+                << "axis_rdp_tol=";
+        if (settings.axis_rdp_tolerance) summary << *settings.axis_rdp_tolerance;
+        else summary << "none";
+        summary << '\n'
+                << "min_height=" << settings.minimum_cell_height << '\n'
+                << "pinchout=" << (settings.pinchout == ColumnBasinSettings::Pinchout::exact_zero ?
+                                     "zero" : "positive") << '\n'
+                << "scheme=" << (settings.scheme == MultipointFluxScheme::linear ?
+                                   "linear" : "nmpfa") << '\n'
+                << "linear_solver=";
+        switch (settings.linear_solver) {
+        case LinearSolverKind::umfpack_lu: summary << "umfpack"; break;
+        case LinearSolverKind::petsc_gmres_gamg: summary << "gamg"; break;
+        case LinearSolverKind::petsc_gmres_boomeramg: summary << "boomeramg"; break;
+        }
+        summary << '\n'
+                << "picard_rtol=" << settings.picard_relative_tolerance << '\n'
+                << "accepted_steps=" << result.accepted_steps << '\n'
                 << "nonlinear_iterations=" << result.nonlinear_iterations << '\n'
                 << "linear_iterations=" << result.linear_iterations << '\n'
                 << "maximum_cells=" << result.maximum_cells << '\n'

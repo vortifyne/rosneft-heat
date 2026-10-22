@@ -3,6 +3,7 @@
 #include "basin/basin_geometry.hpp"
 
 #include <optional>
+#include <span>
 #include <vector>
 
 // A pre-event contact may jump where the local uppermost old layer changes.
@@ -25,9 +26,11 @@ make_column_epoch_geometry(const BasinConfiguration& first,
                            const BasinConfiguration& second,
                            double rdp_tolerance = 0.0);
 
-// Include contour knots and layer-support endpoints of both snapshots.
+// Include contour knots and layer-support endpoints of both snapshots, plus
+// required material-discontinuity coordinates supplied by the caller.
 [[nodiscard]] std::vector<double> make_column_epoch_axis(const ColumnEpochGeometry& epoch,
-                                                         double horizontal_step);
+                                                         double horizontal_step,
+                                                         std::span<const double> required_x = {});
 
 // fraction=0: start of epoch; fraction=1: immediately before layer birth.
 [[nodiscard]] ColumnEpochSection sample_column_epoch(const ColumnEpochGeometry& epoch,
