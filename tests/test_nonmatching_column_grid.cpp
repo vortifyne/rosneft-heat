@@ -58,10 +58,78 @@ TEST(NonmatchingColumnGrid, MergeCreatesSubfacesWithoutCreatingCells) {
     EXPECT_NEAR(interface_length, common_bottom - common_top, 1.0e-14);
 }
 
-TEST(NonmatchingColumnGrid, LayoutDoesNotTurnContourSamplesIntoColumns) {
+TEST(NonmatchingColumnGrid, LayoutRetainsContourSamplesAndPhasesOnlyInsertedLines) {
     const BasinGeometry source = geometry();
     const LayeredMeshLayout layout = make_nonmatching_column_layout(source, 0.75);
-    EXPECT_EQ(layout.x, (std::vector<double>{0.0, 2.0 / 3.0, 4.0 / 3.0, 2.0}));
+    EXPECT_EQ(layout.x, (std::vector<double>{0.0, 0.5, 1.0, 1.5, 2.0}));
+
+    const LayeredMeshLayout shifted = make_nonmatching_column_layout(source, 0.75, 0.4, 0.25);
+    EXPECT_EQ(shifted.x, (std::vector<double>{0.0, 0.625, 1.0, 1.625, 2.0}));
+    EXPECT_DOUBLE_EQ(shifted.cell_size, 0.4);
+}
+
+TEST(NonmatchingColumnGrid, RepresentsVerticalOuterBoundarySteps) {
+    const std::vector<double> x{0.0, 1.0, 2.0};
+    const BasinGeometry source{
+        .age_ma = 0.0,
+        .boundaries = {{profile(x, {0.0, 0.4, 0.8})},
+                       {profile(x, {1.0, 1.4, 1.8})},
+                       {profile(x, {2.0, 2.4, 2.8})}},
+        .layers = {{1, 0, 1, 0.0, 2.0}, {2, 1, 2, 0.0, 2.0}}};
+    const LayeredMeshLayout layout{.x = {0.0, 1.0, 2.0}, .cell_size = 0.55};
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+
+    ASSERT_EQ(grid.surface_vertical_faces.size(), 1U);
+    EXPECT_NEAR(grid.surface_vertical_faces.front().length(), 0.4, 1.0e-14);
+    EXPECT_DOUBLE_EQ(grid.surface_vertical_faces.front().x, 1.0);
+    EXPECT_DOUBLE_EQ(grid.surface_vertical_faces.front().outward_x, 1.0);
+    ASSERT_EQ(grid.basal_vertical_faces.size(), 1U);
+    EXPECT_NEAR(grid.basal_vertical_faces.front().length(), 0.4, 1.0e-14);
+    EXPECT_DOUBLE_EQ(grid.basal_vertical_faces.front().outward_x, -1.0);
+}
+
+TEST(NonmatchingColumnHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
+    const std::vector<double> x{0.0, 1.0, 2.0};
+    const BasinGeometry source{
+        .age_ma = 0.0,
+        .boundaries = {{profile(x, {0.0, 0.4, 0.8})},
+                       {profile(x, {3.0, 3.0, 3.0})}},
+        .layers = {{1, 0, 1, 0.0, 2.0}}};
+    const LayeredMeshLayout layout{.x = {0.0, 1.0, 2.0}, .cell_size = 0.45};
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+    ASSERT_FALSE(grid.surface_vertical_faces.empty());
+    ASSERT_TRUE(grid.basal_vertical_faces.empty());
+
+    constexpr double conductivity_value = 2.5;
+    constexpr double x_gradient = 3.0;
+    constexpr double z_gradient = -1.25;
+    const auto exact = [](const Point2D point) {
+        return 300.0 + x_gradient * point.x + z_gradient * point.z;
+    };
+    const std::vector<double> conductivity(grid.cells.size(), conductivity_value);
+    const std::vector<double> production(grid.cells.size(), 0.0);
+    Vector temperature(static_cast<Vector::Index>(grid.cells.size()));
+    for (const NonmatchingColumnCell& cell : grid.cells) {
+        temperature[static_cast<Vector::Index>(cell.index)] = exact(cell.center());
+    }
+    NonmatchingColumnHeatSystem system(
+        grid, conductivity, production,
+        {.surface_temperature = exact,
+         .basal_inward_flux = [](Point2D) { return conductivity_value * z_gradient; },
+         .left_inward_flux = [](Point2D) { return -conductivity_value * x_gradient; },
+         .right_inward_flux = [](Point2D) { return conductivity_value * x_gradient; }});
+
+    for (const MultipointFluxScheme scheme :
+         {MultipointFluxScheme::linear, MultipointFluxScheme::linear_equal_weight,
+          MultipointFluxScheme::nonlinear_conservative}) {
+        system.set_flux_scheme(scheme);
+        Vector residual;
+        system.assemble_residual(temperature, residual);
+        EXPECT_LT(residual.infinity_norm(), 2.0e-11);
+        const NonmatchingColumnEnergyRates rates = system.energy_rates(temperature);
+        EXPECT_NEAR(rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow,
+                    0.0, 2.0e-11);
+    }
 }
 
 TEST(NonmatchingColumnFlux, ReproducesAffineFluxOnMergedSubfaces) {
@@ -82,8 +150,8 @@ TEST(NonmatchingColumnFlux, ReproducesAffineFluxOnMergedSubfaces) {
         .basal_inward_flux = [](Point2D) { return 2.5 * z_gradient; }};
     const NonmatchingColumnFlux flux(grid);
     for (const MultipointFluxScheme scheme :
-         {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative,
-          MultipointFluxScheme::nonlinear_dmp}) {
+         {MultipointFluxScheme::linear, MultipointFluxScheme::linear_equal_weight,
+          MultipointFluxScheme::nonlinear_conservative, MultipointFluxScheme::nonlinear_dmp}) {
         const NonmatchingColumnFluxes values =
             flux.compute(scheme, conductivity, temperature, boundary);
         ASSERT_EQ(values.vertical.size(), grid.vertical_subfaces.size());
@@ -118,6 +186,8 @@ TEST(NonmatchingColumnFlux, UsesHarmonicNormalFluxAcrossMaterialJump) {
                                .columns = {{0}, {1}},
                                .horizontal_faces = {},
                                .vertical_subfaces = {{0, 1, 1.0, 0.0, 1.0}},
+                               .surface_vertical_faces = {},
+                               .basal_vertical_faces = {},
                                .top_cells = {0, 1},
                                .bottom_cells = {0, 1}};
     const std::vector<double> conductivity{1.0, 1000.0};
@@ -129,8 +199,8 @@ TEST(NonmatchingColumnFlux, UsesHarmonicNormalFluxAcrossMaterialJump) {
         .basal_inward_flux = [](Point2D) { return 0.0; }};
     const NonmatchingColumnFlux flux(grid);
     for (const MultipointFluxScheme scheme :
-         {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative,
-          MultipointFluxScheme::nonlinear_dmp}) {
+         {MultipointFluxScheme::linear, MultipointFluxScheme::linear_equal_weight,
+          MultipointFluxScheme::nonlinear_conservative, MultipointFluxScheme::nonlinear_dmp}) {
         const NonmatchingColumnFluxes values =
             flux.compute(scheme, conductivity, temperature, boundary);
         ASSERT_EQ(values.vertical.size(), 1U);

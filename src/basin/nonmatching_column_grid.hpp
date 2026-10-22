@@ -42,12 +42,25 @@ struct NonmatchingVerticalSubface {
     [[nodiscard]] double center_z() const noexcept;
 };
 
+struct NonmatchingVerticalBoundaryFace {
+    std::size_t cell = 0;
+    double x = 0.0;
+    double z_top = 0.0;
+    double z_bottom = 0.0;
+    double outward_x = 0.0;
+
+    [[nodiscard]] double length() const noexcept;
+    [[nodiscard]] double center_z() const noexcept;
+};
+
 struct NonmatchingColumnGrid {
     std::vector<double> x;
     std::vector<NonmatchingColumnCell> cells;
     std::vector<std::vector<std::size_t>> columns;
     std::vector<NonmatchingHorizontalFace> horizontal_faces;
     std::vector<NonmatchingVerticalSubface> vertical_subfaces;
+    std::vector<NonmatchingVerticalBoundaryFace> surface_vertical_faces;
+    std::vector<NonmatchingVerticalBoundaryFace> basal_vertical_faces;
     std::vector<std::size_t> top_cells;
     std::vector<std::size_t> bottom_cells;
 
@@ -60,7 +73,12 @@ struct NonmatchingColumnGrid {
 [[nodiscard]] NonmatchingColumnGrid make_nonmatching_column_grid(const BasinGeometry& geometry,
                                                                  const LayeredMeshLayout& layout);
 
-// Contour vertices do not create columns. Only material-support endpoints are
-// mandatory; remaining intervals are quasi-uniform.
+// Retained contour coordinates and material-support endpoints are mandatory.
+// Long intervals are filled quasi-uniformly; phase only moves inserted points.
 [[nodiscard]] LayeredMeshLayout make_nonmatching_column_layout(const BasinGeometry& geometry,
                                                                double cell_size);
+
+[[nodiscard]] LayeredMeshLayout make_nonmatching_column_layout(const BasinGeometry& geometry,
+                                                               double horizontal_cell_size,
+                                                               double vertical_cell_size,
+                                                               double phase);

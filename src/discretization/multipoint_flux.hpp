@@ -10,6 +10,9 @@
 
 enum class MultipointFluxScheme {
     linear,
+    // Diagnostic baseline retained to isolate the historical 1/2--1/2
+    // combination from conductance-weighted linear fluxes on C grids.
+    linear_equal_weight,
     nonlinear_conservative,
     nonlinear_dmp,
 };

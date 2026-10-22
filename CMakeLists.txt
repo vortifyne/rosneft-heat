@@ -159,23 +159,34 @@ add_executable(nonmatching_discretization_verification
   tools/nonmatching_discretization_verification.cpp)
 target_link_libraries(nonmatching_discretization_verification PRIVATE basin_heat)
 
+add_executable(nonmatching_geometry_audit tools/nonmatching_geometry_audit.cpp)
+target_link_libraries(nonmatching_geometry_audit PRIVATE basin_heat)
+
 add_executable(nonmatching_fixed_epoch_verification
   tools/nonmatching_fixed_epoch_verification.cpp)
 target_link_libraries(nonmatching_fixed_epoch_verification PRIVATE basin_heat)
+
+add_executable(compare_nonmatching_cell_fields
+  tools/compare_nonmatching_cell_fields.cpp)
 
 if(MSVC)
   target_compile_options(discretization_verification PRIVATE /W4 /permissive-)
   target_compile_options(fixed_epoch_verification PRIVATE /W4 /permissive-)
   target_compile_options(multipoint_stencil_audit PRIVATE /W4 /permissive-)
   target_compile_options(nonmatching_discretization_verification PRIVATE /W4 /permissive-)
+  target_compile_options(nonmatching_geometry_audit PRIVATE /W4 /permissive-)
   target_compile_options(nonmatching_fixed_epoch_verification PRIVATE /W4 /permissive-)
+  target_compile_options(compare_nonmatching_cell_fields PRIVATE /W4 /permissive-)
 else()
   target_compile_options(discretization_verification PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   target_compile_options(fixed_epoch_verification PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   target_compile_options(multipoint_stencil_audit PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   target_compile_options(nonmatching_discretization_verification
     PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+  target_compile_options(nonmatching_geometry_audit PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   target_compile_options(nonmatching_fixed_epoch_verification
+    PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+  target_compile_options(compare_nonmatching_cell_fields
     PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 

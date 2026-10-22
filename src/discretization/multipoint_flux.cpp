@@ -473,7 +473,8 @@ MultipointFluxes MultipointFlux::compute(const MultipointFluxScheme scheme,
             one_sided_flux(face.neighbor, neighbor_reference, conductivity, boundary_data);
         MultipointFluxExpression owner_flux;
         MultipointFluxExpression neighbor_flux;
-        if (scheme == MultipointFluxScheme::linear) {
+        if (scheme == MultipointFluxScheme::linear ||
+            scheme == MultipointFluxScheme::linear_equal_weight) {
             add_scaled(owner_flux, owner.expression, 0.5 * face.length);
             add_scaled(owner_flux, neighbor.expression, -0.5 * face.length);
             neighbor_flux = owner_flux;

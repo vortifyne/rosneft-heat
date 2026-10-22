@@ -21,8 +21,14 @@ struct NonmatchingColumnInternalFlux {
     MultipointFluxExpression right_expression;
 };
 
+struct NonmatchingColumnBoundaryFlux {
+    std::size_t cell = 0;
+    MultipointFluxExpression expression;
+};
+
 struct NonmatchingColumnFluxes {
     std::vector<NonmatchingColumnInternalFlux> vertical;
+    std::vector<NonmatchingColumnBoundaryFlux> surface;
     std::size_t maximum_stencil_size = 0;
 };
 
@@ -48,6 +54,9 @@ private:
     one_sided_flux(std::size_t cell, std::size_t neighbor, double interface_x,
                    std::span<const double> conductivity,
                    const NonmatchingColumnBoundaryData& boundary_data) const;
+    [[nodiscard]] MultipointFluxExpression surface_boundary_flux(
+        const NonmatchingVerticalBoundaryFace& face, std::span<const double> conductivity,
+        const NonmatchingColumnBoundaryData& boundary_data) const;
 
     const NonmatchingColumnGrid* grid_ = nullptr;
 };

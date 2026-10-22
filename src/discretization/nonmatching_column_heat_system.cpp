@@ -93,6 +93,9 @@ void NonmatchingColumnHeatSystem::assemble_residual(const Vector& solution,
         residual[static_cast<Vector::Index>(flux.right_cell)] -=
             flux.right_expression.value(values);
     }
+    for (const NonmatchingColumnBoundaryFlux& flux : vertical.surface) {
+        residual[static_cast<Vector::Index>(flux.cell)] += flux.expression.value(values);
+    }
     for (const NonmatchingHorizontalFace& face : grid_->horizontal_faces) {
         const double flux = horizontal_transmissibility(face) *
                             (solution[static_cast<Vector::Index>(face.upper_cell)] -
@@ -151,6 +154,12 @@ void NonmatchingColumnHeatSystem::assemble_matrix(const Vector& solution,
                                   static_cast<Vector::Index>(term.cell), -term.coefficient);
         }
     }
+    for (const NonmatchingColumnBoundaryFlux& flux : vertical.surface) {
+        for (const MultipointFluxTerm term : flux.expression.terms) {
+            triplets.emplace_back(static_cast<Vector::Index>(flux.cell),
+                                  static_cast<Vector::Index>(term.cell), term.coefficient);
+        }
+    }
     for (const NonmatchingHorizontalFace& face : grid_->horizontal_faces) {
         const double value = horizontal_transmissibility(face);
         triplets.emplace_back(static_cast<Vector::Index>(face.upper_cell),
@@ -177,6 +186,13 @@ NonmatchingColumnEnergyRates
 NonmatchingColumnHeatSystem::energy_rates(const Vector& solution) const {
     update_properties(solution);
     NonmatchingColumnEnergyRates result;
+    const auto values = std::span<const double>(solution.native().data(),
+                                                static_cast<std::size_t>(solution.size()));
+    const NonmatchingColumnFluxes vertical =
+        vertical_flux_.compute(flux_scheme_, thermal_conductivity_, values, boundary_data_);
+    for (const NonmatchingColumnBoundaryFlux& flux : vertical.surface) {
+        result.surface_outflow += flux.expression.value(values);
+    }
     for (const std::size_t cell_index : grid_->top_cells) {
         const NonmatchingColumnCell& cell = grid_->cells[cell_index];
         const double transmissibility =

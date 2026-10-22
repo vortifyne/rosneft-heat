@@ -32,8 +32,18 @@ double profile_mean(const ScalarProfile& profile, const double left, const doubl
 
 LayeredMeshLayout make_nonmatching_column_layout(const BasinGeometry& geometry,
                                                  const double cell_size) {
-    if (!std::isfinite(cell_size) || !(cell_size > 0.0) || geometry.layers.empty()) {
-        throw std::invalid_argument("Nonmatching-column layout requires geometry and a step");
+    return make_nonmatching_column_layout(geometry, cell_size, cell_size, 0.0);
+}
+
+LayeredMeshLayout make_nonmatching_column_layout(const BasinGeometry& geometry,
+                                                 const double horizontal_cell_size,
+                                                 const double vertical_cell_size,
+                                                 const double phase) {
+    if (!std::isfinite(horizontal_cell_size) || !(horizontal_cell_size > 0.0) ||
+        !std::isfinite(vertical_cell_size) || !(vertical_cell_size > 0.0) ||
+        !std::isfinite(phase) || std::abs(phase) > 0.45 || geometry.layers.empty()) {
+        throw std::invalid_argument(
+            "Nonmatching-column layout requires geometry, positive steps, and |phase| <= 0.45");
     }
     std::vector<double> events;
     events.reserve(2 * geometry.layers.size());
@@ -41,16 +51,21 @@ LayeredMeshLayout make_nonmatching_column_layout(const BasinGeometry& geometry,
         events.push_back(region.x_min);
         events.push_back(region.x_max);
     }
+    for (const BasinBoundary& boundary : geometry.boundaries) {
+        events.insert(events.end(), boundary.depth.x.begin(), boundary.depth.x.end());
+    }
     std::sort(events.begin(), events.end());
     events.erase(std::unique(events.begin(), events.end()), events.end());
-    LayeredMeshLayout result{.x = {}, .cell_size = cell_size};
+    LayeredMeshLayout result{.x = {}, .cell_size = vertical_cell_size};
     for (std::size_t interval = 1; interval < events.size(); ++interval) {
         const double left = events[interval - 1];
         const double right = events[interval];
         const std::size_t count = std::max<std::size_t>(
-            1, static_cast<std::size_t>(std::ceil((right - left) / cell_size)));
-        for (std::size_t part = 0; part < count; ++part) {
-            const double fraction = static_cast<double>(part) / static_cast<double>(count);
+            1, static_cast<std::size_t>(std::ceil((right - left) / horizontal_cell_size)));
+        result.x.push_back(left);
+        for (std::size_t part = 1; part < count; ++part) {
+            const double fraction = (static_cast<double>(part) + phase) /
+                                    static_cast<double>(count);
             result.x.push_back(std::lerp(left, right, fraction));
         }
     }
@@ -79,6 +94,14 @@ double NonmatchingVerticalSubface::length() const noexcept {
 }
 
 double NonmatchingVerticalSubface::center_z() const noexcept {
+    return 0.5 * (z_top + z_bottom);
+}
+
+double NonmatchingVerticalBoundaryFace::length() const noexcept {
+    return z_bottom - z_top;
+}
+
+double NonmatchingVerticalBoundaryFace::center_z() const noexcept {
     return 0.5 * (z_top + z_bottom);
 }
 
@@ -174,6 +197,46 @@ NonmatchingColumnGrid make_nonmatching_column_grid(const BasinGeometry& geometry
         const double depth_scale = std::max({1.0, result.cells[left_cells.back()].z_bottom,
                                              result.cells[right_cells.back()].z_bottom});
         const double tolerance = 1.0e-10 * depth_scale;
+        const double left_top = result.cells[left_cells.front()].z_top;
+        const double right_top = result.cells[right_cells.front()].z_top;
+        const double left_bottom = result.cells[left_cells.back()].z_bottom;
+        const double right_bottom = result.cells[right_cells.back()].z_bottom;
+        const double common_top = std::max(left_top, right_top);
+        const double common_bottom = std::min(left_bottom, right_bottom);
+        if (common_bottom < common_top - tolerance) {
+            throw std::runtime_error("Neighbouring nonmatching columns do not overlap");
+        }
+
+        const auto append_boundary_faces = [&result, tolerance](
+                                               const std::vector<std::size_t>& column,
+                                               const double z_top, const double z_bottom,
+                                               const double x, const double outward_x,
+                                               auto& output) {
+            for (const std::size_t cell_index : column) {
+                const NonmatchingColumnCell& cell = result.cells[cell_index];
+                const double top = std::max(z_top, cell.z_top);
+                const double bottom = std::min(z_bottom, cell.z_bottom);
+                if (bottom - top > tolerance) {
+                    output.push_back({cell_index, x, top, bottom, outward_x});
+                }
+            }
+        };
+        const double interface_x = layout.x[interface];
+        if (left_top < right_top - tolerance) {
+            append_boundary_faces(left_cells, left_top, right_top, interface_x, 1.0,
+                                  result.surface_vertical_faces);
+        } else if (right_top < left_top - tolerance) {
+            append_boundary_faces(right_cells, right_top, left_top, interface_x, -1.0,
+                                  result.surface_vertical_faces);
+        }
+        if (left_bottom > right_bottom + tolerance) {
+            append_boundary_faces(left_cells, right_bottom, left_bottom, interface_x, 1.0,
+                                  result.basal_vertical_faces);
+        } else if (right_bottom > left_bottom + tolerance) {
+            append_boundary_faces(right_cells, left_bottom, right_bottom, interface_x, -1.0,
+                                  result.basal_vertical_faces);
+        }
+
         std::size_t left_row = 0;
         std::size_t right_row = 0;
         while (left_row < left_cells.size() && right_row < right_cells.size()) {
@@ -183,7 +246,7 @@ NonmatchingColumnGrid make_nonmatching_column_grid(const BasinGeometry& geometry
             const double bottom = std::min(left_cell.z_bottom, right_cell.z_bottom);
             if (bottom - top > tolerance) {
                 result.vertical_subfaces.push_back(
-                    {left_cell.index, right_cell.index, layout.x[interface], top, bottom});
+                    {left_cell.index, right_cell.index, interface_x, top, bottom});
             }
             if (left_cell.z_bottom < right_cell.z_bottom - tolerance) {
                 ++left_row;

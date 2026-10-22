@@ -37,6 +37,10 @@ struct SolveResult {
     double linear_solve_seconds = 0.0;
 };
 
+enum class AxisMode { retained_lines, support_only };
+enum class SurfaceStepPolicy { dirichlet, omit };
+enum class NonlinearStrategy { residual_line_search, picard };
+
 const BasinConfiguration& configuration_at(const BasinInput& input, const double age_ma) {
     const auto configurations = input.configurations();
     const auto found = std::find_if(configurations.begin(), configurations.end(),
@@ -72,17 +76,77 @@ MultipointFluxScheme parse_scheme(const std::string_view value) {
     if (value == "linear_mpfa") {
         return MultipointFluxScheme::linear;
     }
+    if (value == "linear_equal_weight") {
+        return MultipointFluxScheme::linear_equal_weight;
+    }
     if (value == "nmpfa_conservative") {
         return MultipointFluxScheme::nonlinear_conservative;
     }
     if (value == "nmpfa_dmp") {
         return MultipointFluxScheme::nonlinear_dmp;
     }
-    throw std::invalid_argument("Scheme must be linear_mpfa, nmpfa_conservative, or nmpfa_dmp");
+    throw std::invalid_argument(
+        "Scheme must be linear_mpfa, linear_equal_weight, nmpfa_conservative, or nmpfa_dmp");
+}
+
+AxisMode parse_axis_mode(const std::string_view value) {
+    if (value == "retained") {
+        return AxisMode::retained_lines;
+    }
+    if (value == "support_only") {
+        return AxisMode::support_only;
+    }
+    throw std::invalid_argument("Axis mode must be retained or support_only");
+}
+
+SurfaceStepPolicy parse_surface_policy(const std::string_view value) {
+    if (value == "dirichlet_steps") {
+        return SurfaceStepPolicy::dirichlet;
+    }
+    if (value == "omit_steps") {
+        return SurfaceStepPolicy::omit;
+    }
+    throw std::invalid_argument("Surface policy must be dirichlet_steps or omit_steps");
+}
+
+NonlinearStrategy parse_nonlinear_strategy(const std::string_view value) {
+    if (value == "line_search") {
+        return NonlinearStrategy::residual_line_search;
+    }
+    if (value == "picard") {
+        return NonlinearStrategy::picard;
+    }
+    throw std::invalid_argument("Nonlinear strategy must be line_search or picard");
+}
+
+LayeredMeshLayout support_only_layout(const BasinGeometry& geometry, const double hx,
+                                      const double hz, const double phase) {
+    std::vector<double> events;
+    for (const BasinLayerRegion& region : geometry.layers) {
+        events.push_back(region.x_min);
+        events.push_back(region.x_max);
+    }
+    std::sort(events.begin(), events.end());
+    events.erase(std::unique(events.begin(), events.end()), events.end());
+    LayeredMeshLayout result{.x = {}, .cell_size = hz};
+    for (std::size_t interval = 1; interval < events.size(); ++interval) {
+        const double left = events[interval - 1];
+        const double right = events[interval];
+        const std::size_t count = std::max<std::size_t>(
+            1, static_cast<std::size_t>(std::ceil((right - left) / hx)));
+        result.x.push_back(left);
+        for (std::size_t part = 1; part < count; ++part) {
+            result.x.push_back(std::lerp(
+                left, right,
+                (static_cast<double>(part) + phase) / static_cast<double>(count)));
+        }
+    }
+    result.x.push_back(events.back());
+    return result;
 }
 
 SolveResult solve(NonmatchingColumnHeatSystem& system, Vector temperature,
-                  const MultipointFluxScheme scheme) {
+                  const MultipointFluxScheme scheme, const NonlinearStrategy strategy) {
     UmfpackLinearSolver solver;
     SolveResult result{.temperature = std::move(temperature),
                        .residual = {},
@@ -99,6 +163,9 @@ SolveResult solve(NonmatchingColumnHeatSystem& system, Vector temperature,
         system.assemble_residual(result.temperature, result.residual);
         result.assembly_seconds += elapsed(start);
         const double current = result.residual.infinity_norm();
+        if (current <= 1.0e-8) {
+            return result;
+        }
         start = std::chrono::steady_clock::now();
         system.assemble_matrix(result.temperature, result.matrix);
         result.assembly_seconds += elapsed(start);
@@ -115,9 +182,6 @@ SolveResult solve(NonmatchingColumnHeatSystem& system, Vector temperature,
         if (iteration < 5 || (iteration + 1) % 25 == 0) {
             std::cerr << "picard iteration=" << iteration << " residual=" << current
                       << " correction=" << result.final_correction_linf << '\n';
-        }
-        if (current <= 1.0e-8) {
-            return result;
         }
         if (scheme == MultipointFluxScheme::nonlinear_dmp) {
             constexpr double damping = 0.5;
@@ -154,7 +218,8 @@ SolveResult solve(NonmatchingColumnHeatSystem& system, Vector temperature,
                 }
             }
             result.temperature.native() = std::move(next);
-        } else if (scheme == MultipointFluxScheme::nonlinear_conservative) {
+        } else if (scheme == MultipointFluxScheme::nonlinear_conservative &&
+                   strategy == NonlinearStrategy::residual_line_search) {
             Vector best = result.temperature;
             double best_residual = current;
             double relaxation = 1.0;
@@ -263,21 +328,36 @@ void write_samples(const std::filesystem::path& path, const NonmatchingColumnGri
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 8) {
+        if (argc != 8 && (argc < 10 || argc > 13)) {
             throw std::invalid_argument(
                 "usage: nonmatching_fixed_epoch_verification PHYSICAL_INPUT GEOMETRY_INPUT "
-                "GEOMETRY_LABEL SCHEME H geotherm|constant OUTPUT_DIR");
+                "GEOMETRY_LABEL SCHEME H geotherm|constant OUTPUT_DIR\n"
+                "   or: nonmatching_fixed_epoch_verification PHYSICAL_INPUT GEOMETRY_INPUT "
+                "GEOMETRY_LABEL SCHEME HX HZ PHASE geotherm|constant OUTPUT_DIR "
+                "[retained|support_only [dirichlet_steps|omit_steps "
+                "[line_search|picard]]]");
         }
         const std::filesystem::path physical_path = argv[1];
         const std::filesystem::path geometry_path = argv[2];
         const std::string geometry_label = argv[3];
         const MultipointFluxScheme scheme = parse_scheme(argv[4]);
-        const double cell_size = std::stod(argv[5]);
-        const std::string_view initial_guess = argv[6];
-        const std::filesystem::path output_directory = argv[7];
+        const double horizontal_cell_size = std::stod(argv[5]);
+        const double vertical_cell_size = argc >= 10 ? std::stod(argv[6]) : horizontal_cell_size;
+        const double phase = argc >= 10 ? std::stod(argv[7]) : 0.0;
+        const std::string_view initial_guess = argc >= 10 ? argv[8] : argv[6];
+        const std::filesystem::path output_directory = argc >= 10 ? argv[9] : argv[7];
+        const AxisMode axis_mode =
+            argc >= 11 ? parse_axis_mode(argv[10]) : AxisMode::retained_lines;
+        const SurfaceStepPolicy surface_policy =
+            argc >= 12 ? parse_surface_policy(argv[11]) : SurfaceStepPolicy::dirichlet;
+        const NonlinearStrategy nonlinear_strategy =
+            argc >= 13 ? parse_nonlinear_strategy(argv[12])
+                       : NonlinearStrategy::residual_line_search;
         if ((initial_guess != "geotherm" && initial_guess != "constant") ||
-            !std::isfinite(cell_size) || !(cell_size > 0.0)) {
-            throw std::invalid_argument("Invalid H or initial guess");
+            !std::isfinite(horizontal_cell_size) || !(horizontal_cell_size > 0.0) ||
+            !std::isfinite(vertical_cell_size) || !(vertical_cell_size > 0.0) ||
+            !std::isfinite(phase) || std::abs(phase) > 0.45) {
+            throw std::invalid_argument("Invalid mesh step, phase, or initial guess");
         }
 
         const auto wall_start = std::chrono::steady_clock::now();
@@ -288,9 +368,17 @@ int main(int argc, char** argv) {
         const BasinConfiguration& configuration = configuration_at(geometry_input, kSnapshotAgeMa);
         const BasinGeometry snapshot_geometry = make_basin_geometry(configuration);
         const LayeredMeshLayout layout =
-            make_nonmatching_column_layout(snapshot_geometry, cell_size);
+            axis_mode == AxisMode::retained_lines
+                ? make_nonmatching_column_layout(snapshot_geometry, horizontal_cell_size,
+                                                 vertical_cell_size, phase)
+                : support_only_layout(snapshot_geometry, horizontal_cell_size,
+                                      vertical_cell_size, phase);
         const auto mesh_start = std::chrono::steady_clock::now();
-        const NonmatchingColumnGrid grid = make_nonmatching_column_grid(snapshot_geometry, layout);
+        NonmatchingColumnGrid grid = make_nonmatching_column_grid(snapshot_geometry, layout);
+        const std::size_t represented_surface_steps = grid.surface_vertical_faces.size();
+        if (surface_policy == SurfaceStepPolicy::omit) {
+            grid.surface_vertical_faces.clear();
+        }
         const double mesh_seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - mesh_start).count();
 
@@ -358,7 +446,8 @@ int main(int argc, char** argv) {
             grid, conductivity, production,
             {.surface_temperature = surface_temperature, .basal_inward_flux = basal_flux}, updater);
         system.set_flux_scheme(scheme);
-        SolveResult solved = solve(system, std::move(temperature), scheme);
+        SolveResult solved =
+            solve(system, std::move(temperature), scheme, nonlinear_strategy);
         const NonmatchingColumnEnergyRates rates = system.energy_rates(solved.temperature);
         const NonmatchingColumnFluxDiagnostics diagnostics =
             system.flux_diagnostics(solved.temperature);
@@ -389,13 +478,27 @@ int main(int argc, char** argv) {
         }
 
         std::cout << std::setprecision(17)
-                  << "geometry,mesh,scheme,h,initial,cells,vertical_subfaces,nnz,"
+                  << "geometry,mesh,scheme,hx,hz,phase,initial,axis_mode,surface_policy,"
+                     "nonlinear_strategy,columns,"
+                     "cells,vertical_subfaces,represented_surface_vertical_faces,"
+                     "assembled_surface_vertical_faces,basal_vertical_faces,nnz,"
                      "nonlinear_updates,maximum_stencil,internal_flux_mismatch,residual_linf,"
                      "correction_linf,global_balance,surface_outflow,basal_inflow,supplied_heat,"
                      "production,Tmin,Tmax,area,minimum_cell_height,minimum_subface,mesh_seconds,"
                      "assembly_seconds,linear_solve_seconds,wall_seconds\n"
-                  << geometry_label << ",C," << argv[4] << ',' << cell_size << ',' << argv[6] << ','
-                  << grid.cells.size() << ',' << grid.vertical_subfaces.size() << ','
+                  << geometry_label << ",C," << argv[4] << ',' << horizontal_cell_size << ','
+                  << vertical_cell_size << ',' << phase << ',' << initial_guess << ','
+                  << (axis_mode == AxisMode::retained_lines ? "retained" : "support_only") << ','
+                  << (surface_policy == SurfaceStepPolicy::dirichlet ? "dirichlet_steps"
+                                                                     : "omit_steps")
+                  << ','
+                  << (nonlinear_strategy == NonlinearStrategy::residual_line_search
+                          ? "residual_line_search"
+                          : "picard")
+                  << ',' << grid.columns.size() << ',' << grid.cells.size() << ','
+                  << grid.vertical_subfaces.size() << ',' << represented_surface_steps << ','
+                  << grid.surface_vertical_faces.size() << ',' << grid.basal_vertical_faces.size()
+                  << ','
                   << solved.matrix.nonzero_count() << ',' << solved.nonlinear_iterations << ','
                   << diagnostics.maximum_stencil_size << ','
                   << diagnostics.internal_conservation_defect_linf << ','
