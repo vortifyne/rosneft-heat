@@ -34,7 +34,10 @@ NonmatchingColumnTransientSystem::NonmatchingColumnTransientSystem(
     validate_capacity(volumetric_heat_capacity_, grid.cells.size());
 }
 
-void NonmatchingColumnTransientSystem::set_flux_scheme(MultipointFluxScheme scheme) noexcept {
+void NonmatchingColumnTransientSystem::set_flux_scheme(MultipointFluxScheme scheme) {
+    if (scheme == MultipointFluxScheme::nonlinear_two_point) {
+        throw std::invalid_argument("NTPFA is currently verified only for the stationary C grid");
+    }
     spatial_.set_flux_scheme(scheme);
 }
 

@@ -54,9 +54,13 @@ private:
     one_sided_flux(std::size_t cell, std::size_t neighbor, double interface_x,
                    std::span<const double> conductivity,
                    const NonmatchingColumnBoundaryData& boundary_data) const;
-    [[nodiscard]] MultipointFluxExpression surface_boundary_flux(
-        const NonmatchingVerticalBoundaryFace& face, std::span<const double> conductivity,
-        const NonmatchingColumnBoundaryData& boundary_data) const;
+    [[nodiscard]] MultipointFluxExpression
+    surface_boundary_flux(const NonmatchingVerticalBoundaryFace& face,
+                          std::span<const double> conductivity,
+                          const NonmatchingColumnBoundaryData& boundary_data) const;
+    [[nodiscard]] NonmatchingColumnFluxes
+    compute_two_point(std::span<const double> conductivity, std::span<const double> solution,
+                      const NonmatchingColumnBoundaryData& boundary_data) const;
 
     const NonmatchingColumnGrid* grid_ = nullptr;
 };

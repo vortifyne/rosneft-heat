@@ -2,6 +2,7 @@
 #include "basin/nonmatching_column_grid.hpp"
 #include "discretization/nonmatching_column_heat_system.hpp"
 #include "discretization/nonmatching_column_hfv_system.hpp"
+#include "discretization/nonmatching_column_ntpfa.hpp"
 #include "linear/petsc_krylov_linear_solver.hpp"
 #include "linear/umfpack_linear_solver.hpp"
 #include "physics/thermophysical_properties.hpp"
@@ -59,6 +60,7 @@ enum class NonlinearStrategy {
 struct VerificationScheme {
     bool hfv = false;
     MultipointFluxScheme multipoint = MultipointFluxScheme::linear;
+    bool ntpfa_audit = false;
 };
 
 class PetscSession {
@@ -121,6 +123,9 @@ double integrated_profile_flux(const ScalarProfile& depth, const ScalarProfile& 
 }
 
 VerificationScheme parse_scheme(const std::string_view value) {
+    if (value == "ntpfa_audit") {
+        return {.ntpfa_audit = true};
+    }
     if (value == "linear_mpfa") {
         return {.hfv = false, .multipoint = MultipointFluxScheme::linear};
     }
@@ -133,12 +138,15 @@ VerificationScheme parse_scheme(const std::string_view value) {
     if (value == "nmpfa_dmp") {
         return {.hfv = false, .multipoint = MultipointFluxScheme::nonlinear_dmp};
     }
+    if (value == "ntpfa") {
+        return {.hfv = false, .multipoint = MultipointFluxScheme::nonlinear_two_point};
+    }
     if (value == "sushi_hfv") {
         return {.hfv = true, .multipoint = MultipointFluxScheme::linear};
     }
     throw std::invalid_argument(
         "Scheme must be linear_mpfa, linear_equal_weight, nmpfa_conservative, nmpfa_dmp, "
-        "or sushi_hfv");
+        "sushi_hfv, ntpfa, or ntpfa_audit");
 }
 
 AxisMode parse_axis_mode(const std::string_view value) {
@@ -569,6 +577,22 @@ int main(int argc, char** argv) {
                 *lithotypes[cell.index], kFluid);
             conductivity[cell.index] = properties.thermal_conductivity;
             production[cell.index] = properties.heat_production;
+        }
+
+        if (scheme.ntpfa_audit) {
+            const ColumnNtpfaGeometryAudit audit = audit_column_ntpfa_geometry(grid, conductivity);
+            std::cout << "ntpfa_audit cells=" << grid.cells.size()
+                      << " internal_sides=" << audit.internal_sides
+                      << " dirichlet_cell_sides=" << audit.dirichlet_cell_sides
+                      << " dirichlet_boundary_sides=" << audit.dirichlet_boundary_sides
+                      << " failed_sides=" << audit.failed_sides
+                      << " outside_subfaces=" << audit.target_harmonic_points_outside_subfaces
+                      << " maximum_condition=" << audit.maximum_selected_condition << '\n';
+            for (const ColumnNtpfaAuditFailure& failure : audit.examples) {
+                std::cout << "failure cell=" << failure.cell << " x=" << failure.face_center.x
+                          << " z=" << failure.face_center.z << " reason=" << failure.reason << '\n';
+            }
+            return audit.failed_sides == 0 ? 0 : 2;
         }
 
         const BasinGeometry physical_geometry = make_basin_geometry(physical_configuration);

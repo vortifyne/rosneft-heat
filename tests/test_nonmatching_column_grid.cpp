@@ -2,6 +2,7 @@
 #include "discretization/nonmatching_column_flux.hpp"
 #include "discretization/nonmatching_column_heat_system.hpp"
 #include "discretization/nonmatching_column_hfv_system.hpp"
+#include "discretization/nonmatching_column_ntpfa.hpp"
 #include "linear/umfpack_linear_solver.hpp"
 
 #include <gtest/gtest.h>
@@ -121,7 +122,8 @@ TEST(NonmatchingColumnHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
 
     for (const MultipointFluxScheme scheme :
          {MultipointFluxScheme::linear, MultipointFluxScheme::linear_equal_weight,
-          MultipointFluxScheme::nonlinear_conservative}) {
+          MultipointFluxScheme::nonlinear_conservative,
+          MultipointFluxScheme::nonlinear_two_point}) {
         system.set_flux_scheme(scheme);
         Vector residual;
         system.assemble_residual(temperature, residual);
@@ -151,7 +153,8 @@ TEST(NonmatchingColumnFlux, ReproducesAffineFluxOnMergedSubfaces) {
     const NonmatchingColumnFlux flux(grid);
     for (const MultipointFluxScheme scheme :
          {MultipointFluxScheme::linear, MultipointFluxScheme::linear_equal_weight,
-          MultipointFluxScheme::nonlinear_conservative, MultipointFluxScheme::nonlinear_dmp}) {
+          MultipointFluxScheme::nonlinear_conservative, MultipointFluxScheme::nonlinear_dmp,
+          MultipointFluxScheme::nonlinear_two_point}) {
         const NonmatchingColumnFluxes values =
             flux.compute(scheme, conductivity, temperature, boundary);
         ASSERT_EQ(values.vertical.size(), grid.vertical_subfaces.size());
@@ -200,13 +203,58 @@ TEST(NonmatchingColumnFlux, UsesHarmonicNormalFluxAcrossMaterialJump) {
     const NonmatchingColumnFlux flux(grid);
     for (const MultipointFluxScheme scheme :
          {MultipointFluxScheme::linear, MultipointFluxScheme::linear_equal_weight,
-          MultipointFluxScheme::nonlinear_conservative, MultipointFluxScheme::nonlinear_dmp}) {
+          MultipointFluxScheme::nonlinear_conservative, MultipointFluxScheme::nonlinear_dmp,
+          MultipointFluxScheme::nonlinear_two_point}) {
         const NonmatchingColumnFluxes values =
             flux.compute(scheme, conductivity, temperature, boundary);
         ASSERT_EQ(values.vertical.size(), 1U);
         EXPECT_NEAR(values.vertical[0].left_expression.value(temperature), -flux_scale, 2.0e-11);
         EXPECT_NEAR(values.vertical[0].right_expression.value(temperature), -flux_scale, 2.0e-11);
     }
+}
+
+TEST(NonmatchingColumnFlux, TwoPointPicardMatrixHasOnlyPairCouplingsAndMonotoneSigns) {
+    const BasinGeometry source = geometry();
+    const LayeredMeshLayout layout{.x = {0.0, 1.0, 2.0}, .cell_size = 0.35};
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+    std::vector<double> conductivity(grid.cells.size());
+    std::vector<double> temperature(grid.cells.size());
+    for (const NonmatchingColumnCell& cell : grid.cells) {
+        conductivity[cell.index] = cell.layer_id == 1 ? 1.0 : 10.0;
+        temperature[cell.index] = 300.0 + 5.0 * cell.center().x + 2.0 * cell.center().z;
+    }
+    const NonmatchingColumnFlux flux(grid);
+    const NonmatchingColumnFluxes values =
+        flux.compute(MultipointFluxScheme::nonlinear_two_point, conductivity, temperature,
+                     {.surface_temperature = [](Point2D point) { return 300.0 + 5.0 * point.x; },
+                      .basal_inward_flux = [](Point2D) { return 0.0; }});
+    EXPECT_LE(values.maximum_stencil_size, 2U);
+    for (const NonmatchingColumnInternalFlux& face : values.vertical) {
+        EXPECT_NEAR(face.left_expression.value(temperature),
+                    face.right_expression.value(temperature), 1.0e-13);
+        for (const MultipointFluxExpression* expression :
+             {&face.left_expression, &face.right_expression}) {
+            for (const MultipointFluxTerm term : expression->terms) {
+                EXPECT_TRUE(term.cell == face.left_cell || term.cell == face.right_cell);
+                if (term.cell == face.left_cell) {
+                    EXPECT_GE(term.coefficient, 0.0);
+                } else {
+                    EXPECT_LE(term.coefficient, 0.0);
+                }
+            }
+        }
+    }
+    for (const NonmatchingColumnBoundaryFlux& face : values.surface) {
+        for (const MultipointFluxTerm term : face.expression.terms) {
+            EXPECT_EQ(term.cell, face.cell);
+            EXPECT_GE(term.coefficient, 0.0);
+        }
+    }
+    const ColumnNtpfaGeometryAudit audit = audit_column_ntpfa_geometry(grid, conductivity);
+    EXPECT_EQ(audit.internal_sides, 2 * grid.vertical_subfaces.size());
+    EXPECT_EQ(audit.dirichlet_cell_sides, grid.surface_vertical_faces.size());
+    EXPECT_EQ(audit.dirichlet_boundary_sides, grid.surface_vertical_faces.size());
+    EXPECT_EQ(audit.failed_sides, 0U);
 }
 
 TEST(NonmatchingColumnHeatSystem, LinearMatrixMatchesResidualAndDmpMatrixIsMonotone) {

@@ -17,6 +17,7 @@ enum class MultipointFluxScheme {
     linear_equal_weight,
     nonlinear_conservative,
     nonlinear_dmp,
+    nonlinear_two_point,
 };
 
 struct MultipointBoundaryData {

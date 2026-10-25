@@ -22,7 +22,7 @@ public:
         NonmatchingColumnHeatSystem::PropertyUpdater property_updater = {},
         CapacityUpdater capacity_updater = {});
 
-    void set_flux_scheme(MultipointFluxScheme scheme) noexcept;
+    void set_flux_scheme(MultipointFluxScheme scheme);
 
     void assemble_residual(double time, const Vector& solution,
                            const Vector& solution_derivative, Vector& residual) const override;

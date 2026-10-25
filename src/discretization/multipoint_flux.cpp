@@ -451,6 +451,9 @@ MultipointFluxes MultipointFlux::compute(const MultipointFluxScheme scheme,
                                          const std::span<const double> conductivity,
                                          const std::span<const double> solution,
                                          const MultipointBoundaryData& boundary_data) const {
+    if (scheme == MultipointFluxScheme::nonlinear_two_point) {
+        throw std::invalid_argument("NTPFA is implemented only on the nonmatching C grid");
+    }
     if (conductivity.size() != cell_centers_.size() || solution.size() != cell_centers_.size()) {
         throw std::invalid_argument("Multipoint flux field size does not match the mesh");
     }

@@ -43,6 +43,40 @@ std::size_t stencil_size(const MultipointFluxExpression& expression) {
                       [](const auto& term) { return std::abs(term.coefficient) > 1.0e-14; }));
 }
 
+double coefficient_of(const MultipointFluxExpression& expression, const std::size_t cell) {
+    double result = 0.0;
+    for (const MultipointFluxTerm term : expression.terms) {
+        if (term.cell == cell) {
+            result += term.coefficient;
+        }
+    }
+    return result;
+}
+
+double auxiliary_remainder(const MultipointFluxExpression& expression, const std::size_t primary,
+                           const std::size_t opposite, const std::span<const double> solution) {
+    double remainder = 0.0;
+    for (const MultipointFluxTerm term : expression.terms) {
+        if (term.cell != primary && term.cell != opposite) {
+            remainder -= term.coefficient * solution[term.cell];
+        }
+    }
+    return remainder;
+}
+
+double positive_remainder(const double value, const char* context) {
+    if (value < -1.0e-10 * std::max(1.0, std::abs(value))) {
+        throw std::runtime_error(context);
+    }
+    return std::max(0.0, value);
+}
+
+double remainder_weight(const double own_remainder, const double opposite_remainder) {
+    const double epsilon =
+        std::numeric_limits<double>::epsilon() * std::max({1.0, own_remainder, opposite_remainder});
+    return (opposite_remainder + epsilon) / (own_remainder + opposite_remainder + 2.0 * epsilon);
+}
+
 } // namespace
 
 struct NonmatchingColumnFlux::Sample {
@@ -142,8 +176,7 @@ NonmatchingColumnFlux::one_sided_flux(const std::size_t cell, const std::size_t 
 }
 
 MultipointFluxExpression NonmatchingColumnFlux::surface_boundary_flux(
-    const NonmatchingVerticalBoundaryFace& face,
-    const std::span<const double> conductivity,
+    const NonmatchingVerticalBoundaryFace& face, const std::span<const double> conductivity,
     const NonmatchingColumnBoundaryData& boundary_data) const {
     const NonmatchingColumnCell& cell = grid_->cells.at(face.cell);
     const Point2D center = cell.center();
@@ -183,6 +216,137 @@ MultipointFluxExpression NonmatchingColumnFlux::surface_boundary_flux(
 }
 
 NonmatchingColumnFluxes
+NonmatchingColumnFlux::compute_two_point(const std::span<const double> conductivity,
+                                         const std::span<const double> solution,
+                                         const NonmatchingColumnBoundaryData& boundary_data) const {
+    NonmatchingColumnFluxes result;
+    result.maximum_stencil_size = 2;
+    result.vertical.reserve(grid_->vertical_subfaces.size());
+    for (const NonmatchingVerticalSubface& face : grid_->vertical_subfaces) {
+        const std::size_t left_cell = face.left_cell;
+        const std::size_t right_cell = face.right_cell;
+        const MultipointFluxExpression left =
+            one_sided_flux(left_cell, right_cell, face.x, conductivity, boundary_data).expression;
+        const MultipointFluxExpression right =
+            one_sided_flux(right_cell, left_cell, face.x, conductivity, boundary_data).expression;
+        const double left_a = coefficient_of(left, left_cell);
+        const double left_b = -coefficient_of(left, right_cell);
+        const double right_a = coefficient_of(right, right_cell);
+        const double right_b = -coefficient_of(right, left_cell);
+        const double left_remainder =
+            positive_remainder(auxiliary_remainder(left, left_cell, right_cell, solution),
+                               "NTPFA left auxiliary remainder is negative");
+        const double right_remainder =
+            positive_remainder(auxiliary_remainder(right, right_cell, left_cell, solution),
+                               "NTPFA right auxiliary remainder is negative");
+        const double left_weight = remainder_weight(left_remainder, right_remainder);
+        const double right_weight = remainder_weight(right_remainder, left_remainder);
+        MultipointFluxExpression expression;
+        add_term(expression, left_cell,
+                 face.length() * (left_weight * left_a + right_weight * right_b));
+        add_term(expression, right_cell,
+                 -face.length() * (left_weight * left_b + right_weight * right_a));
+        expression.constant =
+            face.length() * (left_weight * left.constant - right_weight * right.constant);
+        result.vertical.push_back({left_cell, right_cell, expression, std::move(expression)});
+    }
+
+    result.surface.reserve(grid_->surface_vertical_faces.size());
+    for (const NonmatchingVerticalBoundaryFace& face : grid_->surface_vertical_faces) {
+        const std::size_t cell = face.cell;
+        const NonmatchingColumnCell& geometry = grid_->cells[cell];
+        const Point2D center = geometry.center();
+        const Point2D boundary_point{face.x, face.center_z()};
+        const double boundary_temperature = boundary_data.surface_temperature(boundary_point);
+        const MultipointFluxExpression cell_flux =
+            surface_boundary_flux(face, conductivity, boundary_data);
+        const double cell_a = coefficient_of(cell_flux, cell) / face.length();
+        const double cell_b = conductivity[cell] / std::abs(face.x - center.x);
+        const double cell_remainder =
+            positive_remainder(auxiliary_remainder(cell_flux, cell, cell, solution) / face.length(),
+                               "NTPFA Dirichlet cell-side remainder is negative");
+        const double cell_source =
+            cell_flux.constant / face.length() + cell_b * boundary_temperature;
+
+        // Boundary-side reconstruction from §2.3: the first direction points
+        // from the boundary collocation point into its cell. The second uses
+        // the adjacent horizontal face in the direction of the step offset.
+        const double target_x = center.x - boundary_point.x;
+        const double target_z = center.z - boundary_point.z;
+        const double conormal_x = -conductivity[cell] * face.outward_x;
+        const bool upward = boundary_point.z < center.z;
+        const double auxiliary_z = upward ? geometry.z_top : geometry.z_bottom;
+        const double distance = std::abs(auxiliary_z - boundary_point.z);
+        if (!(distance > 0.0)) {
+            throw std::runtime_error("NTPFA boundary auxiliary distance is nonpositive");
+        }
+        const std::optional<std::size_t> neighbor = upward ? geometry.upward : geometry.downward;
+        Point2D auxiliary_point{};
+        double auxiliary_neighbor_weight = 0.0;
+        double auxiliary_dirichlet = 0.0;
+        double auxiliary_neumann_source = 0.0;
+        if (neighbor) {
+            const Point2D other = grid_->cells[*neighbor].center();
+            const double other_distance = std::abs(other.z - auxiliary_z);
+            const double denominator =
+                conductivity[cell] * other_distance + conductivity[*neighbor] * distance;
+            if (!(denominator > 0.0)) {
+                throw std::runtime_error("NTPFA boundary harmonic denominator is nonpositive");
+            }
+            auxiliary_neighbor_weight = conductivity[*neighbor] * distance / denominator;
+            const double correction = distance * other_distance *
+                                      (conductivity[cell] - conductivity[*neighbor]) / denominator *
+                                      (upward ? -1.0 : 1.0);
+            auxiliary_point = {(1.0 - auxiliary_neighbor_weight) * boundary_point.x +
+                                   auxiliary_neighbor_weight * other.x,
+                               (1.0 - auxiliary_neighbor_weight) * boundary_point.z +
+                                   auxiliary_neighbor_weight * other.z + correction};
+        } else if (upward) {
+            auxiliary_point = {center.x, auxiliary_z};
+            auxiliary_dirichlet = boundary_data.surface_temperature({center.x, auxiliary_z});
+        } else {
+            auxiliary_point = {boundary_point.x, auxiliary_z};
+            auxiliary_neumann_source = distance *
+                                       boundary_data.basal_inward_flux({center.x, auxiliary_z}) /
+                                       conductivity[cell];
+        }
+        const double auxiliary_x = auxiliary_point.x - boundary_point.x;
+        const double auxiliary_delta_z = auxiliary_point.z - boundary_point.z;
+        const double determinant = target_x * auxiliary_delta_z - target_z * auxiliary_x;
+        if (std::abs(determinant) <=
+            1.0e-12 * std::hypot(target_x, target_z) * std::hypot(auxiliary_x, auxiliary_delta_z)) {
+            throw std::runtime_error("NTPFA boundary two-direction stencil is degenerate");
+        }
+        double first = conormal_x * auxiliary_delta_z / determinant;
+        double second = -target_z * conormal_x / determinant;
+        const double coefficient_scale = std::max({1.0, std::abs(first), std::abs(second)});
+        if (first < -1.0e-10 * coefficient_scale || second < -1.0e-10 * coefficient_scale) {
+            throw std::runtime_error("NTPFA boundary has no positive two-direction stencil");
+        }
+        first = std::max(0.0, first);
+        second = std::max(0.0, second);
+        const double boundary_a = first;
+        const double boundary_b =
+            first + second * (neighbor ? auxiliary_neighbor_weight : (upward ? 1.0 : 0.0));
+        const double boundary_remainder =
+            neighbor ? second * auxiliary_neighbor_weight * solution[*neighbor] : 0.0;
+        const double cell_weight = remainder_weight(cell_remainder, boundary_remainder);
+        const double boundary_weight = remainder_weight(boundary_remainder, cell_remainder);
+        const double boundary_source =
+            second * (upward ? auxiliary_dirichlet : auxiliary_neumann_source);
+        MultipointFluxExpression expression;
+        add_term(expression, cell,
+                 face.length() * (cell_weight * cell_a + boundary_weight * boundary_a));
+        expression.constant =
+            face.length() *
+            (-(cell_weight * cell_b + boundary_weight * boundary_b) * boundary_temperature +
+             cell_weight * cell_source + boundary_weight * boundary_source);
+        result.surface.push_back({cell, std::move(expression)});
+    }
+    return result;
+}
+
+NonmatchingColumnFluxes
 NonmatchingColumnFlux::compute(const MultipointFluxScheme scheme,
                                const std::span<const double> conductivity,
                                const std::span<const double> solution,
@@ -197,6 +361,10 @@ NonmatchingColumnFlux::compute(const MultipointFluxScheme scheme,
         if (!std::isfinite(value) || !(value > 0.0)) {
             throw std::invalid_argument("Nonmatching-column conductivity must be positive");
         }
+    }
+
+    if (scheme == MultipointFluxScheme::nonlinear_two_point) {
+        return compute_two_point(conductivity, solution, boundary_data);
     }
 
     NonmatchingColumnFluxes result;

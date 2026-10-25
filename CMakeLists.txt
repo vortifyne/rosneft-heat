@@ -81,6 +81,7 @@ add_library(basin_column STATIC
   src/basin/nonmatching_column_grid.cpp
   src/discretization/multipoint_flux_expression.cpp
   src/discretization/nonmatching_column_flux.cpp
+  src/discretization/nonmatching_column_ntpfa.cpp
   src/discretization/nonmatching_column_heat_system.cpp
   src/discretization/nonmatching_column_transient_system.cpp
   src/physics/easy_ro.cpp
