@@ -1,6 +1,7 @@
 #include "basin/basin_forward_solver.hpp"
 
 #include "basin/basin_binary.hpp"
+#include "basin/basin_forward_options.hpp"
 #include "basin/basin_geometry_rdp.hpp"
 #include "basin/column_epoch_grid.hpp"
 #include "basin/column_field_transfer.hpp"
@@ -184,13 +185,6 @@ State transfer_state(const State& old, NonmatchingColumnGrid new_grid, const Eas
     return state;
 }
 
-NonlinearSolveRequest nonlinear_request(double relative_tolerance) {
-    return {.nonlinear_method = NonlinearMethod::picard,
-            .relative_tolerance = relative_tolerance,
-            .absolute_tolerance = 1.0e-8,
-            .max_iterations = 200};
-}
-
 } // namespace
 
 BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings settings)
@@ -200,10 +194,11 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
     const auto& input = input_;
     const auto& settings = settings_;
     const auto configurations = input.configurations();
-    if (configurations.size() < 2 || !(settings.horizontal_step > 0.0) ||
+    if (settings.nonlinear.nonlinear_method != NonlinearMethod::picard ||
+        configurations.size() < 2 || !(settings.horizontal_step > 0.0) ||
         !(settings.vertical_step > 0.0) || !(settings.minimum_cell_height > 0.0) ||
-        !(settings.timestep_ma > 0.0) || !(settings.picard_relative_tolerance > 0.0) ||
-        !(settings.picard_relative_tolerance < 1.0)) {
+        !(settings.timestep_ma > 0.0) || !(settings.nonlinear.relative_tolerance > 0.0) ||
+        !(settings.nonlinear.relative_tolerance < 1.0)) {
         throw std::invalid_argument("Invalid basin configurations or settings");
     }
     const EasyRoModel easy_ro = make_easy_ro(input);
@@ -219,6 +214,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
     BasinForwardResult result;
     TimeIntegrator integrator;
     integrator.set_linear_solver(settings.linear_solver);
+    integrator.set_preconditioner_reuse(settings.pc_reuse);
     observe_state(state, easy_ro, BasinForwardSnapshot::Kind::initial,
                   configurations.front().age_ma, observe);
 
@@ -240,7 +236,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
         const double timestep = settings.timestep_ma * kSecondsPerMa;
         double elapsed = 0.0;
         integrator.set_initial_solution(elapsed, state.temperature);
-        if (epoch_index > 0) {
+        if (epoch_index > 0 && settings.pc_reuse == PreconditionerReuse::manual) {
             integrator.reset_linear_solver();
         }
         while (elapsed < duration) {
@@ -297,9 +293,8 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
                 integrator.reset_linear_solver();
             }
             integrator.set_timestep(dt);
-            const TimeIntegrationResult step = integrator.advance_to(
-                system, target, nonlinear_request(settings.picard_relative_tolerance),
-                settings.linear);
+            const TimeIntegrationResult step =
+                integrator.advance_to(system, target, settings.nonlinear, settings.linear);
             if (!step.completed()) {
                 throw std::runtime_error(
                     "basin nonlinear solve failed at age " +
@@ -402,70 +397,8 @@ BasinForwardResult BasinForwardSolver::solve(const std::filesystem::path& output
             observe(snapshot);
     });
     std::ofstream summary(output / "summary.txt");
-    summary << std::setprecision(17) << "dx=" << settings_.horizontal_step << '\n'
-            << "dz=" << settings_.vertical_step << '\n'
-            << "dt_ma=" << settings_.timestep_ma << '\n'
-            << "rdp_tol=" << settings_.rdp_tolerance << '\n'
-            << "axis_rdp_tol=";
-    if (settings_.axis_rdp_tolerance)
-        summary << *settings_.axis_rdp_tolerance;
-    else
-        summary << "none";
-    summary << '\n'
-            << "min_height=" << settings_.minimum_cell_height << '\n'
-            << "pinchout="
-            << (settings_.pinchout == BasinForwardSettings::Pinchout::exact_zero ? "zero"
-                                                                                 : "positive")
-            << '\n'
-            << "scheme=" << (settings_.scheme == MultipointFluxScheme::linear ? "linear" : "nmpfa")
-            << '\n'
-            << "linear_solver=";
-    switch (settings_.linear_solver) {
-    case LinearSolverKind::umfpack_lu:
-        summary << "umfpack";
-        break;
-    case LinearSolverKind::petsc_gmres_gamg:
-        summary << "gamg";
-        break;
-    case LinearSolverKind::petsc_gmres_boomeramg:
-        summary << "boomeramg";
-        break;
-    case LinearSolverKind::petsc_gmres_ilu:
-        summary << "gmres-ilu";
-        break;
-    case LinearSolverKind::petsc_gmres_ilu2:
-        summary << "gmres-ilu2";
-        break;
-    case LinearSolverKind::petsc_bicgstab_ilu:
-        summary << "bicgstab-ilu";
-        break;
-    case LinearSolverKind::petsc_bicgstab_ilu2:
-        summary << "bicgstab-ilu2";
-        break;
-    case LinearSolverKind::petsc_bicgstab_gamg:
-        summary << "bicgstab-gamg";
-        break;
-    case LinearSolverKind::petsc_bicgstab_boomeramg:
-        summary << "bicgstab-boomeramg";
-        break;
-    case LinearSolverKind::petsc_gmres_gamg_reuse:
-        summary << "gmres-gamg-reuse";
-        break;
-    case LinearSolverKind::petsc_gmres_boomeramg_reuse:
-        summary << "gmres-boomeramg-reuse";
-        break;
-    case LinearSolverKind::petsc_bicgstab_gamg_reuse:
-        summary << "bicgstab-gamg-reuse";
-        break;
-    case LinearSolverKind::petsc_bicgstab_boomeramg_reuse:
-        summary << "bicgstab-boomeramg-reuse";
-        break;
-    default:
-        throw std::logic_error("Unknown linear solver kind");
-    }
-    summary << '\n'
-            << "picard_rtol=" << settings_.picard_relative_tolerance << '\n'
-            << "accepted_steps=" << result.accepted_steps << '\n'
+    write_basin_forward_settings(summary, settings_);
+    summary << "accepted_steps=" << result.accepted_steps << '\n'
             << "nonlinear_iterations=" << result.nonlinear_iterations << '\n'
             << "linear_iterations=" << result.linear_iterations << '\n'
             << "maximum_cells=" << result.maximum_cells << '\n'

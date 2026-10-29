@@ -7,6 +7,9 @@
 DOCKER_IMAGE ?= heat-env
 JOBS ?= 4
 MODEL ?= OFF
+BENCH_REVISION = $(shell git rev-parse HEAD)
+BENCH_DIRTY = $(shell git diff --quiet HEAD -- && echo false || echo true)
+BENCH_ENV = HEAT_BENCHMARK_REVISION=$(BENCH_REVISION) HEAT_BENCHMARK_DIRTY=$(BENCH_DIRTY)
 BENCH_ARGS ?=
 
 DOCKER_RUN = docker run --rm \
@@ -48,11 +51,11 @@ local-test:
 	ctest --preset test
 
 docker-bench:
-	$(DOCKER_RUN) bash -c '$(call configure_build,docker-bench,benchmarks) && build/docker/bench/benchmarks $(BENCH_ARGS)'
+	$(DOCKER_RUN) bash -c '$(call configure_build,docker-bench,benchmarks) && $(BENCH_ENV) build/docker/bench/benchmarks $(BENCH_ARGS)'
 
 local-bench:
 	$(call configure_build,bench,benchmarks)
-	build/local/bench/benchmarks $(BENCH_ARGS)
+	$(BENCH_ENV) build/local/bench/benchmarks $(BENCH_ARGS)
 
 clean:
 	rm -rf build/ compile_commands.json

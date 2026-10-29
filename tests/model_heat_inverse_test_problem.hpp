@@ -58,7 +58,7 @@ inline ModelHeatForwardSettings make_settings() {
         .time_step = 0.1,
         .nonlinear = kNewtonRequest,
         .linear = kDirectLinearRequest,
-        .linear_solver = LinearSolverKind::umfpack_lu,
+        .linear_solver = LinearSolverOptions{},
     };
 }
 

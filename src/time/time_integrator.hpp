@@ -10,6 +10,13 @@
 class SemiDiscreteSystem;
 class TimeScheme;
 
+// manual: the caller marks reuse boundaries with reset_linear_solver().
+enum class PreconditionerReuse {
+    none,
+    step,
+    manual
+};
+
 enum class TimeIntegrationStatus {
     completed,
     nonlinear_solve_failed,
@@ -44,7 +51,8 @@ public:
 
     void set_initial_solution(double initial_time, const Vector& initial_solution);
     void set_timestep(double dt);
-    void set_linear_solver(LinearSolverKind kind);
+    void set_linear_solver(LinearSolverOptions options);
+    void set_preconditioner_reuse(PreconditionerReuse reuse) noexcept;
     void reset_linear_solver() noexcept;
 
     NonlinearSolver& nonlinear_solver() noexcept;
@@ -59,6 +67,7 @@ public:
 
 private:
     double dt_ = 0.0;
+    PreconditionerReuse preconditioner_reuse_ = PreconditionerReuse::none;
     TimeHistory time_history_;
     std::unique_ptr<TimeScheme> time_scheme_;
     NonlinearSolver nonlinear_solver_;

@@ -4,25 +4,14 @@
 
 #include <memory>
 
-enum class PetscKrylovMethod {
-    gmres,
-    bicgstab
-};
-enum class PetscPreconditioner {
-    ilu0,
-    ilu2,
-    gamg,
-    boomeramg
-};
-
 // Sequential Krylov solver. Requires an active PETSc session owned by the application.
 class PetscKrylovLinearSolver final : public LinearSolver {
 public:
-    explicit PetscKrylovLinearSolver(PetscKrylovMethod method = PetscKrylovMethod::gmres,
-                                     PetscPreconditioner preconditioner = PetscPreconditioner::ilu0,
-                                     bool reuse_preconditioner = false);
+    explicit PetscKrylovLinearSolver(LinearMethod method = LinearMethod::gmres,
+                                     Preconditioner preconditioner = Preconditioner::ilu);
     ~PetscKrylovLinearSolver() override;
 
+    void set_preconditioner_reuse(bool reuse) noexcept override;
     void reset() noexcept override;
 
     SparseStorageOrder required_storage_order() const noexcept override {
@@ -34,9 +23,9 @@ public:
                             const LinearSolveRequest& request) override;
 
 private:
-    PetscKrylovMethod method_;
-    PetscPreconditioner preconditioner_;
-    bool reuse_preconditioner_;
+    LinearMethod method_;
+    Preconditioner preconditioner_;
+    bool reuse_preconditioner_ = false;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

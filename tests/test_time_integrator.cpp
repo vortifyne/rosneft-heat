@@ -1,4 +1,5 @@
 #include "discretization/semi_discrete_system.hpp"
+#include "petsc_test_session.hpp"
 #include "time/time_integrator.hpp"
 
 #include <cmath>
@@ -232,9 +233,56 @@ TEST(TimeIntegratorTest, ReportsWhenTimeStepCannotAdvanceFloatingPointTime) {
 TEST(TimeIntegratorTest, DelegatesLinearSolverSelection) {
     TimeIntegrator integrator;
 
-    EXPECT_NO_THROW(integrator.set_linear_solver(LinearSolverKind::umfpack_lu));
-    EXPECT_EQ(integrator.nonlinear_solver().linear_solver_kind(), LinearSolverKind::umfpack_lu);
+    EXPECT_NO_THROW(integrator.set_linear_solver(LinearSolverOptions{}));
+    EXPECT_EQ(integrator.nonlinear_solver().linear_solver_options(), LinearSolverOptions{});
     EXPECT_EQ(integrator.nonlinear_solver().linear_solver().type(), LinearSolverType::direct);
+}
+
+} // namespace
+
+namespace {
+
+class ChangingDiagonalSystem final : public SemiDiscreteSystem {
+public:
+    void assemble_residual(double time, const Vector& solution, const Vector& derivative,
+                           Vector& residual) const override {
+        residual = Vector{derivative[0] + (1.0 + time) * solution[0],
+                          derivative[1] + (2.0 + 3.0 * time) * solution[1]};
+    }
+    void assemble_matrix(NonlinearMethod, double time, const Vector&, const Vector&, double shift,
+                         SparseMatrix& matrix) const override {
+        const std::vector<MatrixTriplet> entries{{0, 0, shift + 1.0 + time},
+                                                 {1, 1, shift + 2.0 + 3.0 * time}};
+        matrix.set_from_triplets(entries);
+    }
+};
+
+TEST(TimeIntegratorTest, ResetsStepPreconditionerButRetainsManuallyManagedPreconditioner) {
+    ensure_petsc_test_session();
+    ChangingDiagonalSystem system;
+    for (const auto reuse :
+         {PreconditionerReuse::none, PreconditionerReuse::step, PreconditionerReuse::manual}) {
+        TimeIntegrator integrator;
+        integrator.set_initial_solution(0.0, Vector{1.0, 1.0});
+        integrator.set_timestep(1.0);
+        integrator.set_linear_solver({.method = LinearMethod::gmres});
+        integrator.set_preconditioner_reuse(reuse);
+        const LinearSolveRequest linear{
+            .relative_tolerance = 1e-10, .absolute_tolerance = 1e-12, .max_iterations = 1};
+        const auto result = integrator.advance_to(system, 2.0, kNewtonRequest, linear);
+        if (reuse == PreconditionerReuse::manual) {
+            EXPECT_EQ(result.status, TimeIntegrationStatus::nonlinear_solve_failed);
+            EXPECT_EQ(result.accepted_steps, 1);
+            EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 1.0);
+            integrator.reset_linear_solver();
+            EXPECT_TRUE(integrator.advance_to(system, 2.0, kNewtonRequest, linear).completed());
+        } else {
+            EXPECT_TRUE(result.completed());
+            EXPECT_EQ(result.accepted_steps, 2);
+        }
+        EXPECT_NEAR(integrator.current_snapshot().solution[0], 1.0 / 12.0, 1e-12);
+        EXPECT_NEAR(integrator.current_snapshot().solution[1], 1.0 / 54.0, 1e-12);
+    }
 }
 
 } // namespace

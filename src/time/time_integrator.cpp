@@ -35,8 +35,17 @@ void TimeIntegrator::set_timestep(double dt) {
     dt_ = dt;
 }
 
-void TimeIntegrator::set_linear_solver(LinearSolverKind kind) {
-    nonlinear_solver_.set_linear_solver(kind);
+void TimeIntegrator::set_linear_solver(LinearSolverOptions options) {
+    nonlinear_solver_.set_linear_solver(options);
+    nonlinear_solver_.linear_solver().set_preconditioner_reuse(preconditioner_reuse_ !=
+                                                               PreconditionerReuse::none);
+}
+
+void TimeIntegrator::set_preconditioner_reuse(PreconditionerReuse reuse) noexcept {
+    if (reuse != preconditioner_reuse_)
+        reset_linear_solver();
+    preconditioner_reuse_ = reuse;
+    nonlinear_solver_.linear_solver().set_preconditioner_reuse(reuse != PreconditionerReuse::none);
 }
 
 void TimeIntegrator::reset_linear_solver() noexcept {
@@ -105,6 +114,8 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
             };
         }
 
+        if (preconditioner_reuse_ == PreconditionerReuse::step)
+            reset_linear_solver();
         Vector solution = time_history_.current().solution;
         auto nonlinear_system =
             time_scheme_->make_nonlinear_system(semi_discrete_system, time_history_, step_end_time);

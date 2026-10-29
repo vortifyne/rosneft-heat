@@ -18,7 +18,7 @@ struct ModelHeatForwardSettings {
     double time_step;
     NonlinearSolveRequest nonlinear;
     LinearSolveRequest linear;
-    LinearSolverKind linear_solver = LinearSolverKind::umfpack_lu;
+    LinearSolverOptions linear_solver{};
 };
 
 struct [[nodiscard]] ModelHeatForwardResult {

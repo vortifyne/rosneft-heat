@@ -8,10 +8,10 @@
 #include <optional>
 
 struct NonlinearSolveRequest {
-    NonlinearMethod nonlinear_method;
-    double relative_tolerance;
-    double absolute_tolerance;
-    int max_iterations;
+    NonlinearMethod nonlinear_method = NonlinearMethod::picard;
+    double relative_tolerance = 1.0e-8;
+    double absolute_tolerance = 1.0e-8;
+    int max_iterations = 200;
 };
 
 struct SolverTimings {
@@ -52,7 +52,7 @@ class NonlinearSolver {
 public:
     NonlinearSolver();
 
-    void set_linear_solver(LinearSolverKind kind);
+    void set_linear_solver(LinearSolverOptions options);
 
     LinearSolver& linear_solver() noexcept {
         return *linear_solver_;
@@ -62,8 +62,8 @@ public:
         return *linear_solver_;
     }
 
-    LinearSolverKind linear_solver_kind() const noexcept {
-        return linear_solver_kind_;
+    const LinearSolverOptions& linear_solver_options() const noexcept {
+        return linear_solver_options_;
     }
 
     LinearSolverType linear_solver_type() const noexcept {
@@ -75,8 +75,8 @@ public:
                                const LinearSolveRequest& linear_request);
 
 private:
-    static std::unique_ptr<LinearSolver> make_linear_solver(LinearSolverKind kind);
+    static std::unique_ptr<LinearSolver> make_linear_solver(LinearSolverOptions options);
 
-    LinearSolverKind linear_solver_kind_ = LinearSolverKind::umfpack_lu;
+    LinearSolverOptions linear_solver_options_{};
     std::unique_ptr<LinearSolver> linear_solver_;
 };

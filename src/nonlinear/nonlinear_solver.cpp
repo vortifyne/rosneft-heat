@@ -9,18 +9,24 @@
 #include <stdexcept>
 #include <utility>
 
-NonlinearSolver::NonlinearSolver() : linear_solver_(make_linear_solver(linear_solver_kind_)) {}
+NonlinearSolver::NonlinearSolver() : linear_solver_(make_linear_solver(linear_solver_options_)) {}
 
-void NonlinearSolver::set_linear_solver(LinearSolverKind kind) {
-    auto linear_solver = make_linear_solver(kind);
+void NonlinearSolver::set_linear_solver(LinearSolverOptions options) {
+    if (options == linear_solver_options_)
+        return;
+    auto linear_solver = make_linear_solver(options);
     linear_solver_ = std::move(linear_solver);
-    linear_solver_kind_ = kind;
+    linear_solver_options_ = options;
 }
 
 NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_system, Vector& x,
                                             const NonlinearSolveRequest& nonlinear_request,
                                             const LinearSolveRequest& linear_request) {
-    if (nonlinear_request.max_iterations < 0) {
+    if (nonlinear_request.max_iterations < 0 ||
+        !std::isfinite(nonlinear_request.relative_tolerance) ||
+        nonlinear_request.relative_tolerance < 0.0 || nonlinear_request.relative_tolerance >= 1.0 ||
+        !std::isfinite(nonlinear_request.absolute_tolerance) ||
+        nonlinear_request.absolute_tolerance < 0.0) {
         throw std::invalid_argument("Invalid nonlinear solver iteration settings");
     }
     SolverTimings timings;
@@ -66,10 +72,9 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
 
         const Vector b = -residual;
         Vector delta_x;
-        LinearSolveRequest current_linear_request = linear_request;
         operation_start = std::chrono::steady_clock::now();
         const LinearSolveResult linear_result =
-            linear_solver_->solve(matrix, b, delta_x, current_linear_request);
+            linear_solver_->solve(matrix, b, delta_x, linear_request);
         timings.linear_solve_seconds += elapsed_seconds(operation_start);
         linear_iterations += linear_result.iterations;
         last_linear_status = linear_result.status;
@@ -146,46 +151,13 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
     };
 }
 
-std::unique_ptr<LinearSolver> NonlinearSolver::make_linear_solver(LinearSolverKind kind) {
-    switch (kind) {
-    case LinearSolverKind::umfpack_lu:
+std::unique_ptr<LinearSolver> NonlinearSolver::make_linear_solver(LinearSolverOptions options) {
+    switch (options.method) {
+    case LinearMethod::lu:
         return std::make_unique<UmfpackLinearSolver>();
-    case LinearSolverKind::petsc_gmres_ilu:
-        return std::make_unique<PetscKrylovLinearSolver>();
-    case LinearSolverKind::petsc_gmres_ilu2:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::gmres,
-                                                         PetscPreconditioner::ilu2);
-    case LinearSolverKind::petsc_gmres_gamg:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::gmres,
-                                                         PetscPreconditioner::gamg);
-    case LinearSolverKind::petsc_gmres_boomeramg:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::gmres,
-                                                         PetscPreconditioner::boomeramg);
-    case LinearSolverKind::petsc_bicgstab_ilu:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
-                                                         PetscPreconditioner::ilu0);
-    case LinearSolverKind::petsc_bicgstab_ilu2:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
-                                                         PetscPreconditioner::ilu2);
-    case LinearSolverKind::petsc_bicgstab_gamg:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
-                                                         PetscPreconditioner::gamg);
-    case LinearSolverKind::petsc_bicgstab_boomeramg:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
-                                                         PetscPreconditioner::boomeramg);
-    case LinearSolverKind::petsc_gmres_gamg_reuse:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::gmres,
-                                                         PetscPreconditioner::gamg, true);
-    case LinearSolverKind::petsc_gmres_boomeramg_reuse:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::gmres,
-                                                         PetscPreconditioner::boomeramg, true);
-    case LinearSolverKind::petsc_bicgstab_gamg_reuse:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
-                                                         PetscPreconditioner::gamg, true);
-    case LinearSolverKind::petsc_bicgstab_boomeramg_reuse:
-        return std::make_unique<PetscKrylovLinearSolver>(PetscKrylovMethod::bicgstab,
-                                                         PetscPreconditioner::boomeramg, true);
+    case LinearMethod::gmres:
+    case LinearMethod::bicgstab:
+        return std::make_unique<PetscKrylovLinearSolver>(options.method, options.preconditioner);
     }
-
-    throw std::invalid_argument("Unknown linear solver kind");
+    throw std::invalid_argument("Unknown linear method");
 }

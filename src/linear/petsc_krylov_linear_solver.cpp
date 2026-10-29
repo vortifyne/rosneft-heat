@@ -49,18 +49,20 @@ struct PetscKrylovLinearSolver::Impl {
     PetscInt size = 0;
 };
 
-PetscKrylovLinearSolver::PetscKrylovLinearSolver(PetscKrylovMethod method,
-                                                 PetscPreconditioner preconditioner,
-                                                 bool reuse_preconditioner)
-    : LinearSolver(LinearSolverType::iterative), method_(method), preconditioner_(preconditioner),
-      reuse_preconditioner_(reuse_preconditioner) {
-    if (reuse_preconditioner && preconditioner != PetscPreconditioner::gamg &&
-        preconditioner != PetscPreconditioner::boomeramg) {
-        throw std::invalid_argument("Preconditioner reuse is supported only for AMG");
+PetscKrylovLinearSolver::PetscKrylovLinearSolver(LinearMethod method, Preconditioner preconditioner)
+    : LinearSolver(LinearSolverType::iterative), method_(method), preconditioner_(preconditioner) {
+    if (method != LinearMethod::gmres && method != LinearMethod::bicgstab) {
+        throw std::invalid_argument("PETSc requires an iterative method");
     }
 }
 
 PetscKrylovLinearSolver::~PetscKrylovLinearSolver() = default;
+
+void PetscKrylovLinearSolver::set_preconditioner_reuse(bool reuse) noexcept {
+    if (reuse != reuse_preconditioner_)
+        reset();
+    reuse_preconditioner_ = reuse;
+}
 
 void PetscKrylovLinearSolver::reset() noexcept {
     impl_.reset();
@@ -122,13 +124,13 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
         check(KSPCreate(PETSC_COMM_SELF, local_ksp.out()));
     }
     KSP ksp = reuse_preconditioner_ ? impl_->ksp.get() : local_ksp.get();
-    // A is current; the frozen P defines a fixed AMG preconditioner for this solver's lifetime.
+    // A is current; P defines the preconditioner retained until an explicit reset.
     check(KSPSetOperators(ksp, petsc_matrix.get(),
                           reuse_preconditioner_ ? impl_->frozen_matrix.get() : petsc_matrix.get()));
     check(KSPSetReusePreconditioner(ksp, reused ? PETSC_TRUE : PETSC_FALSE));
     if (!reused) {
-        check(KSPSetType(ksp, method_ == PetscKrylovMethod::gmres ? KSPGMRES : KSPBCGS));
-        if (method_ == PetscKrylovMethod::gmres) {
+        check(KSPSetType(ksp, method_ == LinearMethod::gmres ? KSPGMRES : KSPBCGS));
+        if (method_ == LinearMethod::gmres) {
             check(KSPGMRESSetRestart(ksp, 30));
         }
         check(KSPSetPCSide(ksp, PC_LEFT));
@@ -136,15 +138,15 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
         PC pc = nullptr;
         check(KSPGetPC(ksp, &pc));
         switch (preconditioner_) {
-        case PetscPreconditioner::ilu0:
-        case PetscPreconditioner::ilu2:
+        case Preconditioner::ilu:
+        case Preconditioner::ilu2:
             check(PCSetType(pc, PCILU));
-            check(PCFactorSetLevels(pc, preconditioner_ == PetscPreconditioner::ilu0 ? 0 : 2));
+            check(PCFactorSetLevels(pc, preconditioner_ == Preconditioner::ilu ? 0 : 2));
             break;
-        case PetscPreconditioner::gamg:
+        case Preconditioner::gamg:
             check(PCSetType(pc, PCGAMG));
             break;
-        case PetscPreconditioner::boomeramg:
+        case Preconditioner::boomeramg:
             check(PCSetType(pc, PCHYPRE));
             check(PCHYPRESetType(pc, "boomeramg"));
             break;

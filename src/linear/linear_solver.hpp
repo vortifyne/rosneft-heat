@@ -30,20 +30,23 @@ enum class LinearSolverType {
     iterative,
 };
 
-enum class LinearSolverKind {
-    umfpack_lu,
-    petsc_gmres_ilu,
-    petsc_gmres_ilu2,
-    petsc_gmres_gamg,
-    petsc_gmres_boomeramg,
-    petsc_bicgstab_ilu,
-    petsc_bicgstab_ilu2,
-    petsc_bicgstab_gamg,
-    petsc_bicgstab_boomeramg,
-    petsc_gmres_gamg_reuse,
-    petsc_gmres_boomeramg_reuse,
-    petsc_bicgstab_gamg_reuse,
-    petsc_bicgstab_boomeramg_reuse,
+enum class LinearMethod {
+    lu,
+    gmres,
+    bicgstab
+};
+enum class Preconditioner {
+    ilu,
+    ilu2,
+    gamg,
+    boomeramg
+};
+
+struct LinearSolverOptions {
+    LinearMethod method = LinearMethod::lu;
+    Preconditioner preconditioner = Preconditioner::ilu;
+
+    bool operator==(const LinearSolverOptions&) const = default;
 };
 
 class LinearSolver {
@@ -55,6 +58,9 @@ public:
     }
 
     virtual SparseStorageOrder required_storage_order() const noexcept = 0;
+
+    // Affects iterative preconditioners; direct solvers ignore this setting.
+    virtual void set_preconditioner_reuse(bool) noexcept {}
 
     // Discard cached numerical data without replacing the solver or its settings.
     virtual void reset() noexcept {}

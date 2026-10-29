@@ -28,9 +28,7 @@ NonmatchingColumnGrid single_cell_grid(double height) {
 }
 
 NonmatchingColumnBoundaryData boundary(double surface_temperature) {
-    return {.surface_temperature = [surface_temperature](Point2D) {
-                return surface_temperature;
-            },
+    return {.surface_temperature = [surface_temperature](Point2D) { return surface_temperature; },
             .basal_inward_flux = [](Point2D) { return 0.0; }};
 }
 
@@ -83,12 +81,11 @@ double integrate_moving_quadratic(double timestep) {
     return temperature;
 }
 
-Vector solve_temperature_dependent_case(double timestep, LinearSolverKind linear_solver) {
+Vector solve_temperature_dependent_case(double timestep, LinearSolverOptions linear_solver) {
     const std::vector<double> x{0.0, 1.0, 2.0};
-    const BasinGeometry geometry{
-        .age_ma = 0.0,
-        .boundaries = {{{x, {0.0, 0.2, 0.0}}}, {{x, {2.0, 2.2, 2.0}}}},
-        .layers = {{1, 0, 1, 0.0, 2.0}}};
+    const BasinGeometry geometry{.age_ma = 0.0,
+                                 .boundaries = {{{x, {0.0, 0.2, 0.0}}}, {{x, {2.0, 2.2, 2.0}}}},
+                                 .layers = {{1, 0, 1, 0.0, 2.0}}};
     const LayeredMeshLayout layout{.x = {0.0, 0.5, 1.0, 1.5, 2.0}, .cell_size = 0.4};
     const NonmatchingColumnGrid grid = make_nonmatching_column_grid(geometry, layout);
     const std::vector<double> conductivity(grid.cells.size(), 1.0);
@@ -115,9 +112,8 @@ Vector solve_temperature_dependent_case(double timestep, LinearSolverKind linear
                                           .relative_tolerance = 1.0e-9,
                                           .absolute_tolerance = 1.0e-10,
                                           .max_iterations = 100};
-    const LinearSolveRequest linear{.relative_tolerance = 1.0e-10,
-                                    .absolute_tolerance = 1.0e-12,
-                                    .max_iterations = 300};
+    const LinearSolveRequest linear{
+        .relative_tolerance = 1.0e-10, .absolute_tolerance = 1.0e-12, .max_iterations = 300};
     const TimeIntegrationResult result = integrator.advance_to(system, 1.0, nonlinear, linear);
     EXPECT_TRUE(result.completed());
     return integrator.current_snapshot().solution;
@@ -173,10 +169,9 @@ TEST(NonmatchingColumnTransientSystem, AccumulationUsesCurrentMovingCellAndPicar
 
 TEST(NonmatchingColumnTransientSystem, AdvancesAffineFieldOnIndependentColumns) {
     const std::vector<double> x{0.0, 1.0, 2.0};
-    const BasinGeometry source{
-        .age_ma = 0.0,
-        .boundaries = {{{x, {0.0, 0.4, 0.8}}}, {{x, {3.0, 3.0, 3.0}}}},
-        .layers = {{1, 0, 1, 0.0, 2.0}}};
+    const BasinGeometry source{.age_ma = 0.0,
+                               .boundaries = {{{x, {0.0, 0.4, 0.8}}}, {{x, {3.0, 3.0, 3.0}}}},
+                               .layers = {{1, 0, 1, 0.0, 2.0}}};
     const LayeredMeshLayout layout{.x = x, .cell_size = 0.45};
     const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
     constexpr double conductivity_value = 2.5;
@@ -226,15 +221,16 @@ TEST(NonmatchingColumnTransientSystem, AdvancesAffineFieldOnIndependentColumns) 
 
 TEST(NonmatchingColumnTransientSystem, TemperatureDependentCaseRefinesAndAgreesWithGamg) {
     ensure_petsc_test_session();
-    const Vector coarse = solve_temperature_dependent_case(0.25, LinearSolverKind::umfpack_lu);
-    const Vector medium = solve_temperature_dependent_case(0.125, LinearSolverKind::umfpack_lu);
-    const Vector fine = solve_temperature_dependent_case(0.0625, LinearSolverKind::umfpack_lu);
+    const Vector coarse = solve_temperature_dependent_case(0.25, LinearSolverOptions{});
+    const Vector medium = solve_temperature_dependent_case(0.125, LinearSolverOptions{});
+    const Vector fine = solve_temperature_dependent_case(0.0625, LinearSolverOptions{});
     const double first_change = (medium - coarse).infinity_norm();
     const double second_change = (fine - medium).infinity_norm();
     EXPECT_GT(first_change, 1.0e-5);
     EXPECT_LT(second_change, 0.8 * first_change);
 
-    const Vector gamg =
-        solve_temperature_dependent_case(0.125, LinearSolverKind::petsc_gmres_gamg);
+    const Vector gamg = solve_temperature_dependent_case(
+        0.125,
+        LinearSolverOptions{.method = LinearMethod::gmres, .preconditioner = Preconditioner::gamg});
     EXPECT_LT((gamg - medium).infinity_norm(), 1.0e-5);
 }

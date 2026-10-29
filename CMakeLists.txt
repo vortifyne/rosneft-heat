@@ -71,6 +71,7 @@ target_link_libraries(basin_data PUBLIC basin_physics)
 
 add_library(basin_heat_forward STATIC
   src/basin/basin_forward_solver.cpp
+  src/basin/basin_forward_options.cpp
   src/discretization/multipoint_flux_expression.cpp
   src/discretization/nonmatching_column_flux.cpp
   src/discretization/nonmatching_column_heat_system.cpp
@@ -113,9 +114,7 @@ if(BUILD_TESTING)
     tests/test_time_integrator.cpp
     tests/test_umfpack_linear_solver.cpp
     tests/test_petsc_krylov_linear_solver.cpp
-    tests/test_umfpack_smoke.cpp
     tests/test_vector.cpp
-    tests/test_petsc_tao_punders.cpp
     tests/test_pounders_optimizer.cpp
     tests/test_easy_ro.cpp
     tests/test_basin_geometry.cpp
@@ -130,7 +129,7 @@ if(BUILD_TESTING)
   )
   heat_configure_target(heat_tests)
   target_link_libraries(heat_tests PRIVATE
-    basin_heat_forward heat_opt SuiteSparse::UMFPACK_static
+    basin_heat_forward heat_opt
     GTest::gtest_main PkgConfig::PETSc MPI::MPI_CXX
   )
   gtest_discover_tests(heat_tests)
@@ -155,7 +154,10 @@ endif()
 
 if(HEAT_BUILD_BENCHMARKS)
   find_package(benchmark CONFIG REQUIRED)
-  add_executable(benchmarks benchmarks/linear_search.cpp)
+  add_executable(benchmarks benchmarks/solvers.cpp)
   heat_configure_target(benchmarks)
-  target_link_libraries(benchmarks PRIVATE benchmark::benchmark)
+  target_link_libraries(benchmarks PRIVATE basin_heat_forward benchmark::benchmark PkgConfig::PETSc MPI::MPI_CXX)
+  target_compile_definitions(benchmarks PRIVATE
+    "HEAT_BENCHMARK_COMPILER=\"${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}\""
+  )
 endif()
