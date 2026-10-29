@@ -68,6 +68,43 @@ TEST(NonmatchingColumnGrid, LayoutRetainsContourSamplesAndPhasesOnlyInsertedLine
     EXPECT_DOUBLE_EQ(shifted.cell_size, 0.4);
 }
 
+TEST(NonmatchingColumnGrid, PreservesLayerAreasAndCoversEveryColumnInterfaceAcrossLayouts) {
+    const BasinGeometry source = geometry();
+    for (const double dx : {0.75, 0.35}) {
+        for (const double dz : {0.55, 0.23}) {
+            for (const double phase : {-0.25, 0.0, 0.45}) {
+                SCOPED_TRACE(testing::Message()
+                             << "dx=" << dx << " dz=" << dz << " phase=" << phase);
+                const auto grid = make_nonmatching_column_grid(
+                    source, make_nonmatching_column_layout(source, dx, dz, phase));
+                std::map<int, double> area;
+                std::vector<double> coverage(grid.columns.size() - 1, 0.0);
+                for (const auto& cell : grid.cells) {
+                    ASSERT_GT(cell.area(), 0.0);
+                    area[cell.layer_id] += cell.area();
+                }
+                EXPECT_NEAR(area[1], 1.7, 1.0e-12);
+                EXPECT_NEAR(area[2], 2.4, 1.0e-12);
+                for (const auto& face : grid.vertical_subfaces) {
+                    const auto left = grid.cells[face.left_cell].column;
+                    const auto right = grid.cells[face.right_cell].column;
+                    ASSERT_EQ(right, left + 1);
+                    EXPECT_DOUBLE_EQ(face.x, grid.x[right]);
+                    ASSERT_GT(face.length(), 0.0);
+                    coverage[left] += face.length();
+                }
+                for (std::size_t i = 0; i < coverage.size(); ++i) {
+                    const double top = std::max(grid.cells[grid.columns[i].front()].z_top,
+                                                grid.cells[grid.columns[i + 1].front()].z_top);
+                    const double bottom = std::min(grid.cells[grid.columns[i].back()].z_bottom,
+                                                   grid.cells[grid.columns[i + 1].back()].z_bottom);
+                    EXPECT_NEAR(coverage[i], bottom - top, 1.0e-12);
+                }
+            }
+        }
+    }
+}
+
 TEST(NonmatchingColumnGrid, RepresentsVerticalOuterBoundarySteps) {
     const std::vector<double> x{0.0, 1.0, 2.0};
     const BasinGeometry source{.age_ma = 0.0,

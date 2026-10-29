@@ -3,17 +3,16 @@
 #include "linear/umfpack_linear_solver.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <functional>
-#include <iomanip>
-#include <iostream>
+#include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -32,20 +31,12 @@ struct Solution {
     Vector temperature;
     Vector residual;
     SparseMatrix matrix;
-    std::size_t nonlinear_updates = 0;
-    std::size_t residual_assemblies = 0;
-    std::size_t matrix_assemblies = 0;
-    double elapsed_ms = 0.0;
 };
 
 struct Metrics {
     double l2 = 0.0;
     double e2 = 0.0;
     double linf = 0.0;
-    double minimum = std::numeric_limits<double>::infinity();
-    double maximum = -std::numeric_limits<double>::infinity();
-    double left_mean = 0.0;
-    double right_mean = 0.0;
 };
 
 struct VerificationCase {
@@ -130,21 +121,16 @@ Solution solve(NonmatchingColumnHeatSystem& system, Vector temperature,
                     .residual = {},
                     .matrix = SparseMatrix(system.size(), system.size(), SparseStorageOrder::csc)};
     constexpr std::size_t maximum_iterations = 300;
-    const auto start = std::chrono::steady_clock::now();
     for (std::size_t iteration = 0; iteration <= maximum_iterations; ++iteration) {
         system.assemble_residual(result.temperature, result.residual);
-        ++result.residual_assemblies;
         const double current = residual_linf(result.residual);
         if (current / characteristic_rate <= kNormalizedResidualTolerance) {
-            const auto end = std::chrono::steady_clock::now();
-            result.elapsed_ms = std::chrono::duration<double, std::milli>(end - start).count();
             return result;
         }
         if (iteration == maximum_iterations) {
             break;
         }
         system.assemble_matrix(result.temperature, result.matrix);
-        ++result.matrix_assemblies;
         Vector correction;
         const LinearSolveResult linear = solver.solve(
             result.matrix, -result.residual, correction,
@@ -153,23 +139,8 @@ Solution solve(NonmatchingColumnHeatSystem& system, Vector temperature,
             throw std::runtime_error("UMFPACK failed on nonmatching-column verification");
         }
         result.temperature += correction;
-        ++result.nonlinear_updates;
     }
     throw std::runtime_error("Nonmatching-column iteration did not reach residual tolerance");
-}
-
-double region_mean(const NonmatchingColumnGrid& grid, const Vector& solution, const double x_left,
-                   const double x_right) {
-    double integral = 0.0;
-    double area = 0.0;
-    for (const NonmatchingColumnCell& cell : grid.cells) {
-        const double overlap =
-            std::max(0.0, std::min(cell.x_right, x_right) - std::max(cell.x_left, x_left));
-        const double overlap_area = overlap * cell.height();
-        integral += overlap_area * solution[static_cast<Vector::Index>(cell.index)];
-        area += overlap_area;
-    }
-    return integral / area;
 }
 
 Metrics error_metrics(const NonmatchingColumnGrid& grid, const Vector& solution,
@@ -184,13 +155,9 @@ Metrics error_metrics(const NonmatchingColumnGrid& grid, const Vector& solution,
         squared += cell.area() * difference * difference;
         area += cell.area();
         result.linf = std::max(result.linf, std::abs(difference));
-        result.minimum = std::min(result.minimum, value);
-        result.maximum = std::max(result.maximum, value);
     }
     result.l2 = std::sqrt(squared / area);
     result.e2 = result.l2 / delta_temperature;
-    result.left_mean = region_mean(grid, solution, 0.0, 0.5 * kWidth);
-    result.right_mean = region_mean(grid, solution, 0.5 * kWidth, kWidth);
     return result;
 }
 
@@ -240,16 +207,6 @@ double material_interface_outflow(const NonmatchingColumnGrid& grid,
         }
     }
     return result;
-}
-
-std::string_view name(const MultipointFluxScheme scheme) {
-    switch (scheme) {
-    case MultipointFluxScheme::linear:
-        return "linear_harmonic_baseline";
-    case MultipointFluxScheme::nonlinear_conservative:
-        return "nmpfa_conservative";
-    }
-    throw std::logic_error("Unknown multipoint scheme");
 }
 
 VerificationCase smooth_constant_case() {
@@ -380,113 +337,80 @@ VerificationCase tilted_contact_case(const double contrast) {
     return result;
 }
 
-void print_case(const VerificationCase& definition, const double hx, const double hz,
-                const double phase, const MultipointFluxScheme scheme,
-                const double initial_offset) {
-    const LayeredMeshLayout layout =
-        make_nonmatching_column_layout(definition.geometry, hx, hz, phase);
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(definition.geometry, layout);
-    std::vector<double> conductivity(grid.cells.size());
-    std::vector<double> source(grid.cells.size());
-    Vector initial(static_cast<Vector::Index>(grid.cells.size()));
-    initial.set_constant(kBaseTemperature + initial_offset);
-    for (const NonmatchingColumnCell& cell : grid.cells) {
+std::vector<VerificationCase> cases() {
+    return {smooth_constant_case(),          smooth_variable_case(),
+            sloped_surface_case(),           horizontal_contact_case(100.0),
+            horizontal_contact_case(1000.0), tilted_contact_case(100.0),
+            tilted_contact_case(1000.0)};
+}
+
+Metrics check_case(const VerificationCase& definition, double h, MultipointFluxScheme scheme) {
+    const auto layout = make_nonmatching_column_layout(definition.geometry, h, h, 0.0);
+    const auto grid = make_nonmatching_column_grid(definition.geometry, layout);
+    std::vector<double> conductivity(grid.cells.size()), source(grid.cells.size());
+    for (const auto& cell : grid.cells) {
         conductivity[cell.index] = definition.conductivity(cell.center(), cell.layer_id);
         source[cell.index] = definition.source(cell.center(), cell.layer_id);
     }
     NonmatchingColumnHeatSystem system(grid, conductivity, source, definition.boundary_data);
     system.set_flux_scheme(scheme);
-    Solution solution = solve(system, std::move(initial), definition.characteristic_rate);
-    const Metrics error =
-        error_metrics(grid, solution.temperature, definition.exact, definition.delta_temperature);
-    const NonmatchingColumnEnergyRates rates = system.energy_rates(solution.temperature);
-    const NonmatchingColumnFluxDiagnostics diagnostics =
-        system.flux_diagnostics(solution.temperature);
-    const double global_balance =
+    Vector initial(static_cast<Vector::Index>(grid.cells.size()));
+    initial.set_constant(kBaseTemperature);
+    const auto solution = solve(system, std::move(initial), definition.characteristic_rate);
+    EXPECT_LE(residual_linf(solution.residual) / definition.characteristic_rate,
+              kNormalizedResidualTolerance);
+    const auto rates = system.energy_rates(solution.temperature);
+    const double balance =
         rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow - rates.heat_production;
-    double minimum_subface = std::numeric_limits<double>::infinity();
-    double maximum_dx = 0.0;
-    double maximum_dz = 0.0;
-    for (const NonmatchingColumnCell& cell : grid.cells) {
-        maximum_dx = std::max(maximum_dx, cell.width());
-        maximum_dz = std::max(maximum_dz, cell.height());
+    EXPECT_LT(std::abs(balance) / definition.characteristic_rate, 1.0e-9);
+    EXPECT_LT(system.flux_diagnostics(solution.temperature).internal_conservation_defect_linf,
+              1.0e-10);
+    if (definition.interface_layer) {
+        const double outflow = material_interface_outflow(
+            grid, system.thermal_conductivity(), solution.temperature, definition.boundary_data,
+            scheme, *definition.interface_layer);
+        const double tolerance = definition.name == "horizontal_contact"
+                                     ? 1.0e-8
+                                     : 0.01 * definition.characteristic_rate;
+        EXPECT_NEAR(outflow, definition.expected_interface_outflow, tolerance);
     }
-    for (const NonmatchingVerticalSubface& face : grid.vertical_subfaces) {
-        minimum_subface = std::min(minimum_subface, face.length());
-    }
-    const double interface_outflow =
-        definition.interface_layer
-            ? material_interface_outflow(grid, system.thermal_conductivity(), solution.temperature,
-                                         definition.boundary_data, scheme,
-                                         *definition.interface_layer)
-            : std::numeric_limits<double>::quiet_NaN();
-    std::cout << definition.name << ',' << name(scheme) << ',' << initial_offset << ',' << hx << ','
-              << hz << ',' << phase << ',' << definition.parameter << ',' << grid.columns.size()
-              << ',' << grid.cells.size() << ',' << grid.vertical_subfaces.size() << ','
-              << grid.surface_vertical_faces.size() << ',' << grid.basal_vertical_faces.size()
-              << ',' << solution.matrix.nonzero_count() << ',' << solution.nonlinear_updates << ','
-              << solution.residual_assemblies << ',' << solution.matrix_assemblies << ','
-              << solution.elapsed_ms << ',' << diagnostics.maximum_stencil_size << ','
-              << diagnostics.internal_conservation_defect_linf << ',' << error.e2 << ',' << error.l2
-              << ',' << error.linf << ',' << error.minimum << ',' << error.maximum << ','
-              << error.left_mean << ',' << error.right_mean << ','
-              << residual_linf(solution.residual) << ','
-              << residual_linf(solution.residual) / definition.characteristic_rate << ','
-              << global_balance << ',' << global_balance / definition.characteristic_rate << ','
-              << rates.surface_outflow << ',' << rates.basal_inflow << ',' << rates.lateral_inflow
-              << ',' << rates.heat_production << ',' << interface_outflow << ','
-              << definition.expected_interface_outflow << ',' << minimum_subface << ','
-              << maximum_dx << ',' << maximum_dz << '\n';
+    return error_metrics(grid, solution.temperature, definition.exact,
+                         definition.delta_temperature);
 }
 
-std::vector<VerificationCase> cases() {
-    std::vector<VerificationCase> result;
-    result.push_back(smooth_constant_case());
-    result.push_back(smooth_variable_case());
-    result.push_back(sloped_surface_case());
-    result.push_back(horizontal_contact_case(100.0));
-    result.push_back(horizontal_contact_case(1000.0));
-    result.push_back(tilted_contact_case(100.0));
-    result.push_back(tilted_contact_case(1000.0));
-    return result;
-}
+class NonmatchingColumnAccuracy
+    : public testing::TestWithParam<std::tuple<int, MultipointFluxScheme>> {};
 
-void run_setting(const double hx, const double hz, const double phase,
-                 const double initial_offset) {
-    for (const auto scheme :
-         {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
-        for (const auto& definition : cases()) {
-            print_case(definition, hx, hz, phase, scheme, initial_offset);
-        }
+TEST_P(NonmatchingColumnAccuracy, RefinesToKnownSolutionAndConservesEnergy) {
+    const auto [index, scheme] = GetParam();
+    const auto definition = cases()[static_cast<std::size_t>(index)];
+    SCOPED_TRACE(std::string(definition.name) +
+                 " contrast=" + std::to_string(definition.parameter));
+    const auto coarse = check_case(definition, 0.4, scheme);
+    const auto fine = check_case(definition, 0.2, scheme);
+    if (definition.name == "horizontal_contact") {
+        EXPECT_LT(coarse.linf, 1.0e-8);
+        EXPECT_LT(fine.linf, 1.0e-8);
+    } else {
+        EXPECT_LT(fine.l2, coarse.l2);
+        EXPECT_LT(fine.e2, 0.01);
     }
 }
+
+std::string
+accuracy_case_name(const testing::TestParamInfo<NonmatchingColumnAccuracy::ParamType>& info) {
+    const auto [index, scheme] = info.param;
+    const auto definition = cases()[static_cast<std::size_t>(index)];
+    return std::string(definition.name) + "_" +
+           std::to_string(static_cast<int>(definition.parameter)) +
+           (scheme == MultipointFluxScheme::linear ? "_MPFA" : "_NMPFA");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MpfaAndNmpfa, NonmatchingColumnAccuracy,
+    testing::Combine(testing::Range(0, 7),
+                     testing::Values(MultipointFluxScheme::linear,
+                                     MultipointFluxScheme::nonlinear_conservative)),
+    accuracy_case_name);
 
 } // namespace
-
-int main(int argc, char** argv) {
-    try {
-        std::cout << std::setprecision(17)
-                  << "test,scheme,initial_offset,hx,hz,phase,parameter,columns,cells,"
-                     "vertical_subfaces,"
-                     "surface_steps,basal_steps,nnz,nonlinear_updates,residual_assemblies,"
-                     "matrix_assemblies,elapsed_ms,maximum_stencil,internal_flux_mismatch,E2,l2,"
-                     "linf,Tmin,Tmax,left_mean,right_mean,residual_linf,residual_normalized,"
-                     "global_balance,balance_normalized,surface_outflow,basal_inflow,"
-                     "lateral_inflow,production,material_interface_outflow,"
-                     "expected_material_interface_outflow,minimum_subface,max_dx,max_dz\n";
-        if (argc == 4 || argc == 5) {
-            const double initial_offset = argc == 5 ? std::stod(argv[4]) : 0.0;
-            run_setting(std::stod(argv[1]), std::stod(argv[2]), std::stod(argv[3]), initial_offset);
-        } else if (argc == 1) {
-            for (const double h : {0.4, 0.2, 0.1, 0.05})
-                run_setting(h, h, 0.0, 0.0);
-        } else {
-            throw std::invalid_argument(
-                "usage: nonmatching_discretization_verification [HX HZ PHASE [INITIAL_OFFSET]]");
-        }
-        return 0;
-    } catch (const std::exception& error) {
-        std::cerr << error.what() << '\n';
-        return 1;
-    }
-}

@@ -1,5 +1,6 @@
 #include "basin/basin_forward_solver.hpp"
 
+#include "basin/basin_binary.hpp"
 #include "basin/basin_geometry_rdp.hpp"
 #include "basin/column_epoch_grid.hpp"
 #include "basin/column_field_transfer.hpp"
@@ -10,7 +11,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <numeric>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -383,5 +387,96 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
                       observe);
         result.final_age_ma = second.age_ma;
     }
+    return result;
+}
+
+BasinForwardResult BasinForwardSolver::solve(const std::filesystem::path& output,
+                                             const BasinForwardObserver& observe) const {
+    std::filesystem::create_directories(output);
+    std::size_t snapshot_number = 0;
+    const BasinForwardResult result = solve([&](const BasinForwardSnapshot& snapshot) {
+        std::ostringstream name;
+        name << "snapshot_" << std::setw(4) << std::setfill('0') << snapshot_number++ << ".cgrid";
+        write_basin_binary(output / name.str(), snapshot);
+        if (observe)
+            observe(snapshot);
+    });
+    std::ofstream summary(output / "summary.txt");
+    summary << std::setprecision(17) << "dx=" << settings_.horizontal_step << '\n'
+            << "dz=" << settings_.vertical_step << '\n'
+            << "dt_ma=" << settings_.timestep_ma << '\n'
+            << "rdp_tol=" << settings_.rdp_tolerance << '\n'
+            << "axis_rdp_tol=";
+    if (settings_.axis_rdp_tolerance)
+        summary << *settings_.axis_rdp_tolerance;
+    else
+        summary << "none";
+    summary << '\n'
+            << "min_height=" << settings_.minimum_cell_height << '\n'
+            << "pinchout="
+            << (settings_.pinchout == BasinForwardSettings::Pinchout::exact_zero ? "zero"
+                                                                                 : "positive")
+            << '\n'
+            << "scheme=" << (settings_.scheme == MultipointFluxScheme::linear ? "linear" : "nmpfa")
+            << '\n'
+            << "linear_solver=";
+    switch (settings_.linear_solver) {
+    case LinearSolverKind::umfpack_lu:
+        summary << "umfpack";
+        break;
+    case LinearSolverKind::petsc_gmres_gamg:
+        summary << "gamg";
+        break;
+    case LinearSolverKind::petsc_gmres_boomeramg:
+        summary << "boomeramg";
+        break;
+    case LinearSolverKind::petsc_gmres_ilu:
+        summary << "gmres-ilu";
+        break;
+    case LinearSolverKind::petsc_gmres_ilu2:
+        summary << "gmres-ilu2";
+        break;
+    case LinearSolverKind::petsc_bicgstab_ilu:
+        summary << "bicgstab-ilu";
+        break;
+    case LinearSolverKind::petsc_bicgstab_ilu2:
+        summary << "bicgstab-ilu2";
+        break;
+    case LinearSolverKind::petsc_bicgstab_gamg:
+        summary << "bicgstab-gamg";
+        break;
+    case LinearSolverKind::petsc_bicgstab_boomeramg:
+        summary << "bicgstab-boomeramg";
+        break;
+    case LinearSolverKind::petsc_gmres_gamg_reuse:
+        summary << "gmres-gamg-reuse";
+        break;
+    case LinearSolverKind::petsc_gmres_boomeramg_reuse:
+        summary << "gmres-boomeramg-reuse";
+        break;
+    case LinearSolverKind::petsc_bicgstab_gamg_reuse:
+        summary << "bicgstab-gamg-reuse";
+        break;
+    case LinearSolverKind::petsc_bicgstab_boomeramg_reuse:
+        summary << "bicgstab-boomeramg-reuse";
+        break;
+    default:
+        throw std::logic_error("Unknown linear solver kind");
+    }
+    summary << '\n'
+            << "picard_rtol=" << settings_.picard_relative_tolerance << '\n'
+            << "accepted_steps=" << result.accepted_steps << '\n'
+            << "nonlinear_iterations=" << result.nonlinear_iterations << '\n'
+            << "linear_iterations=" << result.linear_iterations << '\n'
+            << "maximum_cells=" << result.maximum_cells << '\n'
+            << "maximum_cell_residual=" << result.maximum_cell_residual << '\n'
+            << "maximum_global_balance=" << result.maximum_global_balance << '\n'
+            << "maximum_internal_flux_defect=" << result.maximum_internal_flux_defect << '\n'
+            << "final_age_ma=" << result.final_age_ma << '\n';
+    if (!summary)
+        throw std::runtime_error("Failed writing basin summary");
+    summary.close();
+    if (!summary)
+        throw std::runtime_error("Failed closing basin summary");
     return result;
 }

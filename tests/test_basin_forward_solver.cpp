@@ -77,7 +77,8 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
     EXPECT_EQ(result.accepted_steps, 2);
     EXPECT_LT(result.maximum_cell_residual, 1.0e-8);
     EXPECT_LT(result.maximum_global_balance, 1.0e-8);
-    const auto repeated = solver.solve([&](const BasinForwardSnapshot& snapshot) {
+    const auto output_directory = directory / "output";
+    const auto repeated = solver.solve(output_directory, [&](const BasinForwardSnapshot& snapshot) {
         if (snapshot.kind == BasinForwardSnapshot::Kind::initial) {
             for (const double maturity : snapshot.maturity_integrals) {
                 EXPECT_DOUBLE_EQ(maturity, 0.0);
@@ -87,6 +88,10 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
     EXPECT_EQ(repeated.accepted_steps, result.accepted_steps);
     EXPECT_DOUBLE_EQ(repeated.maximum_cell_residual, result.maximum_cell_residual);
     EXPECT_DOUBLE_EQ(repeated.maximum_global_balance, result.maximum_global_balance);
+    EXPECT_TRUE(std::filesystem::is_regular_file(output_directory / "summary.txt"));
+    for (const auto* name : {"snapshot_0000.cgrid", "snapshot_0001.cgrid", "snapshot_0002.cgrid"}) {
+        EXPECT_GT(std::filesystem::file_size(output_directory / name), 40U);
+    }
     std::filesystem::remove_all(directory);
 }
 

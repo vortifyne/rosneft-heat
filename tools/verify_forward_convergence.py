@@ -77,7 +77,7 @@ def compare_fields(coarse: dict, fine: dict) -> dict[str, float]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
-                                     epilog="Additional heat_forward options follow --.")
+                                     epilog="Additional basin_forward_solver options follow --.")
     parser.add_argument("input", type=Path, help="Prepared CSV input directory")
     parser.add_argument("output", type=Path)
     parser.add_argument("--dx", type=float, default=100.0)
@@ -85,7 +85,7 @@ def main() -> None:
     parser.add_argument("--dt-ma", type=float, default=2.0)
     parser.add_argument("--levels", type=int, default=3)
     parser.add_argument("--runner", type=Path,
-                        default=Path(__file__).with_name("run_heat_forward.sh"))
+                        default=Path(__file__).with_name("run_basin_forward.sh"))
     options = sys.argv[1:]
     separator = options.index("--") if "--" in options else len(options)
     arguments = parser.parse_args(options[:separator])

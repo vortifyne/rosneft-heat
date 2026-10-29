@@ -1,6 +1,6 @@
 #pragma once
 
-#include "basin/basin_forward_solver.hpp"
+#include "basin/basin_snapshot.hpp"
 
 #include <filesystem>
 

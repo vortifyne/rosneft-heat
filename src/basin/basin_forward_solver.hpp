@@ -1,13 +1,13 @@
 #pragma once
 
 #include "basin/basin_input.hpp"
-#include "basin/nonmatching_column_grid.hpp"
+#include "basin/basin_snapshot.hpp"
 #include "discretization/multipoint_flux_types.hpp"
 #include "linear/linear_solver.hpp"
 
+#include <filesystem>
 #include <functional>
 #include <optional>
-#include <span>
 
 struct BasinForwardSettings {
     enum class Pinchout {
@@ -29,20 +29,6 @@ struct BasinForwardSettings {
     LinearSolveRequest linear{};
 };
 
-struct BasinForwardSnapshot {
-    enum class Kind {
-        initial,
-        before_event,
-        after_event
-    };
-    Kind kind = Kind::initial;
-    double age_ma = 0.0;
-    const NonmatchingColumnGrid& grid;
-    std::span<const double> temperature;
-    std::span<const double> maturity_integrals;
-    std::span<const double> reflectance_percent;
-};
-
 struct BasinForwardResult {
     int accepted_steps = 0;
     int nonlinear_iterations = 0;
@@ -61,6 +47,8 @@ public:
     BasinForwardSolver(BasinInput input, BasinForwardSettings settings = {});
 
     [[nodiscard]] BasinForwardResult solve(const BasinForwardObserver& observe = {}) const;
+    [[nodiscard]] BasinForwardResult solve(const std::filesystem::path& output_directory,
+                                           const BasinForwardObserver& observe = {}) const;
 
 private:
     BasinInput input_;

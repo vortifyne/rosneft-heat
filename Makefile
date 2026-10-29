@@ -1,48 +1,61 @@
-.PHONY: all help \
-        docker-image docker-debug docker-release docker-bench docker-test \
-        local-debug local-release local-bench local-test clean
+.DEFAULT_GOAL := help
 
-DOCKER_IMAGE = heat-env
+.PHONY: help docker-image \
+        docker-debug docker-release docker-test docker-bench \
+        local-debug local-release local-test local-bench clean clean-deps
+
+DOCKER_IMAGE ?= heat-env
+JOBS ?= 4
+MODEL ?= OFF
+BENCH_ARGS ?=
 
 DOCKER_RUN = docker run --rm \
 	--user $(shell id -u):$(shell id -g) \
-	-v $(shell pwd):$(shell pwd) \
+	-v "$(CURDIR):$(CURDIR)" \
 	-v vcpkg-cache:/var/cache/vcpkg \
-	-w $(shell pwd) \
+	-w "$(CURDIR)" \
+	-e OMP_NUM_THREADS=1 -e OPENBLAS_NUM_THREADS=1 \
+	-e MKL_NUM_THREADS=1 -e BLIS_NUM_THREADS=1 \
 	$(DOCKER_IMAGE)
 
-# Docker
+help:
+	@echo "make docker-image                     Build the Docker environment"
+	@echo "make {docker,local}-{debug,release}    Build basin_forward_solver"
+	@echo "make {docker,local}-test [MODEL=ON]    Build and run tests"
+	@echo "make {docker,local}-bench              Build and run benchmarks"
+	@echo "make clean                            Remove build outputs"
+	@echo "make clean-deps                       Remove installed dependencies"
+
+# Configure and build with one preset; tests and benchmarks have separate builds.
+define configure_build
+cmake --preset $(1) -DHEAT_BUILD_MODEL=$(MODEL) && cmake --build --preset $(1) --parallel $(JOBS) $(if $(2),--target $(2))
+endef
+
 docker-image:
 	docker build -t $(DOCKER_IMAGE) .
 
-docker-debug:
-	$(DOCKER_RUN) bash -c "cmake --preset debug -UZ_VCPKG_ROOT_DIR -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed && cmake --build --preset debug"
+docker-debug docker-release:
+	$(DOCKER_RUN) bash -c '$(call configure_build,$@)'
 
-docker-release:
-	$(DOCKER_RUN) bash -c "cmake --preset release -UZ_VCPKG_ROOT_DIR -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed && cmake --build --preset release"
-
-docker-bench: docker-release
-	$(DOCKER_RUN) ./build/release/benchmarks
+local-debug local-release:
+	$(call configure_build,$(patsubst local-%,%,$@))
 
 docker-test:
-	$(DOCKER_RUN) bash -c "ctest --test-dir build/release --output-on-failure"
-
-
-# Local (resolve problems & testing)
-local-debug:
-	cmake --preset debug -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed
-	cmake --build --preset debug
-
-local-release:
-	cmake --preset release -DVCPKG_INSTALLED_DIR=$(shell pwd)/vcpkg_installed
-	cmake --build --preset release
-
-local-bench: local-release
-	./build/release/benchmarks
+	$(DOCKER_RUN) bash -c '$(call configure_build,docker-test) && ctest --preset docker-test'
 
 local-test:
-	ctest --test-dir build/release --output-on-failure
+	$(call configure_build,test)
+	ctest --preset test
 
-# General
+docker-bench:
+	$(DOCKER_RUN) bash -c '$(call configure_build,docker-bench,benchmarks) && build/docker/bench/benchmarks $(BENCH_ARGS)'
+
+local-bench:
+	$(call configure_build,bench,benchmarks)
+	build/local/bench/benchmarks $(BENCH_ARGS)
+
 clean:
-	rm -rf build/ vcpkg_installed/ compile_commands.json
+	rm -rf build/ compile_commands.json
+
+clean-deps:
+	rm -rf vcpkg_installed/
