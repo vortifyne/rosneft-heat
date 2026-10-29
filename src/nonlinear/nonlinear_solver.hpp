@@ -12,9 +12,6 @@ struct NonlinearSolveRequest {
     double relative_tolerance;
     double absolute_tolerance;
     int max_iterations;
-    bool use_backtracking = false;
-    int max_backtracking_steps = 8;
-    double backtracking_reduction = 0.5;
 };
 
 struct SolverTimings {
