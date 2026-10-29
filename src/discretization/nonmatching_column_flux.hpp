@@ -1,7 +1,7 @@
 #pragma once
 
 #include "basin/nonmatching_column_grid.hpp"
-#include "discretization/multipoint_flux.hpp"
+#include "discretization/multipoint_flux_types.hpp"
 
 #include <functional>
 #include <span>

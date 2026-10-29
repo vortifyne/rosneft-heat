@@ -56,6 +56,9 @@ public:
 
     virtual SparseStorageOrder required_storage_order() const noexcept = 0;
 
+    // Discard cached numerical data without replacing the solver or its settings.
+    virtual void reset() noexcept {}
+
     virtual LinearSolveResult solve(const SparseMatrix& A, const Vector& b, Vector& x,
                                     const LinearSolveRequest& request) = 0;
 

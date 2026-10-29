@@ -69,9 +69,28 @@ else()
   target_compile_options(model_heat PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
-add_library(basin_column STATIC
+add_library(heat_physics STATIC
+  src/physics/easy_ro.cpp
+  src/physics/thermophysical_properties.cpp
+)
+target_include_directories(heat_physics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_library(basin_data STATIC
   src/basin/basin_input.cpp
   src/basin/basin_geometry.cpp
+)
+target_include_directories(basin_data PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(basin_data PUBLIC heat_physics)
+
+if(MSVC)
+  target_compile_options(heat_physics PRIVATE /W4 /permissive-)
+  target_compile_options(basin_data PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(heat_physics PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+  target_compile_options(basin_data PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
+add_library(basin_column STATIC
   src/basin/basin_geometry_rdp.cpp
   src/basin/column_epoch_geometry.cpp
   src/basin/column_epoch_grid.cpp
@@ -84,12 +103,10 @@ add_library(basin_column STATIC
   src/discretization/nonmatching_column_ntpfa.cpp
   src/discretization/nonmatching_column_heat_system.cpp
   src/discretization/nonmatching_column_transient_system.cpp
-  src/physics/easy_ro.cpp
-  src/physics/thermophysical_properties.cpp
 )
 
 target_include_directories(basin_column PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(basin_column PUBLIC heat_numerics)
+target_link_libraries(basin_column PUBLIC heat_numerics basin_data)
 
 if(MSVC)
   target_compile_options(basin_column PRIVATE /W4 /permissive-)

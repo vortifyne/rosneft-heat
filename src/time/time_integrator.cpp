@@ -39,6 +39,10 @@ void TimeIntegrator::set_linear_solver(LinearSolverKind kind) {
     nonlinear_solver_.set_linear_solver(kind);
 }
 
+void TimeIntegrator::reset_linear_solver() noexcept {
+    nonlinear_solver_.linear_solver().reset();
+}
+
 NonlinearSolver& TimeIntegrator::nonlinear_solver() noexcept {
     return nonlinear_solver_;
 }

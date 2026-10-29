@@ -23,6 +23,8 @@ public:
                                      bool reuse_preconditioner = false);
     ~PetscKrylovLinearSolver() override;
 
+    void reset() noexcept override;
+
     SparseStorageOrder required_storage_order() const noexcept override {
         return SparseStorageOrder::csr;
     }

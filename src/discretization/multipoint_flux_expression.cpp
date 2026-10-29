@@ -1,4 +1,4 @@
-#include "discretization/multipoint_flux.hpp"
+#include "discretization/multipoint_flux_types.hpp"
 
 double MultipointFluxExpression::value(const std::span<const double> solution) const {
     double result = constant;

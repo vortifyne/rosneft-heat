@@ -63,3 +63,27 @@ TEST(PetscKrylovLinearSolver, ReusedAmgSolvesTheCurrentMatrix) {
         }
     }
 }
+
+TEST(PetscKrylovLinearSolver, ExplicitResetRebuildsAmgForChangedCoefficients) {
+    ensure_petsc_test_session();
+    PetscKrylovLinearSolver solver(PetscKrylovMethod::gmres, PetscPreconditioner::gamg, true);
+    const auto solve_diagonal = [&solver](double first, double second) {
+        SparseMatrix matrix(2, 2, SparseStorageOrder::csr);
+        const std::vector<MatrixTriplet> entries{{0, 0, first}, {1, 1, second}};
+        matrix.set_from_triplets(entries);
+        matrix.make_compressed();
+        const Vector expected{2.0, -3.0};
+        Vector solution;
+        const auto result = solver.solve(
+            matrix, matrix * expected, solution,
+            {.relative_tolerance = 1.0e-10, .absolute_tolerance = 1.0e-12, .max_iterations = 1});
+        if (result.status == LinearSolveStatus::converged) {
+            EXPECT_LT((solution - expected).norm(), 1.0e-8);
+        }
+        return result.status;
+    };
+    ASSERT_EQ(solve_diagonal(2.0, 3.0), LinearSolveStatus::converged);
+    EXPECT_EQ(solve_diagonal(7.0, 11.0), LinearSolveStatus::max_iterations);
+    solver.reset();
+    EXPECT_EQ(solve_diagonal(7.0, 11.0), LinearSolveStatus::converged);
+}

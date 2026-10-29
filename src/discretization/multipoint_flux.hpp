@@ -1,5 +1,6 @@
 #pragma once
 
+#include "discretization/multipoint_flux_types.hpp"
 #include "mesh/point2d.hpp"
 
 #include <Eigen/Core>
@@ -10,33 +11,11 @@
 
 class Mesh2D;
 
-enum class MultipointFluxScheme {
-    linear,
-    // Diagnostic baseline retained to isolate the historical 1/2--1/2
-    // combination from conductance-weighted linear fluxes on C grids.
-    linear_equal_weight,
-    nonlinear_conservative,
-    nonlinear_dmp,
-    nonlinear_two_point,
-};
-
 struct MultipointBoundaryData {
     std::function<double(Point2D)> surface_temperature;
     std::function<double(Point2D)> basal_inward_flux;
     std::function<double(Point2D)> left_inward_flux;
     std::function<double(Point2D)> right_inward_flux;
-};
-
-struct MultipointFluxTerm {
-    std::size_t cell = 0;
-    double coefficient = 0.0;
-};
-
-struct MultipointFluxExpression {
-    std::vector<MultipointFluxTerm> terms;
-    double constant = 0.0;
-
-    [[nodiscard]] double value(std::span<const double> solution) const;
 };
 
 struct MultipointInternalFlux {

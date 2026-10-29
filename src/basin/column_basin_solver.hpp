@@ -2,7 +2,7 @@
 
 #include "basin/basin_input.hpp"
 #include "basin/nonmatching_column_grid.hpp"
-#include "discretization/multipoint_flux.hpp"
+#include "discretization/multipoint_flux_types.hpp"
 #include "linear/linear_solver.hpp"
 
 #include <functional>
@@ -10,7 +10,10 @@
 #include <span>
 
 struct ColumnBasinSettings {
-    enum class Pinchout { positive_height, exact_zero };
+    enum class Pinchout {
+        positive_height,
+        exact_zero
+    };
     double horizontal_step = 50.0;
     double vertical_step = 50.0;
     double minimum_cell_height = 1.0e-3;
@@ -27,7 +30,11 @@ struct ColumnBasinSettings {
 };
 
 struct ColumnBasinSnapshot {
-    enum class Kind { initial, before_event, after_event };
+    enum class Kind {
+        initial,
+        before_event,
+        after_event
+    };
     Kind kind = Kind::initial;
     double age_ma = 0.0;
     const NonmatchingColumnGrid& grid;

@@ -45,6 +45,7 @@ public:
     void set_initial_solution(double initial_time, const Vector& initial_solution);
     void set_timestep(double dt);
     void set_linear_solver(LinearSolverKind kind);
+    void reset_linear_solver() noexcept;
 
     NonlinearSolver& nonlinear_solver() noexcept;
     const NonlinearSolver& nonlinear_solver() const noexcept;

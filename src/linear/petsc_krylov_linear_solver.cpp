@@ -62,6 +62,10 @@ PetscKrylovLinearSolver::PetscKrylovLinearSolver(PetscKrylovMethod method,
 
 PetscKrylovLinearSolver::~PetscKrylovLinearSolver() = default;
 
+void PetscKrylovLinearSolver::reset() noexcept {
+    impl_.reset();
+}
+
 LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Vector& b, Vector& x,
                                                  const LinearSolveRequest& request) {
     PetscBool initialized = PETSC_FALSE;

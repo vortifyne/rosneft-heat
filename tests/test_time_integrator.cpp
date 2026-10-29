@@ -179,11 +179,16 @@ TEST(TimeIntegratorTest, StopsAtFirstNonlinearFailureAndKeepsAcceptedState) {
 
 TEST(TimeIntegratorTest, ReplacesInitialStateAndExposesCurrentSnapshot) {
     TimeIntegrator integrator;
+    const auto* nonlinear_solver = &integrator.nonlinear_solver();
+    const auto* linear_solver = &nonlinear_solver->linear_solver();
     integrator.set_initial_solution(0.0, Vector{1.0});
     integrator.set_initial_solution(3.0, Vector{4.0});
+    integrator.reset_linear_solver();
 
     EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 3.0);
     EXPECT_DOUBLE_EQ(integrator.current_snapshot().solution[0], 4.0);
+    EXPECT_EQ(&integrator.nonlinear_solver(), nonlinear_solver);
+    EXPECT_EQ(&integrator.nonlinear_solver().linear_solver(), linear_solver);
 }
 
 TEST(TimeIntegratorTest, RejectsInvalidConfigurationAndTimeDirection) {

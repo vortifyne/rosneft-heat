@@ -19,9 +19,8 @@
 namespace {
 
 constexpr double kSecondsPerMa = 1.0e6 * 365.25 * 24.0 * 3600.0;
-constexpr FluidThermophysicalProperties kFluid{.thermal_conductivity = 0.7,
-                                               .density = 1040.0,
-                                               .specific_heat = 4184.0};
+constexpr FluidThermophysicalProperties kFluid{
+    .thermal_conductivity = 0.7, .density = 1040.0, .specific_heat = 4184.0};
 
 std::vector<double> lithotype_breakpoints(const BasinConfiguration& first,
                                           const BasinConfiguration* second = nullptr) {
@@ -36,7 +35,8 @@ std::vector<double> lithotype_breakpoints(const BasinConfiguration& first,
         }
     };
     append(first);
-    if (second) append(*second);
+    if (second)
+        append(*second);
     std::sort(result.begin(), result.end());
     result.erase(std::unique(result.begin(), result.end()), result.end());
     return result;
@@ -81,14 +81,13 @@ struct Properties {
     }
 };
 
-Properties make_properties(const NonmatchingColumnGrid& grid,
-                           const BasinConfiguration& first,
-                           const BasinConfiguration& second,
-                           const BasinInput& input, double fraction,
-                           std::span<const double> temperature) {
+Properties make_properties(const NonmatchingColumnGrid& grid, const BasinConfiguration& first,
+                           const BasinConfiguration& second, const BasinInput& input,
+                           double fraction, std::span<const double> temperature) {
     const std::size_t count = grid.cells.size();
     Properties properties{.porosity = std::vector<double>(count),
-                          .lithotypes = std::vector<const LithotypeThermophysicalProperties*>(count),
+                          .lithotypes =
+                              std::vector<const LithotypeThermophysicalProperties*>(count),
                           .conductivity = std::vector<double>(count),
                           .capacity = std::vector<double>(count),
                           .production = std::vector<double>(count)};
@@ -105,17 +104,18 @@ Properties make_properties(const NonmatchingColumnGrid& grid,
 }
 
 NonmatchingColumnBoundaryData boundary_data(const BasinConfiguration& first,
-                                             const BasinConfiguration& second,
-                                             double fraction) {
+                                            const BasinConfiguration& second, double fraction) {
     return {
-        .surface_temperature = [&first, &second, fraction](Point2D point) {
-            return std::lerp(first.surface_temperature.at(point.x),
-                             second.surface_temperature.at(point.x), fraction);
-        },
-        .basal_inward_flux = [&first, &second, fraction](Point2D point) {
-            return std::lerp(first.basal_heat_flux.at(point.x),
-                             second.basal_heat_flux.at(point.x), fraction);
-        },
+        .surface_temperature =
+            [&first, &second, fraction](Point2D point) {
+                return std::lerp(first.surface_temperature.at(point.x),
+                                 second.surface_temperature.at(point.x), fraction);
+            },
+        .basal_inward_flux =
+            [&first, &second, fraction](Point2D point) {
+                return std::lerp(first.basal_heat_flux.at(point.x),
+                                 second.basal_heat_flux.at(point.x), fraction);
+            },
     };
 }
 
@@ -139,23 +139,27 @@ State initial_state(const ColumnEpochGrid& epoch, const BasinConfiguration& firs
     return state;
 }
 
-void observe_state(const State& state, const EasyRoModel& easy_ro,
-                   ColumnBasinSnapshot::Kind kind, double age_ma,
-                   const ColumnBasinObserver& observer) {
-    if (!observer) return;
+void observe_state(const State& state, const EasyRoModel& easy_ro, ColumnBasinSnapshot::Kind kind,
+                   double age_ma, const ColumnBasinObserver& observer) {
+    if (!observer)
+        return;
     std::vector<double> reflectance(state.grid.cells.size());
     easy_ro.reflectance(state.maturity, reflectance);
-    observer({.kind = kind, .age_ma = age_ma, .grid = state.grid,
+    observer({.kind = kind,
+              .age_ma = age_ma,
+              .grid = state.grid,
               .temperature = values(state.temperature),
               .maturity_integrals = state.maturity,
               .reflectance_percent = reflectance});
 }
 
-State transfer_state(const State& old, NonmatchingColumnGrid new_grid,
-                     const EasyRoModel& easy_ro, int born_layer_id) {
+State transfer_state(const State& old, NonmatchingColumnGrid new_grid, const EasyRoModel& easy_ro,
+                     int born_layer_id) {
     const ColumnFieldTransfer transfer = make_column_field_transfer(old.grid, new_grid);
-    const std::vector<double> temperature = transfer.interpolate_temperature(values(old.temperature));
-    State state{.grid = std::move(new_grid), .temperature = as_vector(temperature),
+    const std::vector<double> temperature =
+        transfer.interpolate_temperature(values(old.temperature));
+    State state{.grid = std::move(new_grid),
+                .temperature = as_vector(temperature),
                 .maturity = easy_ro.initial_state(temperature.size())};
     const std::size_t reactions = easy_ro.reaction_count();
     for (std::size_t reaction = 0; reaction < reactions; ++reaction) {
@@ -165,7 +169,8 @@ State transfer_state(const State& old, NonmatchingColumnGrid new_grid,
         }
         const std::vector<double> next = transfer.interpolate_same_layer(old_field);
         for (std::size_t cell = 0; cell < next.size(); ++cell) {
-            if (state.grid.cells[cell].layer_id == born_layer_id) continue;
+            if (state.grid.cells[cell].layer_id == born_layer_id)
+                continue;
             if (transfer.same_layer[cell].empty()) {
                 throw std::runtime_error("Existing layer has no maturity donor");
             }
@@ -184,31 +189,30 @@ NonlinearSolveRequest nonlinear_request(double relative_tolerance) {
 
 } // namespace
 
-ColumnBasinResult solve_column_basin(const BasinInput& input,
-                                     const ColumnBasinSettings& settings,
+ColumnBasinResult solve_column_basin(const BasinInput& input, const ColumnBasinSettings& settings,
                                      const ColumnBasinObserver& observe) {
     const auto configurations = input.configurations();
     if (configurations.size() < 2 || !(settings.horizontal_step > 0.0) ||
         !(settings.vertical_step > 0.0) || !(settings.minimum_cell_height > 0.0) ||
-        !(settings.timestep_ma > 0.0) ||
-        !(settings.picard_relative_tolerance > 0.0) ||
+        !(settings.timestep_ma > 0.0) || !(settings.picard_relative_tolerance > 0.0) ||
         !(settings.picard_relative_tolerance < 1.0)) {
         throw std::invalid_argument("Invalid C-basin configurations or settings");
     }
     const EasyRoModel easy_ro = make_easy_ro(input);
     const double minimum_height = settings.pinchout == ColumnBasinSettings::Pinchout::exact_zero
-                                      ? 0.0 : settings.minimum_cell_height;
-    const auto first_material_x = lithotype_breakpoints(configurations[0],
-                                                        &configurations[1]);
+                                      ? 0.0
+                                      : settings.minimum_cell_height;
+    const auto first_material_x = lithotype_breakpoints(configurations[0], &configurations[1]);
     const auto first_epoch = make_column_epoch_grid(
-        make_column_epoch_geometry(configurations[0], configurations[1],
-                                   settings.rdp_tolerance),
+        make_column_epoch_geometry(configurations[0], configurations[1], settings.rdp_tolerance),
         settings.horizontal_step, settings.vertical_step, minimum_height,
         settings.axis_rdp_tolerance, first_material_x);
     State state = initial_state(first_epoch, configurations[0], input, easy_ro);
     ColumnBasinResult result;
-    observe_state(state, easy_ro, ColumnBasinSnapshot::Kind::initial,
-                  configurations.front().age_ma, observe);
+    TimeIntegrator integrator;
+    integrator.set_linear_solver(settings.linear_solver);
+    observe_state(state, easy_ro, ColumnBasinSnapshot::Kind::initial, configurations.front().age_ma,
+                  observe);
 
     for (std::size_t epoch_index = 0; epoch_index + 1 < configurations.size(); ++epoch_index) {
         const auto& first = configurations[epoch_index];
@@ -217,12 +221,20 @@ ColumnBasinResult solve_column_basin(const BasinInput& input,
             throw std::invalid_argument("C-basin ages must decrease");
         }
         const auto material_x = lithotype_breakpoints(first, &second);
-        const ColumnEpochGrid epoch = epoch_index == 0 ? first_epoch : make_column_epoch_grid(
-            make_column_epoch_geometry(first, second, settings.rdp_tolerance), settings.horizontal_step,
-            settings.vertical_step, minimum_height, settings.axis_rdp_tolerance, material_x);
+        const ColumnEpochGrid epoch =
+            epoch_index == 0
+                ? first_epoch
+                : make_column_epoch_grid(
+                      make_column_epoch_geometry(first, second, settings.rdp_tolerance),
+                      settings.horizontal_step, settings.vertical_step, minimum_height,
+                      settings.axis_rdp_tolerance, material_x);
         const double duration = (first.age_ma - second.age_ma) * kSecondsPerMa;
         const double timestep = settings.timestep_ma * kSecondsPerMa;
         double elapsed = 0.0;
+        integrator.set_initial_solution(elapsed, state.temperature);
+        if (epoch_index > 0) {
+            integrator.reset_linear_solver();
+        }
         while (elapsed < duration) {
             const double target = std::min(duration, elapsed + timestep);
             const double dt = target - elapsed;
@@ -252,11 +264,11 @@ ColumnBasinResult solve_column_basin(const BasinInput& input,
                         state.maturity[previous * easy_ro.reaction_count() + reaction];
                 }
             }
-            Properties properties = make_properties(current_grid, first, second, input,
-                                                    fraction, values(old_temperature));
+            Properties properties = make_properties(current_grid, first, second, input, fraction,
+                                                    values(old_temperature));
             auto property_updater = [&properties](std::span<const double> temperature,
-                                                   std::span<double> conductivity,
-                                                   std::span<double> production) {
+                                                  std::span<double> conductivity,
+                                                  std::span<double> production) {
                 properties.evaluate(temperature);
                 std::copy(properties.conductivity.begin(), properties.conductivity.end(),
                           conductivity.begin());
@@ -269,31 +281,30 @@ ColumnBasinResult solve_column_basin(const BasinInput& input,
                 std::copy(properties.capacity.begin(), properties.capacity.end(), capacity.begin());
             };
             NonmatchingColumnTransientSystem system(
-                current_grid, properties.conductivity, properties.production,
-                properties.capacity, boundary_data(first, second, fraction),
-                property_updater, capacity_updater);
+                current_grid, properties.conductivity, properties.production, properties.capacity,
+                boundary_data(first, second, fraction), property_updater, capacity_updater);
             system.set_flux_scheme(settings.scheme);
-            TimeIntegrator integrator;
-            integrator.set_initial_solution(0.0, old_temperature);
-            integrator.set_linear_solver(settings.linear_solver);
+            if (integrator.current_snapshot().solution.size() != old_temperature.size()) {
+                integrator.set_initial_solution(elapsed, old_temperature);
+                integrator.reset_linear_solver();
+            }
             integrator.set_timestep(dt);
-            const TimeIntegrationResult step =
-                integrator.advance_to(system, dt,
-                                      nonlinear_request(settings.picard_relative_tolerance),
-                                      settings.linear);
+            const TimeIntegrationResult step = integrator.advance_to(
+                system, target, nonlinear_request(settings.picard_relative_tolerance),
+                settings.linear);
             if (!step.completed()) {
-                throw std::runtime_error("C-basin nonlinear solve failed at age " +
-                                         std::to_string(first.age_ma - fraction *
-                                                        (first.age_ma - second.age_ma)) +
-                                         ": nonlinear_status=" +
-                                         std::to_string(step.last_nonlinear_status ?
-                                             static_cast<int>(*step.last_nonlinear_status) : -1) +
-                                         " linear_status=" +
-                                         std::to_string(step.last_linear_status ?
-                                             static_cast<int>(*step.last_linear_status) : -1) +
-                                         " nonlinear_iterations=" +
-                                         std::to_string(step.nonlinear_iterations) +
-                                         " residual=" + std::to_string(step.last_residual_norm));
+                throw std::runtime_error(
+                    "C-basin nonlinear solve failed at age " +
+                    std::to_string(first.age_ma - fraction * (first.age_ma - second.age_ma)) +
+                    ": nonlinear_status=" +
+                    std::to_string(step.last_nonlinear_status
+                                       ? static_cast<int>(*step.last_nonlinear_status)
+                                       : -1) +
+                    " linear_status=" +
+                    std::to_string(
+                        step.last_linear_status ? static_cast<int>(*step.last_linear_status) : -1) +
+                    " nonlinear_iterations=" + std::to_string(step.nonlinear_iterations) +
+                    " residual=" + std::to_string(step.last_residual_norm));
             }
             const Vector new_temperature = integrator.current_snapshot().solution;
             easy_ro.advance(values(old_temperature), values(new_temperature), dt, old_maturity);
@@ -307,9 +318,9 @@ ColumnBasinResult solve_column_basin(const BasinInput& input,
                 std::max(result.maximum_cell_residual, residual.infinity_norm());
             const auto rates = system.spatial_system().energy_rates(new_temperature);
             const auto flux_diagnostics = system.spatial_system().flux_diagnostics(new_temperature);
-            result.maximum_internal_flux_defect = std::max(
-                result.maximum_internal_flux_defect,
-                flux_diagnostics.internal_conservation_defect_linf);
+            result.maximum_internal_flux_defect =
+                std::max(result.maximum_internal_flux_defect,
+                         flux_diagnostics.internal_conservation_defect_linf);
             properties.evaluate(values(new_temperature));
             double accumulation = 0.0;
             for (const auto& cell : current_grid.cells) {
@@ -319,9 +330,9 @@ ColumnBasinResult solve_column_basin(const BasinInput& input,
             const double global_residual = accumulation + rates.surface_outflow -
                                            rates.basal_inflow - rates.lateral_inflow -
                                            rates.heat_production;
-            const double scale = std::max({1.0, std::abs(rates.surface_outflow),
-                                           std::abs(rates.basal_inflow),
-                                           std::abs(rates.heat_production)});
+            const double scale =
+                std::max({1.0, std::abs(rates.surface_outflow), std::abs(rates.basal_inflow),
+                          std::abs(rates.heat_production)});
             result.maximum_global_balance =
                 std::max(result.maximum_global_balance, std::abs(global_residual) / scale);
             result.maximum_cells = std::max(result.maximum_cells, current_grid.cells.size());
@@ -333,37 +344,39 @@ ColumnBasinResult solve_column_basin(const BasinInput& input,
             state.maturity = std::move(old_maturity);
             elapsed = target;
         }
-        observe_state(state, easy_ro, ColumnBasinSnapshot::Kind::before_event,
-                      second.age_ma, observe);
+        observe_state(state, easy_ro, ColumnBasinSnapshot::Kind::before_event, second.age_ma,
+                      observe);
         const bool last = epoch_index + 2 == configurations.size();
         NonmatchingColumnGrid after_grid;
         if (last) {
-            const BasinGeometry after_geometry = simplify_basin_geometry_rdp(
-                make_basin_geometry(second), settings.rdp_tolerance);
-            const BasinGeometry axis_geometry = settings.axis_rdp_tolerance ?
-                simplify_basin_geometry_rdp(after_geometry, *settings.axis_rdp_tolerance) :
-                after_geometry;
+            const BasinGeometry after_geometry =
+                simplify_basin_geometry_rdp(make_basin_geometry(second), settings.rdp_tolerance);
+            const BasinGeometry axis_geometry =
+                settings.axis_rdp_tolerance
+                    ? simplify_basin_geometry_rdp(after_geometry, *settings.axis_rdp_tolerance)
+                    : after_geometry;
             const ColumnEpochGeometry final_axis_geometry{.start = axis_geometry,
                                                           .after_event = axis_geometry,
                                                           .born_layer_id = std::nullopt};
             const auto final_material_x = lithotype_breakpoints(second);
-            const LayeredMeshLayout layout{
-                .x = make_column_epoch_axis(final_axis_geometry, settings.horizontal_step,
-                                            final_material_x),
-                .cell_size = settings.vertical_step};
+            const LayeredMeshLayout layout{.x = make_column_epoch_axis(final_axis_geometry,
+                                                                       settings.horizontal_step,
+                                                                       final_material_x),
+                                           .cell_size = settings.vertical_step};
             after_grid = make_nonmatching_column_grid(after_geometry, layout);
         } else {
             after_grid = make_column_epoch_grid(
-                make_column_epoch_geometry(second, configurations[epoch_index + 2],
-                                           settings.rdp_tolerance),
-                settings.horizontal_step, settings.vertical_step,
-                minimum_height, settings.axis_rdp_tolerance,
-                lithotype_breakpoints(second, &configurations[epoch_index + 2])).at(0.0);
+                             make_column_epoch_geometry(second, configurations[epoch_index + 2],
+                                                        settings.rdp_tolerance),
+                             settings.horizontal_step, settings.vertical_step, minimum_height,
+                             settings.axis_rdp_tolerance,
+                             lithotype_breakpoints(second, &configurations[epoch_index + 2]))
+                             .at(0.0);
         }
         const int born = epoch.geometry.born_layer_id.value_or(-1);
         state = transfer_state(state, std::move(after_grid), easy_ro, born);
-        observe_state(state, easy_ro, ColumnBasinSnapshot::Kind::after_event,
-                      second.age_ma, observe);
+        observe_state(state, easy_ro, ColumnBasinSnapshot::Kind::after_event, second.age_ma,
+                      observe);
         result.final_age_ma = second.age_ma;
     }
     return result;
