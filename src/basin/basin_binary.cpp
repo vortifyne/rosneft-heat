@@ -1,4 +1,4 @@
-#include "basin/column_basin_binary.hpp"
+#include "basin/basin_binary.hpp"
 
 #include <bit>
 #include <cstdint>
@@ -8,36 +8,34 @@
 
 namespace {
 
-template <typename T>
-void write_value(std::ofstream& file, const T& value) {
+template <typename T> void write_value(std::ofstream& file, const T& value) {
     file.write(reinterpret_cast<const char*>(&value), sizeof(T));
 }
 
-template <typename T>
-void write_array(std::ofstream& file, const std::vector<T>& values) {
+template <typename T> void write_array(std::ofstream& file, const std::vector<T>& values) {
     file.write(reinterpret_cast<const char*>(values.data()),
                static_cast<std::streamsize>(values.size() * sizeof(T)));
 }
 
 } // namespace
 
-void write_column_basin_binary(const std::filesystem::path& path,
-                               const ColumnBasinSnapshot& snapshot) {
+void write_basin_binary(const std::filesystem::path& path, const BasinForwardSnapshot& snapshot) {
     static_assert(std::endian::native == std::endian::little);
     const std::size_t count = snapshot.grid.cells.size();
     if (snapshot.temperature.size() != count || snapshot.reflectance_percent.size() != count ||
         (count > 0 && snapshot.maturity_integrals.size() % count != 0)) {
-        throw std::invalid_argument("C-grid binary field sizes do not match");
+        throw std::invalid_argument("column-grid binary field sizes do not match");
     }
     std::ofstream file(path, std::ios::binary);
-    if (!file) throw std::runtime_error("Cannot create C-grid binary snapshot");
+    if (!file)
+        throw std::runtime_error("Cannot create column-grid binary snapshot");
     file.write("CGRID001", 8);
     write_value(file, static_cast<std::uint32_t>(snapshot.kind));
     write_value(file, snapshot.age_ma);
     write_value(file, static_cast<std::uint64_t>(snapshot.grid.x.size()));
     write_value(file, static_cast<std::uint64_t>(count));
-    write_value(file, static_cast<std::uint32_t>(count == 0 ? 0 :
-        snapshot.maturity_integrals.size() / count));
+    write_value(file, static_cast<std::uint32_t>(
+                          count == 0 ? 0 : snapshot.maturity_integrals.size() / count));
     write_array(file, snapshot.grid.x);
     std::vector<std::uint64_t> column(count);
     std::vector<std::int32_t> layer_id(count);
@@ -58,5 +56,6 @@ void write_column_basin_binary(const std::filesystem::path& path,
                static_cast<std::streamsize>(count * sizeof(double)));
     file.write(reinterpret_cast<const char*>(snapshot.maturity_integrals.data()),
                static_cast<std::streamsize>(snapshot.maturity_integrals.size() * sizeof(double)));
-    if (!file) throw std::runtime_error("Failed writing C-grid binary snapshot");
+    if (!file)
+        throw std::runtime_error("Failed writing column-grid binary snapshot");
 }

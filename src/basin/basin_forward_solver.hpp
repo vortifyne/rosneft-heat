@@ -9,7 +9,7 @@
 #include <optional>
 #include <span>
 
-struct ColumnBasinSettings {
+struct BasinForwardSettings {
     enum class Pinchout {
         positive_height,
         exact_zero
@@ -29,7 +29,7 @@ struct ColumnBasinSettings {
     LinearSolveRequest linear{};
 };
 
-struct ColumnBasinSnapshot {
+struct BasinForwardSnapshot {
     enum class Kind {
         initial,
         before_event,
@@ -43,7 +43,7 @@ struct ColumnBasinSnapshot {
     std::span<const double> reflectance_percent;
 };
 
-struct ColumnBasinResult {
+struct BasinForwardResult {
     int accepted_steps = 0;
     int nonlinear_iterations = 0;
     int linear_iterations = 0;
@@ -54,8 +54,15 @@ struct ColumnBasinResult {
     double final_age_ma = 0.0;
 };
 
-using ColumnBasinObserver = std::function<void(const ColumnBasinSnapshot&)>;
+using BasinForwardObserver = std::function<void(const BasinForwardSnapshot&)>;
 
-[[nodiscard]] ColumnBasinResult solve_column_basin(const BasinInput& input,
-                                                   const ColumnBasinSettings& settings,
-                                                   const ColumnBasinObserver& observe = {});
+class BasinForwardSolver {
+public:
+    BasinForwardSolver(BasinInput input, BasinForwardSettings settings = {});
+
+    [[nodiscard]] BasinForwardResult solve(const BasinForwardObserver& observe = {}) const;
+
+private:
+    BasinInput input_;
+    BasinForwardSettings settings_;
+};

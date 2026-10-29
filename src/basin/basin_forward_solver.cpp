@@ -1,4 +1,4 @@
-#include "basin/column_basin_solver.hpp"
+#include "basin/basin_forward_solver.hpp"
 
 #include "basin/basin_geometry_rdp.hpp"
 #include "basin/column_epoch_grid.hpp"
@@ -139,8 +139,8 @@ State initial_state(const ColumnEpochGrid& epoch, const BasinConfiguration& firs
     return state;
 }
 
-void observe_state(const State& state, const EasyRoModel& easy_ro, ColumnBasinSnapshot::Kind kind,
-                   double age_ma, const ColumnBasinObserver& observer) {
+void observe_state(const State& state, const EasyRoModel& easy_ro, BasinForwardSnapshot::Kind kind,
+                   double age_ma, const BasinForwardObserver& observer) {
     if (!observer)
         return;
     std::vector<double> reflectance(state.grid.cells.size());
@@ -189,17 +189,21 @@ NonlinearSolveRequest nonlinear_request(double relative_tolerance) {
 
 } // namespace
 
-ColumnBasinResult solve_column_basin(const BasinInput& input, const ColumnBasinSettings& settings,
-                                     const ColumnBasinObserver& observe) {
+BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings settings)
+    : input_(std::move(input)), settings_(std::move(settings)) {}
+
+BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe) const {
+    const auto& input = input_;
+    const auto& settings = settings_;
     const auto configurations = input.configurations();
     if (configurations.size() < 2 || !(settings.horizontal_step > 0.0) ||
         !(settings.vertical_step > 0.0) || !(settings.minimum_cell_height > 0.0) ||
         !(settings.timestep_ma > 0.0) || !(settings.picard_relative_tolerance > 0.0) ||
         !(settings.picard_relative_tolerance < 1.0)) {
-        throw std::invalid_argument("Invalid C-basin configurations or settings");
+        throw std::invalid_argument("Invalid basin configurations or settings");
     }
     const EasyRoModel easy_ro = make_easy_ro(input);
-    const double minimum_height = settings.pinchout == ColumnBasinSettings::Pinchout::exact_zero
+    const double minimum_height = settings.pinchout == BasinForwardSettings::Pinchout::exact_zero
                                       ? 0.0
                                       : settings.minimum_cell_height;
     const auto first_material_x = lithotype_breakpoints(configurations[0], &configurations[1]);
@@ -208,17 +212,17 @@ ColumnBasinResult solve_column_basin(const BasinInput& input, const ColumnBasinS
         settings.horizontal_step, settings.vertical_step, minimum_height,
         settings.axis_rdp_tolerance, first_material_x);
     State state = initial_state(first_epoch, configurations[0], input, easy_ro);
-    ColumnBasinResult result;
+    BasinForwardResult result;
     TimeIntegrator integrator;
     integrator.set_linear_solver(settings.linear_solver);
-    observe_state(state, easy_ro, ColumnBasinSnapshot::Kind::initial, configurations.front().age_ma,
-                  observe);
+    observe_state(state, easy_ro, BasinForwardSnapshot::Kind::initial,
+                  configurations.front().age_ma, observe);
 
     for (std::size_t epoch_index = 0; epoch_index + 1 < configurations.size(); ++epoch_index) {
         const auto& first = configurations[epoch_index];
         const auto& second = configurations[epoch_index + 1];
         if (!(first.age_ma > second.age_ma)) {
-            throw std::invalid_argument("C-basin ages must decrease");
+            throw std::invalid_argument("basin ages must decrease");
         }
         const auto material_x = lithotype_breakpoints(first, &second);
         const ColumnEpochGrid epoch =
@@ -240,7 +244,7 @@ ColumnBasinResult solve_column_basin(const BasinInput& input, const ColumnBasinS
             const double dt = target - elapsed;
             const double fraction = target / duration;
             ColumnEpochGrid::Active active;
-            if (settings.pinchout == ColumnBasinSettings::Pinchout::exact_zero) {
+            if (settings.pinchout == BasinForwardSettings::Pinchout::exact_zero) {
                 active = epoch.at_active(fraction);
             } else {
                 active.grid = epoch.at(fraction);
@@ -255,7 +259,7 @@ ColumnBasinResult solve_column_basin(const BasinInput& input, const ColumnBasinS
             for (std::size_t cell = 0; cell < current_grid.cells.size(); ++cell) {
                 const std::size_t previous = active.full_indices[cell];
                 if (previous >= static_cast<std::size_t>(state.temperature.size())) {
-                    throw std::runtime_error("C-basin persistent cell index changed within epoch");
+                    throw std::runtime_error("basin persistent cell index changed within epoch");
                 }
                 old_temperature[static_cast<Vector::Index>(cell)] =
                     state.temperature[static_cast<Vector::Index>(previous)];
@@ -294,7 +298,7 @@ ColumnBasinResult solve_column_basin(const BasinInput& input, const ColumnBasinS
                 settings.linear);
             if (!step.completed()) {
                 throw std::runtime_error(
-                    "C-basin nonlinear solve failed at age " +
+                    "basin nonlinear solve failed at age " +
                     std::to_string(first.age_ma - fraction * (first.age_ma - second.age_ma)) +
                     ": nonlinear_status=" +
                     std::to_string(step.last_nonlinear_status
@@ -344,7 +348,7 @@ ColumnBasinResult solve_column_basin(const BasinInput& input, const ColumnBasinS
             state.maturity = std::move(old_maturity);
             elapsed = target;
         }
-        observe_state(state, easy_ro, ColumnBasinSnapshot::Kind::before_event, second.age_ma,
+        observe_state(state, easy_ro, BasinForwardSnapshot::Kind::before_event, second.age_ma,
                       observe);
         const bool last = epoch_index + 2 == configurations.size();
         NonmatchingColumnGrid after_grid;
@@ -375,7 +379,7 @@ ColumnBasinResult solve_column_basin(const BasinInput& input, const ColumnBasinS
         }
         const int born = epoch.geometry.born_layer_id.value_or(-1);
         state = transfer_state(state, std::move(after_grid), easy_ro, born);
-        observe_state(state, easy_ro, ColumnBasinSnapshot::Kind::after_event, second.age_ma,
+        observe_state(state, easy_ro, BasinForwardSnapshot::Kind::after_event, second.age_ma,
                       observe);
         result.final_age_ma = second.age_ma;
     }

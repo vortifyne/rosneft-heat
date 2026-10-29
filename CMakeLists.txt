@@ -73,13 +73,13 @@ else()
   target_compile_options(basin_data PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
-add_library(basin_column STATIC
+add_library(basin_heat STATIC
   src/basin/basin_geometry_rdp.cpp
   src/basin/column_epoch_geometry.cpp
   src/basin/column_epoch_grid.cpp
   src/basin/column_field_transfer.cpp
-  src/basin/column_basin_solver.cpp
-  src/basin/column_basin_binary.cpp
+  src/basin/basin_forward_solver.cpp
+  src/basin/basin_binary.cpp
   src/basin/nonmatching_column_grid.cpp
   src/discretization/multipoint_flux_expression.cpp
   src/discretization/nonmatching_column_flux.cpp
@@ -87,13 +87,13 @@ add_library(basin_column STATIC
   src/discretization/nonmatching_column_transient_system.cpp
 )
 
-target_include_directories(basin_column PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(basin_column PUBLIC heat_numerics basin_data)
+target_include_directories(basin_heat PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(basin_heat PUBLIC heat_numerics basin_data)
 
 if(MSVC)
-  target_compile_options(basin_column PRIVATE /W4 /permissive-)
+  target_compile_options(basin_heat PRIVATE /W4 /permissive-)
 else()
-  target_compile_options(basin_column PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+  target_compile_options(basin_heat PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
 if(HEAT_BUILD_MODEL_INVERSE)
@@ -130,26 +130,26 @@ if(HEAT_BUILD_MODEL_INVERSE)
   endif()
 endif()
 
-add_executable(column_heat_forward src/basin/column_main.cpp)
-target_link_libraries(column_heat_forward PRIVATE basin_column PkgConfig::PETSc MPI::MPI_CXX)
+add_executable(heat_forward src/basin/main.cpp)
+target_link_libraries(heat_forward PRIVATE basin_heat PkgConfig::PETSc MPI::MPI_CXX)
 
 if(MSVC)
-  target_compile_options(column_heat_forward PRIVATE /W4 /permissive-)
+  target_compile_options(heat_forward PRIVATE /W4 /permissive-)
 else()
-  target_compile_options(column_heat_forward PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+  target_compile_options(heat_forward PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
 add_executable(nonmatching_discretization_verification
   tools/nonmatching_discretization_verification.cpp)
-target_link_libraries(nonmatching_discretization_verification PRIVATE basin_column)
+target_link_libraries(nonmatching_discretization_verification PRIVATE basin_heat)
 
 add_executable(nonmatching_geometry_audit tools/nonmatching_geometry_audit.cpp)
-target_link_libraries(nonmatching_geometry_audit PRIVATE basin_column)
+target_link_libraries(nonmatching_geometry_audit PRIVATE basin_heat)
 
 add_executable(nonmatching_fixed_epoch_verification
   tools/nonmatching_fixed_epoch_verification.cpp)
 target_link_libraries(nonmatching_fixed_epoch_verification
-  PRIVATE basin_column PkgConfig::PETSc MPI::MPI_CXX)
+  PRIVATE basin_heat PkgConfig::PETSc MPI::MPI_CXX)
 
 add_executable(compare_nonmatching_cell_fields
   tools/compare_nonmatching_cell_fields.cpp)
@@ -222,7 +222,7 @@ add_executable(heat_unit_tests
   tests/test_basin_geometry.cpp
   tests/test_column_epoch_geometry.cpp
   tests/test_column_field_transfer.cpp
-  tests/test_column_basin_solver.cpp
+  tests/test_basin_forward_solver.cpp
   tests/test_manufactured_heat_solution.cpp
   tests/test_nonmatching_column_grid.cpp
   tests/test_nonmatching_column_transient_system.cpp
@@ -230,7 +230,7 @@ add_executable(heat_unit_tests
 )
 
 target_link_libraries(heat_unit_tests PRIVATE
-  basin_column
+  basin_heat
   GTest::gtest_main
   PkgConfig::PETSc MPI::MPI_CXX
 )

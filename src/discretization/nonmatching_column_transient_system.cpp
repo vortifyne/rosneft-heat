@@ -8,11 +8,11 @@ namespace {
 
 void validate_capacity(std::span<const double> capacity, std::size_t cells) {
     if (capacity.size() != cells) {
-        throw std::invalid_argument("C-grid heat capacity size does not match the grid");
+        throw std::invalid_argument("column-grid heat capacity size does not match the grid");
     }
     for (double value : capacity) {
         if (!std::isfinite(value) || !(value > 0.0)) {
-            throw std::invalid_argument("C-grid volumetric heat capacity must be positive");
+            throw std::invalid_argument("column-grid volumetric heat capacity must be positive");
         }
     }
 }
@@ -37,7 +37,7 @@ void NonmatchingColumnTransientSystem::set_flux_scheme(MultipointFluxScheme sche
 
 void NonmatchingColumnTransientSystem::update_capacity(double time, const Vector& solution) const {
     if (solution.size() != static_cast<Vector::Index>(grid_->cells.size())) {
-        throw std::invalid_argument("C-grid solution size does not match the grid");
+        throw std::invalid_argument("column-grid solution size does not match the grid");
     }
     if (capacity_updater_) {
         capacity_updater_(time,
@@ -52,7 +52,7 @@ void NonmatchingColumnTransientSystem::assemble_residual(double time, const Vect
                                                          Vector& residual) const {
     update_capacity(time, solution);
     if (solution_derivative.size() != solution.size()) {
-        throw std::invalid_argument("C-grid temperature derivative size does not match");
+        throw std::invalid_argument("column-grid temperature derivative size does not match");
     }
     spatial_.assemble_residual(solution, residual);
     for (const NonmatchingColumnCell& cell : grid_->cells) {
@@ -68,11 +68,11 @@ void NonmatchingColumnTransientSystem::assemble_matrix(NonlinearMethod method, d
                                                        double derivative_shift,
                                                        SparseMatrix& matrix) const {
     if (method != NonlinearMethod::picard) {
-        throw std::invalid_argument("C-grid transient system currently supports Picard only");
+        throw std::invalid_argument("column-grid transient system currently supports Picard only");
     }
     if (solution_derivative.size() != solution.size() || !std::isfinite(derivative_shift) ||
         derivative_shift < 0.0) {
-        throw std::invalid_argument("Invalid C-grid derivative or BDF shift");
+        throw std::invalid_argument("Invalid column-grid derivative or BDF shift");
     }
     update_capacity(time, solution);
     spatial_.assemble_matrix(solution, matrix);
