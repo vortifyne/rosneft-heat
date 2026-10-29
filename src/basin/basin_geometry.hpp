@@ -37,9 +37,3 @@ struct BasinGeometry {
 
 // Preserve the source polylines and represent each shared contact once.
 [[nodiscard]] BasinGeometry make_basin_geometry(const BasinConfiguration& configuration);
-
-// Equidistribute source arc length within background intervals. Additional nodes
-// preserve material topology; external thermal boundaries keep their source
-// polylines. No approximation-error tolerance is imposed.
-[[nodiscard]] BasinGeometry make_basin_grid_geometry(const BasinConfiguration& configuration,
-                                                     double cell_size);

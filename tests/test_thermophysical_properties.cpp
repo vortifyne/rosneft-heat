@@ -1,6 +1,5 @@
-#include "discretization/heat_system.hpp"
-#include "mesh/mesh2d.hpp"
-#include "mesh_test_utils.hpp"
+#include "column_test_utils.hpp"
+#include "discretization/nonmatching_column_transient_system.hpp"
 #include "physics/thermophysical_properties.hpp"
 
 #include <algorithm>
@@ -96,10 +95,6 @@ LithotypeThermophysicalProperties lithotype_from(const ReferenceCase& reference)
     };
 }
 
-Mesh2D make_test_mesh() {
-    return make_rectangular_test_mesh(2.0, 1.0, 0.3);
-}
-
 } // namespace
 
 TEST(ThermophysicalProperties, ConvertsInputUnitsToSi) {
@@ -152,10 +147,10 @@ TEST(ThermophysicalProperties, EvaluatesPreallocatedCellFields) {
     }
 }
 
-TEST(ThermophysicalProperties, SuppliesFieldsToHeatSystem) {
-    const Mesh2D mesh = make_test_mesh();
+TEST(ThermophysicalProperties, SuppliesFieldsToColumnHeatSystem) {
+    const auto grid = make_test_column_grid(3, 2, 3.0, 2.0);
     const LithotypeThermophysicalProperties lithotype = lithotype_from(kReferenceCases[7]);
-    const std::size_t cell_count = mesh.cells().size();
+    const std::size_t cell_count = grid.cells.size();
     std::vector<double> temperatures(cell_count, 373.15);
     std::vector<double> porosities(cell_count, 0.2);
     std::vector<const LithotypeThermophysicalProperties*> lithotypes(cell_count, &lithotype);
@@ -165,20 +160,31 @@ TEST(ThermophysicalProperties, SuppliesFieldsToHeatSystem) {
     evaluate_thermophysical_property_fields(temperatures, porosities, lithotypes, kFluid,
                                             conductivities, heat_capacities, heat_productions);
 
-    const HeatSystem system(mesh, conductivities, heat_capacities, heat_productions,
-                            {.surface_temperature = [](Point2D, double) { return 300.0; },
-                             .basal_heat_flux = [](Point2D, double) { return 0.06; }});
-    Vector temperature(system.size());
+    const NonmatchingColumnTransientSystem system(
+        grid, conductivities, heat_productions, heat_capacities,
+        {.surface_temperature = [](Point2D) { return 300.0; },
+         .basal_inward_flux = [](Point2D) { return 0.06; }});
+    Vector temperature(static_cast<Vector::Index>(cell_count));
     temperature.set_constant(373.15);
-    Vector temperature_derivative(system.size());
+    Vector temperature_derivative(temperature.size());
     temperature_derivative.set_zero();
     Vector residual;
     system.assemble_residual(0.0, temperature, temperature_derivative, residual);
-    SparseMatrix matrix(system.size(), system.size(), SparseStorageOrder::csc);
+    SparseMatrix matrix(temperature.size(), temperature.size(), SparseStorageOrder::csc);
     system.assemble_matrix(NonlinearMethod::picard, 0.0, temperature, temperature_derivative, 1.0,
                            matrix);
 
     EXPECT_TRUE(residual.all_finite());
     EXPECT_TRUE(matrix.is_compressed());
-    EXPECT_GT(matrix.nonzero_count(), system.size());
+    EXPECT_GT(matrix.nonzero_count(), temperature.size());
+    const auto rates = system.spatial_system().energy_rates(temperature);
+    double expected_production = 0.0;
+    for (const auto& cell : grid.cells) {
+        expected_production += cell.area() * heat_productions[cell.index];
+    }
+    EXPECT_NEAR(rates.heat_production, expected_production, 1.0e-12);
+    EXPECT_NEAR(residual.native().sum(),
+                rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow -
+                    rates.heat_production,
+                1.0e-9);
 }

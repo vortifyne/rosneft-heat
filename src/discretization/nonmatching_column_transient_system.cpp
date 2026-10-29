@@ -23,26 +23,19 @@ NonmatchingColumnTransientSystem::NonmatchingColumnTransientSystem(
     const NonmatchingColumnGrid& grid, std::span<const double> thermal_conductivity,
     std::span<const double> heat_production, std::span<const double> volumetric_heat_capacity,
     NonmatchingColumnBoundaryData boundary_data,
-    NonmatchingColumnHeatSystem::PropertyUpdater property_updater,
-    CapacityUpdater capacity_updater)
-    : grid_(&grid),
-      spatial_(grid, thermal_conductivity, heat_production, std::move(boundary_data),
-               std::move(property_updater)),
-      volumetric_heat_capacity_(volumetric_heat_capacity.begin(),
-                                volumetric_heat_capacity.end()),
+    NonmatchingColumnHeatSystem::PropertyUpdater property_updater, CapacityUpdater capacity_updater)
+    : grid_(&grid), spatial_(grid, thermal_conductivity, heat_production, std::move(boundary_data),
+                             std::move(property_updater)),
+      volumetric_heat_capacity_(volumetric_heat_capacity.begin(), volumetric_heat_capacity.end()),
       capacity_updater_(std::move(capacity_updater)) {
     validate_capacity(volumetric_heat_capacity_, grid.cells.size());
 }
 
 void NonmatchingColumnTransientSystem::set_flux_scheme(MultipointFluxScheme scheme) {
-    if (scheme == MultipointFluxScheme::nonlinear_two_point) {
-        throw std::invalid_argument("NTPFA is currently verified only for the stationary C grid");
-    }
     spatial_.set_flux_scheme(scheme);
 }
 
-void NonmatchingColumnTransientSystem::update_capacity(double time,
-                                                       const Vector& solution) const {
+void NonmatchingColumnTransientSystem::update_capacity(double time, const Vector& solution) const {
     if (solution.size() != static_cast<Vector::Index>(grid_->cells.size())) {
         throw std::invalid_argument("C-grid solution size does not match the grid");
     }
@@ -54,9 +47,9 @@ void NonmatchingColumnTransientSystem::update_capacity(double time,
     }
 }
 
-void NonmatchingColumnTransientSystem::assemble_residual(
-    double time, const Vector& solution, const Vector& solution_derivative,
-    Vector& residual) const {
+void NonmatchingColumnTransientSystem::assemble_residual(double time, const Vector& solution,
+                                                         const Vector& solution_derivative,
+                                                         Vector& residual) const {
     update_capacity(time, solution);
     if (solution_derivative.size() != solution.size()) {
         throw std::invalid_argument("C-grid temperature derivative size does not match");
@@ -64,14 +57,16 @@ void NonmatchingColumnTransientSystem::assemble_residual(
     spatial_.assemble_residual(solution, residual);
     for (const NonmatchingColumnCell& cell : grid_->cells) {
         const auto index = static_cast<Vector::Index>(cell.index);
-        residual[index] += cell.area() * volumetric_heat_capacity_[cell.index] *
-                           solution_derivative[index];
+        residual[index] +=
+            cell.area() * volumetric_heat_capacity_[cell.index] * solution_derivative[index];
     }
 }
 
-void NonmatchingColumnTransientSystem::assemble_matrix(
-    NonlinearMethod method, double time, const Vector& solution,
-    const Vector& solution_derivative, double derivative_shift, SparseMatrix& matrix) const {
+void NonmatchingColumnTransientSystem::assemble_matrix(NonlinearMethod method, double time,
+                                                       const Vector& solution,
+                                                       const Vector& solution_derivative,
+                                                       double derivative_shift,
+                                                       SparseMatrix& matrix) const {
     if (method != NonlinearMethod::picard) {
         throw std::invalid_argument("C-grid transient system currently supports Picard only");
     }

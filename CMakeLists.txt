@@ -18,23 +18,6 @@ find_package(PkgConfig REQUIRED)
 pkg_search_module(PETSc REQUIRED IMPORTED_TARGET PETSc petsc)
 find_package(MPI REQUIRED)
 
-set(TQMesh_VERSION_MAJOR 1)
-set(TQMesh_VERSION_MINOR 4)
-set(TQMESH_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/tqmesh")
-file(MAKE_DIRECTORY "${TQMESH_GENERATED_INCLUDE_DIR}")
-configure_file(
-  thirdparty/TQMesh/auxiliary/TQMeshConfig.h.in
-  "${TQMESH_GENERATED_INCLUDE_DIR}/TQMeshConfig.h"
-)
-
-add_library(tqmesh_headers INTERFACE)
-add_library(TQMesh::TQMesh ALIAS tqmesh_headers)
-target_include_directories(tqmesh_headers SYSTEM INTERFACE
-  ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/TQMesh/src/algorithm
-  ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/TQMesh/src/utils
-  ${TQMESH_GENERATED_INCLUDE_DIR}
-)
-
 add_library(heat_numerics STATIC
   src/linear/umfpack_linear_solver.cpp
   src/linear/petsc_krylov_linear_solver.cpp
@@ -100,7 +83,6 @@ add_library(basin_column STATIC
   src/basin/nonmatching_column_grid.cpp
   src/discretization/multipoint_flux_expression.cpp
   src/discretization/nonmatching_column_flux.cpp
-  src/discretization/nonmatching_column_ntpfa.cpp
   src/discretization/nonmatching_column_heat_system.cpp
   src/discretization/nonmatching_column_transient_system.cpp
 )
@@ -112,34 +94,6 @@ if(MSVC)
   target_compile_options(basin_column PRIVATE /W4 /permissive-)
 else()
   target_compile_options(basin_column PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
-endif()
-
-add_library(basin_heat STATIC
-  src/basin/basin_forward_solver.cpp
-  src/basin/basin_state.cpp
-  src/basin/forward_output.cpp
-  src/basin/layered_mesh.cpp
-  src/basin/variable_layered_mesh.cpp
-  src/basin/layer_strip_mesh.cpp
-  src/basin/layered_mesh_coverage.cpp
-  src/basin/mesh_motion.cpp
-  src/basin/vtu_output.cpp
-  src/discretization/heat_system.cpp
-  src/discretization/least_squares_gradient.cpp
-  src/discretization/multipoint_flux.cpp
-  src/discretization/nonmatching_column_hfv_system.cpp
-  src/mesh/mesh2d.cpp
-  src/mesh/mesh_transfer.cpp
-  src/mesh/strip_mesh.cpp
-)
-
-target_include_directories(basin_heat PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(basin_heat PUBLIC basin_column TQMesh::TQMesh)
-
-if(MSVC)
-  target_compile_options(basin_heat PRIVATE /W4 /permissive-)
-else()
-  target_compile_options(basin_heat PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
 if(HEAT_BUILD_MODEL_INVERSE)
@@ -176,55 +130,36 @@ if(HEAT_BUILD_MODEL_INVERSE)
   endif()
 endif()
 
-add_executable(heat_forward src/basin/main.cpp)
 add_executable(column_heat_forward src/basin/column_main.cpp)
 target_link_libraries(column_heat_forward PRIVATE basin_column PkgConfig::PETSc MPI::MPI_CXX)
-target_link_libraries(heat_forward PRIVATE basin_heat PkgConfig::PETSc MPI::MPI_CXX)
 
 if(MSVC)
-  target_compile_options(heat_forward PRIVATE /W4 /permissive-)
   target_compile_options(column_heat_forward PRIVATE /W4 /permissive-)
 else()
-  target_compile_options(heat_forward PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   target_compile_options(column_heat_forward PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
 endif()
 
-add_executable(discretization_verification tools/discretization_verification.cpp)
-target_link_libraries(discretization_verification PRIVATE basin_heat)
-
-add_executable(fixed_epoch_verification tools/fixed_epoch_verification.cpp)
-target_link_libraries(fixed_epoch_verification PRIVATE basin_heat)
-
-add_executable(multipoint_stencil_audit tools/multipoint_stencil_audit.cpp)
-target_link_libraries(multipoint_stencil_audit PRIVATE basin_heat)
-
 add_executable(nonmatching_discretization_verification
   tools/nonmatching_discretization_verification.cpp)
-target_link_libraries(nonmatching_discretization_verification PRIVATE basin_heat)
+target_link_libraries(nonmatching_discretization_verification PRIVATE basin_column)
 
 add_executable(nonmatching_geometry_audit tools/nonmatching_geometry_audit.cpp)
-target_link_libraries(nonmatching_geometry_audit PRIVATE basin_heat)
+target_link_libraries(nonmatching_geometry_audit PRIVATE basin_column)
 
 add_executable(nonmatching_fixed_epoch_verification
   tools/nonmatching_fixed_epoch_verification.cpp)
 target_link_libraries(nonmatching_fixed_epoch_verification
-  PRIVATE basin_heat PkgConfig::PETSc MPI::MPI_CXX)
+  PRIVATE basin_column PkgConfig::PETSc MPI::MPI_CXX)
 
 add_executable(compare_nonmatching_cell_fields
   tools/compare_nonmatching_cell_fields.cpp)
 
 if(MSVC)
-  target_compile_options(discretization_verification PRIVATE /W4 /permissive-)
-  target_compile_options(fixed_epoch_verification PRIVATE /W4 /permissive-)
-  target_compile_options(multipoint_stencil_audit PRIVATE /W4 /permissive-)
   target_compile_options(nonmatching_discretization_verification PRIVATE /W4 /permissive-)
   target_compile_options(nonmatching_geometry_audit PRIVATE /W4 /permissive-)
   target_compile_options(nonmatching_fixed_epoch_verification PRIVATE /W4 /permissive-)
   target_compile_options(compare_nonmatching_cell_fields PRIVATE /W4 /permissive-)
 else()
-  target_compile_options(discretization_verification PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
-  target_compile_options(fixed_epoch_verification PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
-  target_compile_options(multipoint_stencil_audit PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   target_compile_options(nonmatching_discretization_verification
     PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   target_compile_options(nonmatching_geometry_audit PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
@@ -283,26 +218,19 @@ endif()
 gtest_discover_tests(model_unit_tests)
 
 add_executable(heat_unit_tests
-  tests/test_basin_forward_solver.cpp
   tests/test_easy_ro.cpp
-  tests/test_heat_system.cpp
-  tests/test_layered_mesh.cpp
   tests/test_basin_geometry.cpp
   tests/test_column_epoch_geometry.cpp
   tests/test_column_field_transfer.cpp
   tests/test_column_basin_solver.cpp
-  tests/test_least_squares_gradient.cpp
   tests/test_manufactured_heat_solution.cpp
-  tests/test_mesh2d.cpp
-  tests/test_mesh_transfer.cpp
   tests/test_nonmatching_column_grid.cpp
   tests/test_nonmatching_column_transient_system.cpp
-  tests/test_strip_mesh.cpp
   tests/test_thermophysical_properties.cpp
 )
 
 target_link_libraries(heat_unit_tests PRIVATE
-  basin_heat
+  basin_column
   GTest::gtest_main
   PkgConfig::PETSc MPI::MPI_CXX
 )
