@@ -39,12 +39,6 @@ MultipointFluxExpression difference(const std::size_t cell,
     return result;
 }
 
-std::size_t stencil_size(const MultipointFluxExpression& expression) {
-    return static_cast<std::size_t>(
-        std::count_if(expression.terms.begin(), expression.terms.end(),
-                      [](const auto& term) { return std::abs(term.coefficient) > 1.0e-14; }));
-}
-
 } // namespace
 
 struct NonmatchingColumnFlux::Sample {
@@ -268,8 +262,6 @@ NonmatchingColumnFlux::compute(const MultipointFluxScheme scheme,
             left_flux = conservative;
             right_flux = std::move(conservative);
         }
-        result.maximum_stencil_size = std::max(
-            {result.maximum_stencil_size, stencil_size(left_flux), stencil_size(right_flux)});
         result.vertical.push_back(
             {face.left_cell, face.right_cell, std::move(left_flux), std::move(right_flux)});
     }
@@ -277,8 +269,6 @@ NonmatchingColumnFlux::compute(const MultipointFluxScheme scheme,
     for (const NonmatchingVerticalBoundaryFace& face : grid_->surface_vertical_faces) {
         MultipointFluxExpression expression =
             surface_boundary_flux(face, conductivity, boundary_data);
-        result.maximum_stencil_size =
-            std::max(result.maximum_stencil_size, stencil_size(expression));
         result.surface.push_back({face.cell, std::move(expression)});
     }
     return result;

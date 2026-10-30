@@ -62,7 +62,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
     }
 
     int linear_iterations = 0;
-    double last_step_norm = 0.0;
     std::optional<LinearSolveStatus> last_linear_status;
     for (int iteration = 0; iteration < nonlinear_request.max_iterations; ++iteration) {
         SparseMatrix matrix(x.size(), x.size(), linear_solver_->required_storage_order());
@@ -108,9 +107,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
         }
 
         const double residual_norm = candidate_residual.norm();
-        const double step_norm = delta_x.norm();
         const int completed_iterations = iteration + 1;
-        last_step_norm = step_norm;
 
         x = std::move(x_candidate);
         residual = std::move(candidate_residual);
@@ -120,7 +117,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .status = NonlinearSolveStatus::converged_residual_absolute,
                 .iterations = completed_iterations,
                 .final_residual_norm = residual_norm,
-                .final_step_norm = last_step_norm,
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
                 .timings = timings,
@@ -132,7 +128,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
                 .status = NonlinearSolveStatus::converged_residual_relative,
                 .iterations = completed_iterations,
                 .final_residual_norm = residual_norm,
-                .final_step_norm = last_step_norm,
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
                 .timings = timings,
@@ -144,7 +139,6 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
         .status = NonlinearSolveStatus::max_iterations,
         .iterations = nonlinear_request.max_iterations,
         .final_residual_norm = residual.norm(),
-        .final_step_norm = last_step_norm,
         .linear_iterations = linear_iterations,
         .last_linear_status = last_linear_status,
         .timings = timings,

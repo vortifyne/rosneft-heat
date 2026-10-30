@@ -8,18 +8,6 @@
 #include <span>
 #include <vector>
 
-struct NonmatchingColumnEnergyRates {
-    double surface_outflow = 0.0;
-    double basal_inflow = 0.0;
-    double lateral_inflow = 0.0;
-    double heat_production = 0.0;
-};
-
-struct NonmatchingColumnFluxDiagnostics {
-    std::size_t maximum_stencil_size = 0;
-    double internal_conservation_defect_linf = 0.0;
-};
-
 class NonmatchingColumnHeatSystem {
 public:
     using PropertyUpdater =
@@ -38,9 +26,6 @@ public:
 
     void assemble_residual(const Vector& solution, Vector& residual) const;
     void assemble_matrix(const Vector& solution, SparseMatrix& matrix) const;
-
-    [[nodiscard]] NonmatchingColumnEnergyRates energy_rates(const Vector& solution) const;
-    [[nodiscard]] NonmatchingColumnFluxDiagnostics flux_diagnostics(const Vector& solution) const;
 
 private:
     void update_properties(const Vector& solution) const;

@@ -37,7 +37,6 @@ struct [[nodiscard]] NonlinearSolveResult {
     NonlinearSolveStatus status;
     int iterations;
     double final_residual_norm;
-    double final_step_norm = 0.0;
     int linear_iterations = 0;
     std::optional<LinearSolveStatus> last_linear_status;
     SolverTimings timings;

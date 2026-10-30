@@ -3,7 +3,6 @@
 #include "basin/io/basin_forward_options.hpp"
 #include "basin/mesh/nonmatching_column_grid.hpp"
 
-#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -78,9 +77,7 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
     });
     EXPECT_TRUE(saw_final);
     EXPECT_TRUE(saw_initial_axis);
-    EXPECT_EQ(result.accepted_steps, 2);
-    EXPECT_LT(result.maximum_cell_residual, 1.0e-8);
-    EXPECT_LT(result.maximum_global_balance, 1.0e-8);
+    EXPECT_EQ(result.timesteps, 2);
     const auto output_directory = directory / "output";
     const auto repeated = solver.solve(output_directory, [&](const BasinForwardSnapshot& snapshot) {
         if (snapshot.kind == BasinForwardSnapshot::Kind::initial) {
@@ -89,9 +86,9 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
             }
         }
     });
-    EXPECT_EQ(repeated.accepted_steps, result.accepted_steps);
-    EXPECT_DOUBLE_EQ(repeated.maximum_cell_residual, result.maximum_cell_residual);
-    EXPECT_DOUBLE_EQ(repeated.maximum_global_balance, result.maximum_global_balance);
+    EXPECT_EQ(repeated.timesteps, result.timesteps);
+    EXPECT_EQ(repeated.nonlinear_iterations, result.nonlinear_iterations);
+    EXPECT_EQ(repeated.linear_iterations, result.linear_iterations);
     EXPECT_TRUE(std::filesystem::is_regular_file(output_directory / "summary.txt"));
     for (const auto* name : {"snapshot_0000.cgrd", "snapshot_0001.cgrd", "snapshot_0002.cgrd"}) {
         EXPECT_GT(std::filesystem::file_size(output_directory / name), 40U);

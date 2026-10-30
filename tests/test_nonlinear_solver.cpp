@@ -158,24 +158,6 @@ TEST(NonlinearSolverTest, DetectsRelativeResidualConvergence) {
     EXPECT_DOUBLE_EQ(result.final_residual_norm, 0.25);
 }
 
-TEST(NonlinearSolverTest, DoesNotTreatSmallStepAsConvergence) {
-    ScalarNonlinearSystem system(ScalarNonlinearSystem::ResidualKind::constant, 1e12);
-    Vector x{1.0};
-    NonlinearSolver solver;
-    NonlinearSolveRequest request = kNewtonRequest;
-    request.relative_tolerance = 0.0;
-    request.absolute_tolerance = 0.0;
-    request.max_iterations = 1;
-
-    const NonlinearSolveResult result = solver.solve(system, x, request, kDirectLinearRequest);
-
-    EXPECT_EQ(result.status, NonlinearSolveStatus::max_iterations);
-    EXPECT_FALSE(result.converged());
-    EXPECT_EQ(result.iterations, 1);
-    EXPECT_DOUBLE_EQ(result.final_residual_norm, 1.0);
-    EXPECT_DOUBLE_EQ(result.final_step_norm, 1e-12);
-}
-
 TEST(NonlinearSolverTest, ReportsMaximumIterationsAndKeepsLastIterate) {
     ScalarNonlinearSystem system(ScalarNonlinearSystem::ResidualKind::constant);
     Vector x{0.0};

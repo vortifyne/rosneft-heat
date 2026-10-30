@@ -114,11 +114,9 @@ int main(int argc, char** argv) {
                             break;
                         }
                     }
-                    state.counters["cells_max"] = static_cast<double>(result.maximum_cells);
-                    state.counters["steps"] = result.accepted_steps;
+                    state.counters["timesteps"] = result.timesteps;
                     state.counters["nonlinear_iterations"] = result.nonlinear_iterations;
                     state.counters["linear_iterations"] = result.linear_iterations;
-                    state.counters["global_balance"] = result.maximum_global_balance;
                 })
                 ->UseRealTime();
         }

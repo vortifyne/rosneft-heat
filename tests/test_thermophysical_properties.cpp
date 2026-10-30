@@ -1,5 +1,6 @@
 #include "basin/discretization/nonmatching_column_transient_system.hpp"
 #include "basin/physics/thermophysical_properties.hpp"
+#include "basin/postprocessing/energy_rates.hpp"
 #include "column_test_utils.hpp"
 
 #include <algorithm>
@@ -160,10 +161,11 @@ TEST(ThermophysicalProperties, SuppliesFieldsToColumnHeatSystem) {
     evaluate_thermophysical_property_fields(temperatures, porosities, lithotypes, kFluid,
                                             conductivities, heat_capacities, heat_productions);
 
-    const NonmatchingColumnTransientSystem system(
-        grid, conductivities, heat_productions, heat_capacities,
-        {.surface_temperature = [](Point2D) { return 300.0; },
-         .basal_inward_flux = [](Point2D) { return 0.06; }});
+    const NonmatchingColumnBoundaryData boundary_data{
+        .surface_temperature = [](Point2D) { return 300.0; },
+        .basal_inward_flux = [](Point2D) { return 0.06; }};
+    const NonmatchingColumnTransientSystem system(grid, conductivities, heat_productions,
+                                                  heat_capacities, boundary_data);
     Vector temperature(static_cast<Vector::Index>(cell_count));
     temperature.set_constant(373.15);
     Vector temperature_derivative(temperature.size());
@@ -177,7 +179,9 @@ TEST(ThermophysicalProperties, SuppliesFieldsToColumnHeatSystem) {
     EXPECT_TRUE(residual.all_finite());
     EXPECT_TRUE(matrix.is_compressed());
     EXPECT_GT(matrix.nonzero_count(), temperature.size());
-    const auto rates = system.spatial_system().energy_rates(temperature);
+    const auto rates =
+        nonmatching_column_energy_rates(grid, {temperature.native().data(), cell_count},
+                                        conductivities, heat_productions, boundary_data);
     double expected_production = 0.0;
     for (const auto& cell : grid.cells) {
         expected_production += cell.area() * heat_productions[cell.index];

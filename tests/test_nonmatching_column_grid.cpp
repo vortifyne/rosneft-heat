@@ -2,6 +2,7 @@
 #include "basin/discretization/nonmatching_column_heat_system.hpp"
 #include "basin/geometry/basin_geometry.hpp"
 #include "basin/mesh/nonmatching_column_grid.hpp"
+#include "basin/postprocessing/energy_rates.hpp"
 
 #include <gtest/gtest.h>
 #include <map>
@@ -145,12 +146,12 @@ TEST(NonmatchingColumnHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
     for (const NonmatchingColumnCell& cell : grid.cells) {
         temperature[static_cast<Vector::Index>(cell.index)] = exact(cell.center());
     }
-    NonmatchingColumnHeatSystem system(
-        grid, conductivity, production,
-        {.surface_temperature = exact,
-         .basal_inward_flux = [](Point2D) { return conductivity_value * z_gradient; },
-         .left_inward_flux = [](Point2D) { return -conductivity_value * x_gradient; },
-         .right_inward_flux = [](Point2D) { return conductivity_value * x_gradient; }});
+    const NonmatchingColumnBoundaryData boundary_data{
+        .surface_temperature = exact,
+        .basal_inward_flux = [](Point2D) { return conductivity_value * z_gradient; },
+        .left_inward_flux = [](Point2D) { return -conductivity_value * x_gradient; },
+        .right_inward_flux = [](Point2D) { return conductivity_value * x_gradient; }};
+    NonmatchingColumnHeatSystem system(grid, conductivity, production, boundary_data);
 
     for (const MultipointFluxScheme scheme :
          {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
@@ -158,7 +159,9 @@ TEST(NonmatchingColumnHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
         Vector residual;
         system.assemble_residual(temperature, residual);
         EXPECT_LT(residual.infinity_norm(), 2.0e-11);
-        const NonmatchingColumnEnergyRates rates = system.energy_rates(temperature);
+        const auto rates =
+            nonmatching_column_energy_rates(grid, {temperature.native().data(), grid.cells.size()},
+                                            conductivity, production, boundary_data, scheme);
         EXPECT_NEAR(rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow, 0.0,
                     2.0e-11);
     }

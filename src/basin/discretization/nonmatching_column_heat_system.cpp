@@ -1,6 +1,5 @@
 #include "basin/discretization/nonmatching_column_heat_system.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
@@ -180,62 +179,4 @@ void NonmatchingColumnHeatSystem::assemble_matrix(const Vector& solution,
     }
     matrix.resize(size(), size());
     matrix.set_from_triplets(triplets);
-}
-
-NonmatchingColumnEnergyRates
-NonmatchingColumnHeatSystem::energy_rates(const Vector& solution) const {
-    update_properties(solution);
-    NonmatchingColumnEnergyRates result;
-    const auto values = std::span<const double>(solution.native().data(),
-                                                static_cast<std::size_t>(solution.size()));
-    const NonmatchingColumnFluxes vertical =
-        vertical_flux_.compute(flux_scheme_, thermal_conductivity_, values, boundary_data_);
-    for (const NonmatchingColumnBoundaryFlux& flux : vertical.surface) {
-        result.surface_outflow += flux.expression.value(values);
-    }
-    for (const std::size_t cell_index : grid_->top_cells) {
-        const NonmatchingColumnCell& cell = grid_->cells[cell_index];
-        const double transmissibility =
-            thermal_conductivity_[cell_index] * cell.width() / (0.5 * cell.height());
-        result.surface_outflow +=
-            transmissibility * (solution[static_cast<Vector::Index>(cell_index)] -
-                                boundary_data_.surface_temperature({cell.center().x, cell.z_top}));
-    }
-    for (const std::size_t cell_index : grid_->bottom_cells) {
-        const NonmatchingColumnCell& cell = grid_->cells[cell_index];
-        result.basal_inflow +=
-            boundary_data_.basal_inward_flux({cell.center().x, cell.z_bottom}) * cell.width();
-    }
-    const auto add_lateral = [&result](const auto& flux_function, const auto& column,
-                                       const auto& cells) {
-        if (!flux_function) {
-            return;
-        }
-        for (const std::size_t cell_index : column) {
-            const NonmatchingColumnCell& cell = cells[cell_index];
-            result.lateral_inflow += flux_function(cell.center()) * cell.height();
-        }
-    };
-    add_lateral(boundary_data_.left_inward_flux, grid_->columns.front(), grid_->cells);
-    add_lateral(boundary_data_.right_inward_flux, grid_->columns.back(), grid_->cells);
-    for (const NonmatchingColumnCell& cell : grid_->cells) {
-        result.heat_production += heat_production_[cell.index] * cell.area();
-    }
-    return result;
-}
-
-NonmatchingColumnFluxDiagnostics
-NonmatchingColumnHeatSystem::flux_diagnostics(const Vector& solution) const {
-    update_properties(solution);
-    const auto values = std::span<const double>(solution.native().data(),
-                                                static_cast<std::size_t>(solution.size()));
-    const NonmatchingColumnFluxes fluxes =
-        vertical_flux_.compute(flux_scheme_, thermal_conductivity_, values, boundary_data_);
-    NonmatchingColumnFluxDiagnostics result{.maximum_stencil_size = fluxes.maximum_stencil_size};
-    for (const NonmatchingColumnInternalFlux& flux : fluxes.vertical) {
-        result.internal_conservation_defect_linf = std::max(
-            result.internal_conservation_defect_linf,
-            std::abs(flux.left_expression.value(values) - flux.right_expression.value(values)));
-    }
-    return result;
 }

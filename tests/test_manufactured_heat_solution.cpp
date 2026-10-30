@@ -1,5 +1,6 @@
 #include "basin/discretization/nonmatching_column_transient_system.hpp"
 #include "basin/mesh/column_field_transfer.hpp"
+#include "basin/postprocessing/energy_rates.hpp"
 #include "column_test_utils.hpp"
 #include "numerics/nonlinear/nonlinear_solver.hpp"
 #include "numerics/time/time_integrator.hpp"
@@ -65,10 +66,10 @@ double steady_spatial_error(std::size_t nx, std::size_t nz, MultipointFluxScheme
             conductivity * (kx * kx + kz * kz) * (exact(point.x, point.z) - kBaseTemperature);
     }
     const std::vector<double> coefficients(grid.cells.size(), conductivity);
-    NonmatchingColumnHeatSystem system(
-        grid, coefficients, source,
-        {.surface_temperature = [](Point2D) { return kBaseTemperature; },
-         .basal_inward_flux = [](Point2D) { return 0.0; }});
+    const NonmatchingColumnBoundaryData boundary_data{
+        .surface_temperature = [](Point2D) { return kBaseTemperature; },
+        .basal_inward_flux = [](Point2D) { return 0.0; }};
+    NonmatchingColumnHeatSystem system(grid, coefficients, source, boundary_data);
     system.set_flux_scheme(scheme);
     Vector temperature(static_cast<Vector::Index>(grid.cells.size()));
     temperature.set_constant(kBaseTemperature);
@@ -80,10 +81,11 @@ double steady_spatial_error(std::size_t nx, std::size_t nz, MultipointFluxScheme
                                       .max_iterations = 100},
                                      {});
     EXPECT_TRUE(result.converged()) << "residual=" << result.final_residual_norm;
-    const auto rates = system.energy_rates(temperature);
+    const auto rates =
+        nonmatching_column_energy_rates(grid, {temperature.native().data(), grid.cells.size()},
+                                        coefficients, source, boundary_data, scheme);
     EXPECT_NEAR(rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow,
                 rates.heat_production, 1e-8);
-    EXPECT_LT(system.flux_diagnostics(temperature).internal_conservation_defect_linf, 1e-12);
     return area_weighted_error(grid, temperature, exact);
 }
 

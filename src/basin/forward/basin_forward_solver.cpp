@@ -3,8 +3,6 @@
 #include "basin/basin_snapshot.hpp"
 #include "basin/discretization/nonmatching_column_transient_system.hpp"
 #include "basin/geometry/basin_geometry_rdp.hpp"
-#include "basin/io/basin_binary.hpp"
-#include "basin/io/basin_forward_options.hpp"
 #include "basin/mesh/column_epoch_grid.hpp"
 #include "basin/mesh/column_field_transfer.hpp"
 #include "basin/physics/easy_ro.hpp"
@@ -13,10 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
-#include <iomanip>
 #include <numeric>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -281,35 +276,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
             }
             const Vector new_temperature = integrator.current_snapshot().solution;
             easy_ro.advance(values(old_temperature), values(new_temperature), dt, state.maturity);
-            Vector derivative(new_temperature.size());
-            for (Vector::Index cell = 0; cell < derivative.size(); ++cell) {
-                derivative[cell] = (new_temperature[cell] - old_temperature[cell]) / dt;
-            }
-            Vector residual;
-            system.assemble_residual(dt, new_temperature, derivative, residual);
-            result.maximum_cell_residual =
-                std::max(result.maximum_cell_residual, residual.infinity_norm());
-            const auto rates = system.spatial_system().energy_rates(new_temperature);
-            const auto flux_diagnostics = system.spatial_system().flux_diagnostics(new_temperature);
-            result.maximum_internal_flux_defect =
-                std::max(result.maximum_internal_flux_defect,
-                         flux_diagnostics.internal_conservation_defect_linf);
-            properties.evaluate(values(new_temperature));
-            double accumulation = 0.0;
-            for (const auto& cell : current_grid.cells) {
-                accumulation += cell.area() * properties.capacity[cell.index] *
-                                derivative[static_cast<Vector::Index>(cell.index)];
-            }
-            const double global_residual = accumulation + rates.surface_outflow -
-                                           rates.basal_inflow - rates.lateral_inflow -
-                                           rates.heat_production;
-            const double scale =
-                std::max({1.0, std::abs(rates.surface_outflow), std::abs(rates.basal_inflow),
-                          std::abs(rates.heat_production)});
-            result.maximum_global_balance =
-                std::max(result.maximum_global_balance, std::abs(global_residual) / scale);
-            result.maximum_cells = std::max(result.maximum_cells, current_grid.cells.size());
-            result.accepted_steps += step.accepted_steps;
+            result.timesteps += step.accepted_steps;
             result.nonlinear_iterations += step.nonlinear_iterations;
             result.linear_iterations += step.linear_iterations;
             state.grid = std::move(current_grid);
@@ -338,36 +305,6 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
         state = transfer_state(state, std::move(after_grid), easy_ro, born);
         observe_state(state, easy_ro, BasinForwardSnapshot::Kind::after_event, second.age_ma,
                       observe);
-        result.final_age_ma = second.age_ma;
     }
-    return result;
-}
-
-BasinForwardResult BasinForwardSolver::solve(const std::filesystem::path& output,
-                                             const BasinForwardObserver& observe) const {
-    std::filesystem::create_directories(output);
-    std::size_t snapshot_number = 0;
-    const BasinForwardResult result = solve([&](const BasinForwardSnapshot& snapshot) {
-        std::ostringstream name;
-        name << "snapshot_" << std::setw(4) << std::setfill('0') << snapshot_number++ << ".cgrd";
-        write_basin_binary(output / name.str(), snapshot);
-        if (observe)
-            observe(snapshot);
-    });
-    std::ofstream summary(output / "summary.txt");
-    write_basin_forward_settings(summary, settings_);
-    summary << "accepted_steps=" << result.accepted_steps << '\n'
-            << "nonlinear_iterations=" << result.nonlinear_iterations << '\n'
-            << "linear_iterations=" << result.linear_iterations << '\n'
-            << "maximum_cells=" << result.maximum_cells << '\n'
-            << "maximum_cell_residual=" << result.maximum_cell_residual << '\n'
-            << "maximum_global_balance=" << result.maximum_global_balance << '\n'
-            << "maximum_internal_flux_defect=" << result.maximum_internal_flux_defect << '\n'
-            << "final_age_ma=" << result.final_age_ma << '\n';
-    if (!summary)
-        throw std::runtime_error("Failed writing basin summary");
-    summary.close();
-    if (!summary)
-        throw std::runtime_error("Failed closing basin summary");
     return result;
 }

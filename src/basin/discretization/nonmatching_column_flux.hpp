@@ -29,7 +29,6 @@ struct NonmatchingColumnBoundaryFlux {
 struct NonmatchingColumnFluxes {
     std::vector<NonmatchingColumnInternalFlux> vertical;
     std::vector<NonmatchingColumnBoundaryFlux> surface;
-    std::size_t maximum_stencil_size = 0;
 };
 
 class NonmatchingColumnFlux {

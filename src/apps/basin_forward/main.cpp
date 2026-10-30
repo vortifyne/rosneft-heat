@@ -53,10 +53,9 @@ int main(int argc, const char* const argv[]) {
         }
         BasinForwardSolver solver(BasinInput::read(argv[1]), settings);
         const BasinForwardResult result = solver.solve(std::filesystem::path(argv[2]));
-        std::cout << "accepted_steps=" << result.accepted_steps
-                  << " maximum_cells=" << result.maximum_cells
-                  << " maximum_global_balance=" << result.maximum_global_balance
-                  << " final_age_ma=" << result.final_age_ma << '\n';
+        std::cout << "timesteps=" << result.timesteps
+                  << " nonlinear_iterations=" << result.nonlinear_iterations
+                  << " linear_iterations=" << result.linear_iterations << '\n';
     } catch (const std::exception& error) {
         std::cerr << "basin_forward_solver: " << error.what() << '\n';
         return EXIT_FAILURE;

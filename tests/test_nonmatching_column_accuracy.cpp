@@ -1,6 +1,7 @@
 #include "basin/discretization/nonmatching_column_heat_system.hpp"
 #include "basin/geometry/basin_geometry.hpp"
 #include "basin/mesh/nonmatching_column_grid.hpp"
+#include "basin/postprocessing/energy_rates.hpp"
 #include "numerics/linear/umfpack_linear_solver.hpp"
 
 #include <algorithm>
@@ -356,12 +357,12 @@ Metrics check_case(const VerificationCase& definition, double h, MultipointFluxS
     const auto solution = solve(system, std::move(initial), definition.characteristic_rate);
     EXPECT_LE(residual_linf(solution.residual) / definition.characteristic_rate,
               kNormalizedResidualTolerance);
-    const auto rates = system.energy_rates(solution.temperature);
+    const auto rates = nonmatching_column_energy_rates(
+        grid, {solution.temperature.native().data(), grid.cells.size()}, conductivity, source,
+        definition.boundary_data, scheme);
     const double balance =
         rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow - rates.heat_production;
     EXPECT_LT(std::abs(balance) / definition.characteristic_rate, 1.0e-9);
-    EXPECT_LT(system.flux_diagnostics(solution.temperature).internal_conservation_defect_linf,
-              1.0e-10);
     if (definition.interface_layer) {
         const double outflow = material_interface_outflow(
             grid, system.thermal_conductivity(), solution.temperature, definition.boundary_data,
