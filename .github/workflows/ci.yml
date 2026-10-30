@@ -17,5 +17,8 @@ jobs:
       - name: Build Docker environment
         run: docker build -t heat-env .
 
+      - name: Build release application inside Docker
+        run: make docker-release
+
       - name: Build and test inside Docker
         run: make docker-test MODEL=ON
