@@ -1,24 +1,7 @@
 #include "basin/discretization/nonmatching_column_heat_system.hpp"
 
-#include <cmath>
 #include <stdexcept>
 #include <utility>
-
-namespace {
-
-void check_field(const std::span<const double> field, const std::size_t size, const bool positive,
-                 const char* message) {
-    if (field.size() != size) {
-        throw std::invalid_argument("Nonmatching-column field size does not match the grid");
-    }
-    for (const double value : field) {
-        if (!std::isfinite(value) || (positive && !(value > 0.0))) {
-            throw std::invalid_argument(message);
-        }
-    }
-}
-
-} // namespace
 
 NonmatchingColumnHeatSystem::NonmatchingColumnHeatSystem(
     const NonmatchingColumnGrid& grid, const std::span<const double> thermal_conductivity,
@@ -28,10 +11,10 @@ NonmatchingColumnHeatSystem::NonmatchingColumnHeatSystem(
       heat_production_(heat_production.begin(), heat_production.end()),
       boundary_data_(std::move(boundary_data)), property_updater_(std::move(property_updater)),
       vertical_flux_(grid) {
-    check_field(thermal_conductivity, grid.cells.size(), true,
-                "Nonmatching-column conductivity must be finite and positive");
-    check_field(heat_production, grid.cells.size(), false,
-                "Nonmatching-column heat production must be finite");
+    if (thermal_conductivity.size() != grid.cells.size() ||
+        heat_production.size() != grid.cells.size()) {
+        throw std::invalid_argument("Nonmatching-column field sizes do not match the grid");
+    }
     if (!boundary_data_.surface_temperature || !boundary_data_.basal_inward_flux) {
         throw std::invalid_argument("Nonmatching-column boundary functions must be set");
     }
@@ -45,14 +28,6 @@ Vector::Index NonmatchingColumnHeatSystem::size() const noexcept {
     return static_cast<Vector::Index>(grid_->cells.size());
 }
 
-std::span<const double> NonmatchingColumnHeatSystem::thermal_conductivity() const noexcept {
-    return thermal_conductivity_;
-}
-
-std::span<const double> NonmatchingColumnHeatSystem::heat_production() const noexcept {
-    return heat_production_;
-}
-
 void NonmatchingColumnHeatSystem::update_properties(const Vector& solution) const {
     if (solution.size() != size()) {
         throw std::invalid_argument("Nonmatching-column solution size does not match the grid");
@@ -60,10 +35,6 @@ void NonmatchingColumnHeatSystem::update_properties(const Vector& solution) cons
     if (property_updater_) {
         property_updater_({solution.native().data(), static_cast<std::size_t>(solution.size())},
                           thermal_conductivity_, heat_production_);
-        check_field(thermal_conductivity_, grid_->cells.size(), true,
-                    "Updated nonmatching-column conductivity is invalid");
-        check_field(heat_production_, grid_->cells.size(), false,
-                    "Updated nonmatching-column heat production is invalid");
     }
 }
 
@@ -88,9 +59,9 @@ void NonmatchingColumnHeatSystem::assemble_residual(const Vector& solution,
     const auto values = std::span<const double>(solution.native().data(),
                                                 static_cast<std::size_t>(solution.size()));
     for (const NonmatchingColumnInternalFlux& flux : vertical.vertical) {
-        residual[static_cast<Vector::Index>(flux.left_cell)] += flux.left_expression.value(values);
-        residual[static_cast<Vector::Index>(flux.right_cell)] -=
-            flux.right_expression.value(values);
+        const double value = flux.expression.value(values);
+        residual[static_cast<Vector::Index>(flux.left_cell)] += value;
+        residual[static_cast<Vector::Index>(flux.right_cell)] -= value;
     }
     for (const NonmatchingColumnBoundaryFlux& flux : vertical.surface) {
         residual[static_cast<Vector::Index>(flux.cell)] += flux.expression.value(values);
@@ -144,11 +115,11 @@ void NonmatchingColumnHeatSystem::assemble_matrix(const Vector& solution,
     triplets.reserve(grid_->cells.size() + 4 * grid_->horizontal_faces.size() +
                      10 * vertical.vertical.size());
     for (const NonmatchingColumnInternalFlux& flux : vertical.vertical) {
-        for (const MultipointFluxTerm term : flux.left_expression.terms) {
+        for (const MultipointFluxTerm term : flux.expression.terms) {
             triplets.emplace_back(static_cast<Vector::Index>(flux.left_cell),
                                   static_cast<Vector::Index>(term.cell), term.coefficient);
         }
-        for (const MultipointFluxTerm term : flux.right_expression.terms) {
+        for (const MultipointFluxTerm term : flux.expression.terms) {
             triplets.emplace_back(static_cast<Vector::Index>(flux.right_cell),
                                   static_cast<Vector::Index>(term.cell), -term.coefficient);
         }

@@ -170,6 +170,6 @@ std::span<const BasinConfiguration> BasinInput::configurations() const noexcept 
     return configurations_;
 }
 
-const EasyRoInput& BasinInput::easy_ro() const noexcept {
+const EasyRoParameters& BasinInput::easy_ro() const noexcept {
     return easy_ro_;
 }

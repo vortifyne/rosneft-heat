@@ -7,13 +7,10 @@
 
 TEST(ColumnFieldTransfer, BilinearFieldAndNewLayerHistory) {
     const std::vector<double> x{0.0, 1.0, 2.0};
-    const BasinGeometry old_geometry{.age_ma = 1.0,
-                                     .x = x,
-                                     .boundaries = {{0.0, 0.0, 0.0}, {2.0, 2.0, 2.0}},
-                                     .layers = {{2, 0.0, 2.0}}};
+    const BasinGeometry old_geometry{
+        .x = x, .boundaries = {{0.0, 0.0, 0.0}, {2.0, 2.0, 2.0}}, .layers = {{2, 0.0, 2.0}}};
     const NonmatchingColumnGrid old_grid = make_nonmatching_column_grid(old_geometry, x, 1.0);
     const BasinGeometry new_geometry{
-        .age_ma = 0.0,
         .x = x,
         .boundaries = {{0.0, 0.0, 0.0}, {0.5, 0.5, 0.5}, {2.0, 2.0, 2.0}},
         .layers = {{1, 0.0, 2.0}, {2, 0.0, 2.0}}};

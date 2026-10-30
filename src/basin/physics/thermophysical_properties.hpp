@@ -22,19 +22,6 @@ struct EffectiveThermophysicalProperties {
     double heat_production;
 };
 
-[[nodiscard]] constexpr double celsius_to_kelvin(const double temperature) noexcept {
-    return temperature + 273.15;
-}
-
-[[nodiscard]] constexpr double porosity_percent_to_fraction(const double porosity) noexcept {
-    return 0.01 * porosity;
-}
-
-[[nodiscard]] constexpr double
-microwatts_per_cubic_meter_to_watts_per_cubic_meter(const double heat_production) noexcept {
-    return 1.0e-6 * heat_production;
-}
-
 [[nodiscard]] double waples_specific_heat(double temperature, double specific_heat_at_20_celsius);
 
 [[nodiscard]] double sekiguchi_thermal_conductivity(double temperature,

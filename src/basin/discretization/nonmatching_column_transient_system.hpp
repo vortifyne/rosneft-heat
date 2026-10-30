@@ -12,7 +12,7 @@
 // cell indices, even when their geometry has moved.
 class NonmatchingColumnTransientSystem final : public SemiDiscreteSystem {
 public:
-    using CapacityUpdater = std::function<void(double, std::span<const double>, std::span<double>)>;
+    using CapacityUpdater = std::function<void(std::span<const double>, std::span<double>)>;
 
     NonmatchingColumnTransientSystem(
         const NonmatchingColumnGrid& grid, std::span<const double> thermal_conductivity,
@@ -29,10 +29,8 @@ public:
                          const Vector& solution_derivative, double derivative_shift,
                          SparseMatrix& matrix) const override;
 
-    [[nodiscard]] const NonmatchingColumnHeatSystem& spatial_system() const noexcept;
-
 private:
-    void update_capacity(double time, const Vector& solution) const;
+    void update_capacity(const Vector& solution) const;
 
     const NonmatchingColumnGrid* grid_ = nullptr;
     NonmatchingColumnHeatSystem spatial_;

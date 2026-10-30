@@ -71,8 +71,7 @@ BasinGeometry two_layer_geometry(const std::function<double(double)>& contact,
         contact_values.push_back(contact(coordinate));
         bottom_values.push_back(bottom(coordinate));
     }
-    return {.age_ma = 0.0,
-            .x = x,
+    return {.x = x,
             .boundaries = {top_values, contact_values, bottom_values},
             .layers = {{1, 0.0, kWidth}, {2, 0.0, kWidth}}};
 }
@@ -86,10 +85,7 @@ BasinGeometry one_layer_geometry(const std::function<double(double)>& top,
         top_values.push_back(top(coordinate));
         bottom_values.push_back(bottom(coordinate));
     }
-    return {.age_ma = 0.0,
-            .x = x,
-            .boundaries = {top_values, bottom_values},
-            .layers = {{1, 0.0, kWidth}}};
+    return {.x = x, .boundaries = {top_values, bottom_values}, .layers = {{1, 0.0, kWidth}}};
 }
 
 double smooth_temperature(const double x, const double z) {
@@ -175,7 +171,7 @@ double material_interface_outflow(const NonmatchingColumnGrid& grid,
         if (left_layer == right_layer) {
             continue;
         }
-        const double left_to_right = flux.left_expression.value(values);
+        const double left_to_right = flux.expression.value(values);
         if (left_layer == layer) {
             result += left_to_right;
         } else if (right_layer == layer) {
@@ -364,9 +360,9 @@ Metrics check_case(const VerificationCase& definition, double h, MultipointFluxS
         rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow - rates.heat_production;
     EXPECT_LT(std::abs(balance) / definition.characteristic_rate, 1.0e-9);
     if (definition.interface_layer) {
-        const double outflow = material_interface_outflow(
-            grid, system.thermal_conductivity(), solution.temperature, definition.boundary_data,
-            scheme, *definition.interface_layer);
+        const double outflow = material_interface_outflow(grid, conductivity, solution.temperature,
+                                                          definition.boundary_data, scheme,
+                                                          *definition.interface_layer);
         const double tolerance = definition.name == "horizontal_contact"
                                      ? 1.0e-8
                                      : 0.01 * definition.characteristic_rate;

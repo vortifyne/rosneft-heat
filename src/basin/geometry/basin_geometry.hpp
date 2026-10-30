@@ -13,7 +13,6 @@ struct BasinLayerRegion {
 };
 
 struct BasinGeometry {
-    double age_ma = 0.0;
     std::vector<double> x;
     // Layer i lies between contacts i and i + 1, on the shared x axis.
     std::vector<std::vector<double>> boundaries;
@@ -28,5 +27,4 @@ struct BasinGeometry {
 // Retain source knots and required material coordinates; subdivide long intervals.
 [[nodiscard]] std::vector<double> make_column_axis(std::span<const double> knots,
                                                    double horizontal_step,
-                                                   std::span<const double> required_x = {},
-                                                   double phase = 0.0);
+                                                   std::span<const double> required_x = {});

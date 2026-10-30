@@ -188,12 +188,6 @@ NonmatchingColumnFlux::compute(const MultipointFluxScheme scheme,
     if (!boundary_data.surface_temperature || !boundary_data.basal_inward_flux) {
         throw std::invalid_argument("Nonmatching-column boundary functions must be set");
     }
-    for (const double value : conductivity) {
-        if (!std::isfinite(value) || !(value > 0.0)) {
-            throw std::invalid_argument("Nonmatching-column conductivity must be positive");
-        }
-    }
-
     NonmatchingColumnFluxes result;
     result.vertical.reserve(grid_->vertical_subfaces.size());
     for (const NonmatchingVerticalSubface& face : grid_->vertical_subfaces) {
@@ -201,8 +195,7 @@ NonmatchingColumnFlux::compute(const MultipointFluxScheme scheme,
             one_sided_flux(face.left_cell, face.right_cell, face.x, conductivity, boundary_data);
         OneSidedFlux right =
             one_sided_flux(face.right_cell, face.left_cell, face.x, conductivity, boundary_data);
-        MultipointFluxExpression left_flux;
-        MultipointFluxExpression right_flux;
+        MultipointFluxExpression expression;
         if (scheme == MultipointFluxScheme::linear) {
             // Conductance-dependent convex weights from the harmonic-point
             // linearity-preserving construction; 1/2 is valid only for equal
@@ -215,9 +208,8 @@ NonmatchingColumnFlux::compute(const MultipointFluxScheme scheme,
             const double conductance_sum = left_conductance + right_conductance;
             const double left_weight = right_conductance / conductance_sum;
             const double right_weight = left_conductance / conductance_sum;
-            add_scaled(left_flux, left.expression, left_weight * face.length());
-            add_scaled(left_flux, right.expression, -right_weight * face.length());
-            right_flux = left_flux;
+            add_scaled(expression, left.expression, left_weight * face.length());
+            add_scaled(expression, right.expression, -right_weight * face.length());
         } else {
             MultipointFluxExpression conservative;
             const double left_value = left.expression.value(solution);
@@ -259,11 +251,9 @@ NonmatchingColumnFlux::compute(const MultipointFluxScheme scheme,
                     add_scaled(conservative, right_remainder, -face.length() * right_weight);
                 }
             }
-            left_flux = conservative;
-            right_flux = std::move(conservative);
+            expression = std::move(conservative);
         }
-        result.vertical.push_back(
-            {face.left_cell, face.right_cell, std::move(left_flux), std::move(right_flux)});
+        result.vertical.push_back({face.left_cell, face.right_cell, std::move(expression)});
     }
     result.surface.reserve(grid_->surface_vertical_faces.size());
     for (const NonmatchingVerticalBoundaryFace& face : grid_->surface_vertical_faces) {

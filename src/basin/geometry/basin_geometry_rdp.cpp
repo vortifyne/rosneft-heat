@@ -115,8 +115,7 @@ BasinGeometry simplify_basin_geometry_rdp(const BasinGeometry& source, double to
         if (!changed)
             break;
     }
-    BasinGeometry result{.age_ma = source.age_ma,
-                         .x = {},
+    BasinGeometry result{.x = {},
                          .boundaries = std::vector<std::vector<double>>(source.boundaries.size()),
                          .layers = source.layers};
     for (std::size_t i = 0; i < count; ++i) {

@@ -55,14 +55,6 @@ Vector as_vector(std::span<const double> values) {
     return result;
 }
 
-EasyRoModel make_easy_ro(const BasinInput& input) {
-    const auto& kinetics = input.easy_ro();
-    return EasyRoModel({.preexponential = kinetics.preexponential,
-                        .gas_constant = kinetics.gas_constant,
-                        .activation_energies = kinetics.activation_energies,
-                        .weights = kinetics.weights});
-}
-
 struct State {
     NonmatchingColumnGrid grid;
     Vector temperature;
@@ -197,7 +189,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
         !(settings.nonlinear.relative_tolerance < 1.0)) {
         throw std::invalid_argument("Invalid basin configurations or settings");
     }
-    const EasyRoModel easy_ro = make_easy_ro(input);
+    const EasyRoModel easy_ro(input.easy_ro());
     std::vector<BasinGeometry> geometries;
     geometries.reserve(configurations.size());
     for (const auto& configuration : configurations)
@@ -248,7 +240,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
                 std::copy(properties.production.begin(), properties.production.end(),
                           production.begin());
             };
-            auto capacity_updater = [&properties](double, std::span<const double> temperature,
+            auto capacity_updater = [&properties](std::span<const double> temperature,
                                                   std::span<double> capacity) {
                 properties.evaluate(temperature);
                 std::copy(properties.capacity.begin(), properties.capacity.end(), capacity.begin());

@@ -27,10 +27,6 @@ double NonmatchingVerticalSubface::length() const noexcept {
     return z_bottom - z_top;
 }
 
-double NonmatchingVerticalSubface::center_z() const noexcept {
-    return 0.5 * (z_top + z_bottom);
-}
-
 double NonmatchingVerticalBoundaryFace::length() const noexcept {
     return z_bottom - z_top;
 }

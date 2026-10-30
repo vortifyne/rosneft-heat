@@ -4,15 +4,31 @@
 #include "basin/mesh/nonmatching_column_grid.hpp"
 #include "basin/postprocessing/energy_rates.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <gtest/gtest.h>
 #include <map>
 
 namespace {
 
+std::vector<double> shifted_axis(std::span<const double> knots, double horizontal_step,
+                                 double phase) {
+    auto result = make_column_axis(knots, horizontal_step);
+    for (std::size_t interval = 1; interval < knots.size(); ++interval) {
+        const double left = knots[interval - 1], right = knots[interval];
+        const auto first = std::lower_bound(result.begin(), result.end(), left);
+        const auto count = std::lower_bound(first, result.end(), right) - first;
+        for (std::ptrdiff_t j = 1; j < count; ++j) {
+            first[j] = std::lerp(left, right,
+                                 (static_cast<double>(j) + phase) / static_cast<double>(count));
+        }
+    }
+    return result;
+}
+
 BasinGeometry geometry() {
     const std::vector<double> x{0.0, 1.0, 2.0};
-    return {.age_ma = 0.0,
-            .x = x,
+    return {.x = x,
             .boundaries = {{0.0, 0.4, 0.0}, {0.8, 1.2, 1.0}, {2.0, 2.4, 2.2}},
             .layers = {{1, 0.0, 2.0}, {2, 0.0, 2.0}}};
 }
@@ -62,7 +78,7 @@ TEST(NonmatchingColumnGrid, AxisRetainsContourSamplesAndPhasesOnlyInsertedLines)
     const auto layout = make_column_axis(source.x, 0.75);
     EXPECT_EQ(layout, (std::vector<double>{0.0, 0.5, 1.0, 1.5, 2.0}));
 
-    const auto shifted = make_column_axis(source.x, 0.75, {}, 0.25);
+    const auto shifted = shifted_axis(source.x, 0.75, 0.25);
     EXPECT_EQ(shifted, (std::vector<double>{0.0, 0.625, 1.0, 1.625, 2.0}));
 }
 
@@ -73,8 +89,8 @@ TEST(NonmatchingColumnGrid, PreservesLayerAreasAndCoversEveryColumnInterfaceAcro
             for (const double phase : {-0.25, 0.0, 0.45}) {
                 SCOPED_TRACE(testing::Message()
                              << "dx=" << dx << " dz=" << dz << " phase=" << phase);
-                const auto grid = make_nonmatching_column_grid(
-                    source, make_column_axis(source.x, dx, {}, phase), dz);
+                const auto grid =
+                    make_nonmatching_column_grid(source, shifted_axis(source.x, dx, phase), dz);
                 std::map<int, double> area;
                 std::vector<double> coverage(grid.columns.size() - 1, 0.0);
                 for (const auto& cell : grid.cells) {
@@ -105,8 +121,7 @@ TEST(NonmatchingColumnGrid, PreservesLayerAreasAndCoversEveryColumnInterfaceAcro
 
 TEST(NonmatchingColumnGrid, RepresentsVerticalOuterBoundarySteps) {
     const std::vector<double> x{0.0, 1.0, 2.0};
-    const BasinGeometry source{.age_ma = 0.0,
-                               .x = x,
+    const BasinGeometry source{.x = x,
                                .boundaries = {{0.0, 0.4, 0.8}, {1.0, 1.4, 1.8}, {2.0, 2.4, 2.8}},
                                .layers = {{1, 0.0, 2.0}, {2, 0.0, 2.0}}};
     const std::vector<double> layout = {0.0, 1.0, 2.0};
@@ -124,10 +139,8 @@ TEST(NonmatchingColumnGrid, RepresentsVerticalOuterBoundarySteps) {
 
 TEST(NonmatchingColumnHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
     const std::vector<double> x{0.0, 1.0, 2.0};
-    const BasinGeometry source{.age_ma = 0.0,
-                               .x = x,
-                               .boundaries = {{0.0, 0.4, 0.8}, {3.0, 3.0, 3.0}},
-                               .layers = {{1, 0.0, 2.0}}};
+    const BasinGeometry source{
+        .x = x, .boundaries = {{0.0, 0.4, 0.8}, {3.0, 3.0, 3.0}}, .layers = {{1, 0.0, 2.0}}};
     const std::vector<double> layout = {0.0, 1.0, 2.0};
     const double vertical_step = 0.45;
     const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
@@ -192,8 +205,7 @@ TEST(NonmatchingColumnFlux, ReproducesAffineFluxOnMergedSubfaces) {
         ASSERT_EQ(values.vertical.size(), grid.vertical_subfaces.size());
         for (std::size_t i = 0; i < values.vertical.size(); ++i) {
             const double expected = -2.5 * x_gradient * grid.vertical_subfaces[i].length();
-            EXPECT_NEAR(values.vertical[i].left_expression.value(temperature), expected, 2.0e-12);
-            EXPECT_NEAR(values.vertical[i].right_expression.value(temperature), expected, 2.0e-12);
+            EXPECT_NEAR(values.vertical[i].expression.value(temperature), expected, 2.0e-12);
         }
     }
 }
@@ -238,34 +250,44 @@ TEST(NonmatchingColumnFlux, UsesHarmonicNormalFluxAcrossMaterialJump) {
         const NonmatchingColumnFluxes values =
             flux.compute(scheme, conductivity, temperature, boundary);
         ASSERT_EQ(values.vertical.size(), 1U);
-        EXPECT_NEAR(values.vertical[0].left_expression.value(temperature), -flux_scale, 2.0e-11);
-        EXPECT_NEAR(values.vertical[0].right_expression.value(temperature), -flux_scale, 2.0e-11);
+        EXPECT_NEAR(values.vertical[0].expression.value(temperature), -flux_scale, 2.0e-11);
     }
 }
 
-TEST(NonmatchingColumnHeatSystem, LinearMatrixMatchesResidual) {
+TEST(NonmatchingColumnHeatSystem, PicardMatrixMatchesResidualForBothSchemes) {
     const BasinGeometry source = geometry();
     const auto layout = make_column_axis(source.x, 0.55);
     const double vertical_step = 0.55;
     const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
     const std::vector<double> conductivity(grid.cells.size(), 2.5);
     const std::vector<double> production(grid.cells.size(), 0.01);
-    NonmatchingColumnHeatSystem system(
-        grid, conductivity, production,
-        {.surface_temperature = [](const Point2D point) { return 285.0 + point.x; },
-         .basal_inward_flux = [](Point2D) { return 0.08; }});
-    Vector zero(static_cast<Vector::Index>(grid.cells.size()));
-    zero.set_zero();
-    Vector value(static_cast<Vector::Index>(grid.cells.size()));
-    for (Vector::Index i = 0; i < value.size(); ++i) {
-        value[i] = 290.0 + static_cast<double>(i);
+    for (const MultipointFluxScheme scheme :
+         {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
+        // Homogeneous boundary data make the constant term independent of NMPFA weights.
+        NonmatchingColumnHeatSystem system(
+            grid, conductivity, production,
+            {.surface_temperature =
+                 [scheme](const Point2D point) {
+                     return scheme == MultipointFluxScheme::linear ? 285.0 + point.x : 0.0;
+                 },
+             .basal_inward_flux =
+                 [scheme](Point2D) {
+                     return scheme == MultipointFluxScheme::linear ? 0.08 : 0.0;
+                 }});
+        system.set_flux_scheme(scheme);
+        Vector zero(static_cast<Vector::Index>(grid.cells.size()));
+        zero.set_zero();
+        Vector value(static_cast<Vector::Index>(grid.cells.size()));
+        for (Vector::Index i = 0; i < value.size(); ++i) {
+            value[i] = 290.0 + static_cast<double>(i);
+        }
+        Vector zero_residual;
+        Vector residual;
+        system.assemble_residual(zero, zero_residual);
+        system.assemble_residual(value, residual);
+        SparseMatrix matrix(value.size(), value.size(), SparseStorageOrder::csc);
+        system.assemble_matrix(value, matrix);
+        const Eigen::VectorXd predicted = matrix.native_csc() * value.native();
+        EXPECT_LT((residual.native() - zero_residual.native() - predicted).norm(), 1.0e-10);
     }
-    Vector zero_residual;
-    Vector residual;
-    system.assemble_residual(zero, zero_residual);
-    system.assemble_residual(value, residual);
-    SparseMatrix matrix(value.size(), value.size(), SparseStorageOrder::csc);
-    system.assemble_matrix(value, matrix);
-    const Eigen::VectorXd predicted = matrix.native_csc() * value.native();
-    EXPECT_LT((residual.native() - zero_residual.native() - predicted).norm(), 1.0e-10);
 }

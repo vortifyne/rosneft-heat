@@ -41,7 +41,6 @@ struct NonmatchingVerticalSubface {
     double z_bottom = 0.0;
 
     [[nodiscard]] double length() const noexcept;
-    [[nodiscard]] double center_z() const noexcept;
 };
 
 struct NonmatchingVerticalBoundaryFace {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "basin/basin_problem.hpp"
+#include "basin/physics/easy_ro.hpp"
 #include "basin/physics/thermophysical_properties.hpp"
 
 #include <filesystem>
@@ -14,10 +15,10 @@ public:
 
     [[nodiscard]] const LithotypeThermophysicalProperties& lithotype(int code) const;
     [[nodiscard]] std::span<const BasinConfiguration> configurations() const noexcept;
-    [[nodiscard]] const EasyRoInput& easy_ro() const noexcept;
+    [[nodiscard]] const EasyRoParameters& easy_ro() const noexcept;
 
 private:
     std::vector<BasinConfiguration> configurations_;
     std::unordered_map<int, LithotypeThermophysicalProperties> lithotypes_;
-    EasyRoInput easy_ro_;
+    EasyRoParameters easy_ro_{};
 };

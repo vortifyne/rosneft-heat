@@ -48,7 +48,7 @@ BasinGeometry make_basin_geometry(const BasinConfiguration& configuration) {
             }
         }
     }
-    BasinGeometry result{.age_ma = configuration.age_ma, .x = {}, .boundaries = {}, .layers = {}};
+    BasinGeometry result;
     if (configuration.layers.empty())
         return result;
     auto& x = result.x;
@@ -89,11 +89,9 @@ BasinGeometry make_basin_geometry(const BasinConfiguration& configuration) {
 }
 
 std::vector<double> make_column_axis(std::span<const double> knots, double horizontal_step,
-                                     std::span<const double> required_x, double phase) {
-    if (knots.size() < 2 || !std::isfinite(horizontal_step) || !(horizontal_step > 0.0) ||
-        !std::isfinite(phase) || std::abs(phase) > 0.45) {
-        throw std::invalid_argument(
-            "Column axis requires knots, a positive step and |phase| <= 0.45");
+                                     std::span<const double> required_x) {
+    if (knots.size() < 2 || !std::isfinite(horizontal_step) || !(horizontal_step > 0.0)) {
+        throw std::invalid_argument("Column axis requires knots and a positive step");
     }
     std::vector<double> events(knots.begin(), knots.end());
     const auto [left, right] = std::minmax_element(knots.begin(), knots.end());
@@ -110,9 +108,8 @@ std::vector<double> make_column_axis(std::span<const double> knots, double horiz
             static_cast<std::size_t>(std::ceil((events[i] - events[i - 1]) / horizontal_step));
         axis.push_back(events[i - 1]);
         for (std::size_t j = 1; j < count; ++j)
-            axis.push_back(
-                std::lerp(events[i - 1], events[i],
-                          (static_cast<double>(j) + phase) / static_cast<double>(count)));
+            axis.push_back(std::lerp(events[i - 1], events[i],
+                                     static_cast<double>(j) / static_cast<double>(count)));
     }
     axis.push_back(events.back());
     return axis;

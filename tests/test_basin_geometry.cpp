@@ -32,7 +32,6 @@ TEST(BasinGeometry, PreservesOriginalPolylines) {
     const auto input =
         configuration({profile(7, {0., .3, 1., 2.}, {0., .2, .8, 1.}, {2., 3., 3., 4.})}, 12.);
     const auto geometry = make_basin_geometry(input);
-    EXPECT_DOUBLE_EQ(geometry.age_ma, input.age_ma);
     ASSERT_EQ(geometry.layers.size(), 1U);
     EXPECT_EQ(geometry.x, input.layer(7).x);
     EXPECT_EQ(geometry.boundaries[0], input.layer(7).top);

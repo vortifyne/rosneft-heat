@@ -33,10 +33,3 @@ struct BasinConfiguration {
 
     [[nodiscard]] const BasinLayerProfile& layer(int id) const;
 };
-
-struct EasyRoInput {
-    double preexponential = 0.0;
-    double gas_constant = 0.0;
-    std::vector<double> activation_energies;
-    std::vector<double> weights;
-};

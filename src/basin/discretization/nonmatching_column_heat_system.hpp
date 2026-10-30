@@ -21,8 +21,6 @@ public:
 
     void set_flux_scheme(MultipointFluxScheme scheme) noexcept;
     [[nodiscard]] Vector::Index size() const noexcept;
-    [[nodiscard]] std::span<const double> thermal_conductivity() const noexcept;
-    [[nodiscard]] std::span<const double> heat_production() const noexcept;
 
     void assemble_residual(const Vector& solution, Vector& residual) const;
     void assemble_matrix(const Vector& solution, SparseMatrix& matrix) const;

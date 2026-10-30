@@ -17,8 +17,7 @@ struct NonmatchingColumnBoundaryData {
 struct NonmatchingColumnInternalFlux {
     std::size_t left_cell = 0;
     std::size_t right_cell = 0;
-    MultipointFluxExpression left_expression;
-    MultipointFluxExpression right_expression;
+    MultipointFluxExpression expression;
 };
 
 struct NonmatchingColumnBoundaryFlux {

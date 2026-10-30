@@ -98,12 +98,6 @@ LithotypeThermophysicalProperties lithotype_from(const ReferenceCase& reference)
 
 } // namespace
 
-TEST(ThermophysicalProperties, ConvertsInputUnitsToSi) {
-    EXPECT_DOUBLE_EQ(celsius_to_kelvin(20.0), 293.15);
-    EXPECT_DOUBLE_EQ(porosity_percent_to_fraction(25.0), 0.25);
-    EXPECT_DOUBLE_EQ(microwatts_per_cubic_meter_to_watts_per_cubic_meter(2.5), 2.5e-6);
-}
-
 TEST(ThermophysicalProperties, MatchesOrganizerPythonFunctionsForAllLithotypes) {
     for (const ReferenceCase& reference : kReferenceCases) {
         const LithotypeThermophysicalProperties lithotype = lithotype_from(reference);

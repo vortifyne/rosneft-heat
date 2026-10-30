@@ -84,10 +84,8 @@ double integrate_moving_quadratic(double timestep) {
 
 Vector solve_temperature_dependent_case(double timestep, LinearSolverOptions linear_solver) {
     const std::vector<double> x{0.0, 1.0, 2.0};
-    const BasinGeometry geometry{.age_ma = 0.0,
-                                 .x = x,
-                                 .boundaries = {{0.0, 0.2, 0.0}, {2.0, 2.2, 2.0}},
-                                 .layers = {{1, 0.0, 2.0}}};
+    const BasinGeometry geometry{
+        .x = x, .boundaries = {{0.0, 0.2, 0.0}, {2.0, 2.2, 2.0}}, .layers = {{1, 0.0, 2.0}}};
     const std::vector<double> layout = {0.0, 0.5, 1.0, 1.5, 2.0};
     const double vertical_step = 0.4;
     const NonmatchingColumnGrid grid =
@@ -149,20 +147,21 @@ TEST(NonmatchingColumnTransientSystem, AccumulationUsesCurrentMovingCellAndPicar
     const std::vector<double> capacity{1.0};
     NonmatchingColumnTransientSystem system(
         grid, conductivity, source, capacity, boundary(3.0), {},
-        [](double, std::span<const double> temperature, std::span<double> updated) {
+        [](std::span<const double> temperature, std::span<double> updated) {
             updated[0] = 2.0 + temperature[0];
         });
     const Vector temperature{3.0};
     const Vector derivative{0.4};
     Vector spatial_residual;
     Vector transient_residual;
-    system.spatial_system().assemble_residual(temperature, spatial_residual);
+    const NonmatchingColumnHeatSystem spatial(grid, conductivity, source, boundary(3.0));
+    spatial.assemble_residual(temperature, spatial_residual);
     system.assemble_residual(1.0, temperature, derivative, transient_residual);
     EXPECT_NEAR(transient_residual[0] - spatial_residual[0], 2.0 * 5.0 * 0.4, 1.0e-12);
 
     SparseMatrix matrix;
     SparseMatrix spatial_matrix;
-    system.spatial_system().assemble_matrix(temperature, spatial_matrix);
+    spatial.assemble_matrix(temperature, spatial_matrix);
     system.assemble_matrix(NonlinearMethod::picard, 1.0, temperature, derivative, 4.0, matrix);
     EXPECT_NEAR(matrix.coefficient(0, 0) - spatial_matrix.coefficient(0, 0), 2.0 * 5.0 * 4.0,
                 1.0e-12);
@@ -173,10 +172,8 @@ TEST(NonmatchingColumnTransientSystem, AccumulationUsesCurrentMovingCellAndPicar
 
 TEST(NonmatchingColumnTransientSystem, AdvancesAffineFieldOnIndependentColumns) {
     const std::vector<double> x{0.0, 1.0, 2.0};
-    const BasinGeometry source{.age_ma = 0.0,
-                               .x = x,
-                               .boundaries = {{0.0, 0.4, 0.8}, {3.0, 3.0, 3.0}},
-                               .layers = {{1, 0.0, 2.0}}};
+    const BasinGeometry source{
+        .x = x, .boundaries = {{0.0, 0.4, 0.8}, {3.0, 3.0, 3.0}}, .layers = {{1, 0.0, 2.0}}};
     const std::vector<double> layout = x;
     const double vertical_step = 0.45;
     const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);

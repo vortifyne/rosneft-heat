@@ -4,21 +4,6 @@
 #include <stdexcept>
 #include <utility>
 
-namespace {
-
-void validate_capacity(std::span<const double> capacity, std::size_t cells) {
-    if (capacity.size() != cells) {
-        throw std::invalid_argument("column-grid heat capacity size does not match the grid");
-    }
-    for (double value : capacity) {
-        if (!std::isfinite(value) || !(value > 0.0)) {
-            throw std::invalid_argument("column-grid volumetric heat capacity must be positive");
-        }
-    }
-}
-
-} // namespace
-
 NonmatchingColumnTransientSystem::NonmatchingColumnTransientSystem(
     const NonmatchingColumnGrid& grid, std::span<const double> thermal_conductivity,
     std::span<const double> heat_production, std::span<const double> volumetric_heat_capacity,
@@ -28,29 +13,29 @@ NonmatchingColumnTransientSystem::NonmatchingColumnTransientSystem(
                              std::move(property_updater)),
       volumetric_heat_capacity_(volumetric_heat_capacity.begin(), volumetric_heat_capacity.end()),
       capacity_updater_(std::move(capacity_updater)) {
-    validate_capacity(volumetric_heat_capacity_, grid.cells.size());
+    if (volumetric_heat_capacity_.size() != grid.cells.size()) {
+        throw std::invalid_argument("column-grid heat capacity size does not match the grid");
+    }
 }
 
 void NonmatchingColumnTransientSystem::set_flux_scheme(MultipointFluxScheme scheme) {
     spatial_.set_flux_scheme(scheme);
 }
 
-void NonmatchingColumnTransientSystem::update_capacity(double time, const Vector& solution) const {
+void NonmatchingColumnTransientSystem::update_capacity(const Vector& solution) const {
     if (solution.size() != static_cast<Vector::Index>(grid_->cells.size())) {
         throw std::invalid_argument("column-grid solution size does not match the grid");
     }
     if (capacity_updater_) {
-        capacity_updater_(time,
-                          {solution.native().data(), static_cast<std::size_t>(solution.size())},
+        capacity_updater_({solution.native().data(), static_cast<std::size_t>(solution.size())},
                           volumetric_heat_capacity_);
-        validate_capacity(volumetric_heat_capacity_, grid_->cells.size());
     }
 }
 
-void NonmatchingColumnTransientSystem::assemble_residual(double time, const Vector& solution,
+void NonmatchingColumnTransientSystem::assemble_residual(double, const Vector& solution,
                                                          const Vector& solution_derivative,
                                                          Vector& residual) const {
-    update_capacity(time, solution);
+    update_capacity(solution);
     if (solution_derivative.size() != solution.size()) {
         throw std::invalid_argument("column-grid temperature derivative size does not match");
     }
@@ -62,7 +47,7 @@ void NonmatchingColumnTransientSystem::assemble_residual(double time, const Vect
     }
 }
 
-void NonmatchingColumnTransientSystem::assemble_matrix(NonlinearMethod method, double time,
+void NonmatchingColumnTransientSystem::assemble_matrix(NonlinearMethod method, double,
                                                        const Vector& solution,
                                                        const Vector& solution_derivative,
                                                        double derivative_shift,
@@ -74,7 +59,7 @@ void NonmatchingColumnTransientSystem::assemble_matrix(NonlinearMethod method, d
         derivative_shift < 0.0) {
         throw std::invalid_argument("Invalid column-grid derivative or BDF shift");
     }
-    update_capacity(time, solution);
+    update_capacity(solution);
     spatial_.assemble_matrix(solution, matrix);
     if (matrix.storage_order() == SparseStorageOrder::csr) {
         auto& entries = matrix.native_csr();
@@ -93,9 +78,4 @@ void NonmatchingColumnTransientSystem::assemble_matrix(NonlinearMethod method, d
         }
         entries.makeCompressed();
     }
-}
-
-const NonmatchingColumnHeatSystem&
-NonmatchingColumnTransientSystem::spatial_system() const noexcept {
-    return spatial_;
 }
