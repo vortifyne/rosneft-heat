@@ -1,4 +1,4 @@
-"""Browse column-grid snapshots with a temperature or EASY%Ro slider."""
+"""Browse basin snapshots with a temperature or EASY%Ro slider."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from matplotlib.collections import PolyCollection
 from matplotlib.widgets import Slider
 import numpy as np
 
-from column_snapshots import read_snapshot
+from basin_snapshot import read_snapshot
 
 
 def polygons(snapshot: dict) -> np.ndarray:
@@ -34,10 +34,7 @@ def main() -> None:
         parser.error("No snapshot_*.cgrd files found")
     snapshots = [read_snapshot(path) for path in paths]
     key = arguments.field
-    if key == "layer":
-        data = [snapshot["layer"] for snapshot in snapshots]
-    else:
-        data = [snapshot[key] for snapshot in snapshots]
+    data = [snapshot[key] for snapshot in snapshots]
     minimum = min(float(np.min(values)) for values in data)
     maximum = max(float(np.max(values)) for values in data)
     if maximum == minimum:

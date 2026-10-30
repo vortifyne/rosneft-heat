@@ -9,7 +9,7 @@ from pathlib import Path
 from basin_data import BasinData
 
 
-def write_csv(path: Path, header: tuple[str, ...], rows: list[tuple[object, ...]]) -> None:
+def write_csv(path: Path, header: tuple[str, ...], rows) -> None:
     with path.open("w", newline="", encoding="utf-8") as output:
         writer = csv.writer(output, lineterminator="\n")
         writer.writerow(header)
@@ -23,17 +23,16 @@ def main() -> None:
     arguments = parser.parse_args()
 
     data = BasinData(arguments.data_dir)
-    ages = tuple(reversed([float(age) for age in data.times]))
+    ages = tuple(float(age) for age in reversed(data.times))
 
     arguments.output.mkdir(parents=True, exist_ok=True)
     layer_ids = {name: index + 1 for index, name in enumerate(data.layers)}
 
-    configuration_rows: list[tuple[object, ...]] = []
-    layer_rows: list[tuple[object, ...]] = []
-    boundary_rows: list[tuple[object, ...]] = []
+    configuration_rows = []
+    layer_rows = []
+    boundary_rows = []
     for age in ages:
         snapshot = data.snapshot(age)
-        configuration_rows.append((f"{age:.15g}",))
 
         for layer in snapshot:
             layer_id = layer_ids[str(layer["layer"])]
@@ -74,7 +73,7 @@ def main() -> None:
     write_csv(
         arguments.output / "configurations.csv",
         ("age_ma",),
-        configuration_rows,
+        ((f"{age:.15g}",) for age in ages),
     )
     write_csv(
         arguments.output / "layers.csv",
@@ -88,45 +87,26 @@ def main() -> None:
         boundary_rows,
     )
 
-    lithotype_rows = []
-    for code, values in sorted(data.lithotypes.items()):
-        lithotype_rows.append(
-            (
-                code,
-                values["name"],
-                f"{values['rho_s']:.15g}",
-                f"{values['lambda_20']:.15g}",
-                f"{values['c20_J']:.15g}",
-                f"{1.0e-6 * values['As']:.15g}",
-            )
-        )
     write_csv(
         arguments.output / "lithotypes.csv",
         ("code", "name", "solid_density", "conductivity_20", "specific_heat_20",
          "heat_production"),
-        lithotype_rows,
+        ((code, values["name"], f"{values['rho_s']:.15g}",
+          f"{values['lambda_20']:.15g}", f"{values['c20_J']:.15g}",
+          f"{1.0e-6 * values['As']:.15g}")
+         for code, values in sorted(data.lithotypes.items())),
     )
 
     kinetics = data.easy_ro
-    kinetics_rows = [
-        (
-            f"{kinetics['A']:.15g}",
-            f"{float(energy):.15g}",
-            f"{float(weight):.15g}",
-            f"{kinetics['Rg_J']:.15g}",
-        )
-        for energy, weight in zip(kinetics["E_J"], kinetics["f"], strict=True)
-    ]
     write_csv(
         arguments.output / "kinetics.csv",
         ("preexponential", "activation_energy", "weight", "gas_constant"),
-        kinetics_rows,
+        ((f"{kinetics['A']:.15g}", f"{float(energy):.15g}",
+          f"{float(weight):.15g}", f"{kinetics['Rg_J']:.15g}")
+         for energy, weight in zip(kinetics["E_J"], kinetics["f"], strict=True)),
     )
 
-    print(
-        f"prepared={arguments.output} configurations={len(ages)} "
-        f"layers={len(layer_ids)} geometry=original"
-    )
+    print(f"prepared={arguments.output} configurations={len(ages)} layers={len(layer_ids)}")
 
 
 if __name__ == "__main__":

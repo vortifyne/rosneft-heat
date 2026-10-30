@@ -7,9 +7,6 @@
 DOCKER_IMAGE ?= heat-env
 JOBS ?= 4
 MODEL ?= OFF
-BENCH_REVISION = $(shell git rev-parse HEAD)
-BENCH_DIRTY = $(shell git diff --quiet HEAD -- && echo false || echo true)
-BENCH_ENV = HEAT_BENCHMARK_REVISION=$(BENCH_REVISION) HEAT_BENCHMARK_DIRTY=$(BENCH_DIRTY)
 BENCH_ARGS ?=
 
 DOCKER_RUN = docker run --rm \
@@ -22,40 +19,38 @@ DOCKER_RUN = docker run --rm \
 	$(DOCKER_IMAGE)
 
 help:
-	@echo "make docker-image                     Build the Docker environment"
-	@echo "make {docker,local}-{debug,release}    Build basin_forward_solver"
-	@echo "make {docker,local}-test [MODEL=ON]    Build and run tests"
-	@echo "make {docker,local}-bench              Build and run benchmarks"
-	@echo "make clean                            Remove build outputs"
-	@echo "make clean-deps                       Remove installed dependencies"
-
-# Configure and build with one preset; tests and benchmarks have separate builds.
-define configure_build
-cmake --preset $(1) -DHEAT_BUILD_MODEL=$(MODEL) && cmake --build --preset $(1) --parallel $(JOBS) $(if $(2),--target $(2))
-endef
+	@echo "make {docker,local}-{debug,release,test,bench} [MODEL=ON] [JOBS=4]"
+	@echo "make docker-image | clean | clean-deps"
 
 docker-image:
 	docker build -t $(DOCKER_IMAGE) .
 
 docker-debug docker-release:
-	$(DOCKER_RUN) bash -c '$(call configure_build,$@)'
+	$(DOCKER_RUN) bash -c 'cmake --preset $@ -DHEAT_BUILD_MODEL=$(MODEL) && cmake --build --preset $@ --parallel $(JOBS)'
 
-local-debug local-release:
-	$(call configure_build,$(patsubst local-%,%,$@))
+local-debug:
+	cmake --preset debug -DHEAT_BUILD_MODEL=$(MODEL)
+	cmake --build --preset debug --parallel $(JOBS)
+
+local-release:
+	cmake --preset release -DHEAT_BUILD_MODEL=$(MODEL)
+	cmake --build --preset release --parallel $(JOBS)
 
 docker-test:
-	$(DOCKER_RUN) bash -c '$(call configure_build,docker-test) && ctest --preset docker-test'
+	$(DOCKER_RUN) bash -c 'cmake --preset docker-test -DHEAT_BUILD_MODEL=$(MODEL) && cmake --build --preset docker-test --parallel $(JOBS) && ctest --preset docker-test'
 
 local-test:
-	$(call configure_build,test)
+	cmake --preset test -DHEAT_BUILD_MODEL=$(MODEL)
+	cmake --build --preset test --parallel $(JOBS)
 	ctest --preset test
 
 docker-bench:
-	$(DOCKER_RUN) bash -c '$(call configure_build,docker-bench,benchmarks) && $(BENCH_ENV) build/docker/bench/benchmarks $(BENCH_ARGS)'
+	$(DOCKER_RUN) bash -c 'cmake --preset docker-bench -DHEAT_BUILD_MODEL=$(MODEL) && cmake --build --preset docker-bench --parallel $(JOBS) --target benchmarks && build/docker/bench/benchmarks $(BENCH_ARGS)'
 
 local-bench:
-	$(call configure_build,bench,benchmarks)
-	$(BENCH_ENV) build/local/bench/benchmarks $(BENCH_ARGS)
+	cmake --preset bench -DHEAT_BUILD_MODEL=$(MODEL)
+	cmake --build --preset bench --parallel $(JOBS) --target benchmarks
+	build/local/bench/benchmarks $(BENCH_ARGS)
 
 clean:
 	rm -rf build/ compile_commands.json

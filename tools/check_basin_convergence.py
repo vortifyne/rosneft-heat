@@ -12,7 +12,7 @@ import time
 
 import numpy as np
 
-from column_snapshots import read_snapshot
+from basin_snapshot import read_snapshot
 
 
 def compare_fields(coarse: dict, fine: dict) -> dict[str, float]:
