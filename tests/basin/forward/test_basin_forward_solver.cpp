@@ -8,6 +8,8 @@
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
+#include <tuple>
+#include <vector>
 
 namespace {
 
@@ -60,9 +62,11 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
     const BasinInput input = BasinInput::read(directory);
     bool saw_final = false;
     bool saw_initial_axis = false;
+    std::vector<std::tuple<BasinSnapshot::Kind, std::size_t, int, double>> observations;
     const BasinForwardSolver solver(
         input, {.dx = 10.0, .dz = 1.0, .dz_min = 1.0e-4, .dt_ma = 0.5, .axis_rdp_tol = 5.0});
     const BasinForwardResult result = solver.solve([&](const BasinSnapshot& snapshot) {
+        observations.emplace_back(snapshot.kind, snapshot.epoch, snapshot.step, snapshot.age_ma);
         if (snapshot.kind == BasinSnapshot::Kind::initial) {
             saw_initial_axis = true;
             EXPECT_EQ(snapshot.grid.x, (std::vector<double>{0.0, 0.5, 1.0, 2.0}));
@@ -85,6 +89,11 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
     });
     EXPECT_TRUE(saw_final);
     EXPECT_TRUE(saw_initial_axis);
+    EXPECT_EQ(observations, (std::vector<std::tuple<BasinSnapshot::Kind, std::size_t, int, double>>{
+                                {BasinSnapshot::Kind::initial, 0, 0, 1.0},
+                                {BasinSnapshot::Kind::timestep, 0, 1, 0.5},
+                                {BasinSnapshot::Kind::before_event, 0, 2, 0.0},
+                                {BasinSnapshot::Kind::after_event, 1, 0, 0.0}}));
     EXPECT_EQ(result.timesteps, 2);
     ASSERT_EQ(result.epochs.size(), 1U);
     ASSERT_EQ(result.steps.size(), 2U);
@@ -136,7 +145,8 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
         EXPECT_EQ(rows, std::string(name) == "epochs.csv" ? repeated.epochs.size()
                                                           : repeated.steps.size());
     }
-    for (const auto* name : {"snapshot_0000.cgrd", "snapshot_0001.cgrd", "snapshot_0002.cgrd"}) {
+    for (const auto* name : {"snapshot_e01_s0000.cgrd", "snapshot_e01_s0001.cgrd",
+                             "snapshot_e01_s0002.cgrd", "snapshot_e02_s0000.cgrd"}) {
         EXPECT_GT(std::filesystem::file_size(output_directory / "snapshots" / name), 40U);
         EXPECT_FALSE(std::filesystem::exists(output_directory / name));
     }

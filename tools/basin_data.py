@@ -1,40 +1,40 @@
 """
-Читалка данных для задачи Академического турнира 2026:
-двумерная модель теплопереноса в осадочном чехле.
+Data reader for the Academic Tournament 2026:
+two-dimensional heat transfer in a sedimentary basin.
 
-Загружает 6 xlsx-файлов и предоставляет удобный API для доступа
-к геометрии, литологии, пористости, граничным условиям и свойствам литотипов.
+Loads six XLSX files with geometry, lithology, porosity,
+boundary conditions and lithotype properties.
 
-Использование:
+Usage:
     from basin_data import BasinData
 
     data = BasinData("C:/path/to/xlsx_dir")
 
-    # Временные шаги и слои
+    # Ages and layers
     data.times           # [0.0, 5.0, 10.0, ..., 200.0]
     data.layers          # ['Layer_1', 'Layer_2', ..., 'Layer_7']
 
-    # Геометрия слоя в момент времени
+    # Layer geometry at a given age
     x, z_top, z_bot = data.geometry('Layer_5', time=75.0)
 
-    # Литотип, пористость
-    lith_codes = data.lithology('Layer_5', time=75.0)   # массив кодов
-    porosity   = data.porosity('Layer_5', time=75.0)     # массив φ (в %)
+    # Lithotype codes and porosity
+    lith_codes = data.lithology('Layer_5', time=75.0)   # code array
+    porosity   = data.porosity('Layer_5', time=75.0)    # porosity [%]
 
-    # Граничные условия
+    # Boundary conditions
     x, tsurf   = data.tsurf(time=0.0)         # Tsurf(x) [°C]
     x, qbasal  = data.heat_flow(time=0.0)     # qbasal(x) [mW/m²]
 
-    # Свойства литотипов
+    # Lithotype properties
     data.lithotypes
     # {1001: {'name': 'Halite_new', 'rho_s': 2200.0, 'lambda_20': 6.5,
     #         'c20_J': 862.5, 'As': 0.0124, ...}, ...}
 
-    # Какие слои существуют в данный момент
+    # Layers present at a given age
     data.layers_at(time=75.0)  # ['Layer_5', 'Layer_5_1', ..., 'Layer_7']
 
-    # Кинетика EASY%Ro (Sweeney & Burnham, 1990)
-    data.easy_ro  # {'A': [...], 'E': [...], 'f': [...]}
+    # EASY%Ro kinetics (Sweeney & Burnham, 1990)
+    data.easy_ro  # {'A': 1e13, 'E_J': [...], 'f': [...]}
 """
 
 import os
@@ -43,50 +43,50 @@ import pandas as pd
 
 
 # -----------------------------------------------------------------------
-# Кинетические константы EASY%Ro (Sweeney & Burnham, 1990)
+# EASY%Ro kinetic constants (Sweeney & Burnham, 1990)
 # -----------------------------------------------------------------------
 
 _EASY_RO = {
-    # Энергии активации Ei [ккал/моль]
+    # Activation energies Ei [kcal/mol]
     'E_kcal': np.array([
         34, 36, 38, 40, 42, 44, 46, 48, 50, 52,
         54, 56, 58, 60, 62, 64, 66, 68, 70, 72,
     ], dtype=np.float64),
 
-    # Весовые доли fi
+    # Reaction weights fi
     'f': np.array([
         0.03, 0.03, 0.04, 0.04, 0.05, 0.05, 0.06, 0.04, 0.04, 0.07,
         0.06, 0.06, 0.06, 0.05, 0.05, 0.04, 0.03, 0.02, 0.02, 0.01,
     ], dtype=np.float64),
 
-    # Предэкспоненциальный множитель A [1/с] — единый для всех реакций
+    # Preexponential factor A [1/s], shared by all reactions
     'A': 1.0e13,
 
-    # Универсальная газовая постоянная Rg [ккал/(моль·К)]
+    # Gas constant Rg [kcal/(mol K)]
     'Rg_kcal': 1.987e-3,
 }
 
-# Перевод в СИ
-_EASY_RO['E_J'] = _EASY_RO['E_kcal'] * 4186.8     # Дж/моль
-_EASY_RO['Rg_J'] = 8.314                            # Дж/(моль·К)
+# Conversion to SI
+_EASY_RO['E_J'] = _EASY_RO['E_kcal'] * 4186.8     # J/mol
+_EASY_RO['Rg_J'] = 8.314                        # J/(mol K)
 
 
 # -----------------------------------------------------------------------
-# Вспомогательные функции
+# Helpers
 # -----------------------------------------------------------------------
 
 def _layer_sort_key(name):
-    """Ключ сортировки: 'Layer_4_1' -> (4, 1)."""
+    """Sorting key: 'Layer_4_1' -> (4, 1)."""
     parts = name.replace('Layer_', '').split('_')
     return tuple(int(p) for p in parts)
 
 
 def _load_property_xlsx(filepath):
     """
-    Загружает xlsx со свойством.
-    Возвращает dict: layer_name -> DataFrame.
+    Load an XLSX property file.
+    Return a mapping from layer names to DataFrames.
     """
-    print("Читаю " + filepath)
+    print("Reading " + filepath)
     xls = pd.ExcelFile(filepath)
     result = {}
     for sheet in xls.sheet_names:
@@ -95,29 +95,29 @@ def _load_property_xlsx(filepath):
 
 
 # -----------------------------------------------------------------------
-# Основной класс
+# Basin data
 # -----------------------------------------------------------------------
 
 class BasinData:
-    """Контейнер данных бассейна для задачи теплопереноса."""
+    """Basin input data for the heat transfer problem."""
 
     def __init__(self, xlsx_dir):
         """
-        Параметры:
-            xlsx_dir       : папка с Depth.xlsx, Lithology.xlsx, Porosity.xlsx,
+        Parameters:
+            xlsx_dir       : directory containing Depth.xlsx, Lithology.xlsx, Porosity.xlsx,
                              Heat_Flow_Basal.xlsx, Tsurf.xlsx
         """
-        # Загрузка свойств-полей
+        # Load field data
         self._depth = _load_property_xlsx(os.path.join(xlsx_dir, 'Depth.xlsx'))
         self._lith = _load_property_xlsx(os.path.join(xlsx_dir, 'Lithology.xlsx'))
         self._poro = _load_property_xlsx(os.path.join(xlsx_dir, 'Porosity.xlsx'))
         self._hf = _load_property_xlsx(os.path.join(xlsx_dir, 'Heat_Flow_Basal.xlsx'))
         self._tsurf = _load_property_xlsx(os.path.join(xlsx_dir, 'Tsurf.xlsx'))
 
-        # Слои (общий список из Depth)
+        # All layers from Depth
         self.layers = sorted(self._depth.keys(), key=_layer_sort_key)
 
-        # Временные шаги (объединение всех)
+        # Union of ages across all layers
         all_times = set()
         self._layer_times = {}
         for layer, df in self._depth.items():
@@ -126,29 +126,29 @@ class BasinData:
             all_times.update(ts)
         self.times = sorted(all_times)
 
-        # Свойства литотипов
+        # Lithotype properties
         self.lithotypes = self._load_lithotypes(os.path.join(xlsx_dir, 'lithotype_properties.xlsx'))
 
-        # Кинетика EASY%Ro
+        # EASY%Ro kinetics
         self.easy_ro = _EASY_RO.copy()
 
     # -------------------------------------------------------------------
-    # Загрузка литотипов
+    # Lithotype loading
     # -------------------------------------------------------------------
 
     @staticmethod
     def _load_lithotypes(filepath):
-        """Загружает lithotype_properties.xlsx в словарь {ID: {...}}."""
+        """Load lithotype_properties.xlsx into a mapping {ID: {...}}."""
         df = pd.read_excel(filepath)
         result = {}
         for _, row in df.iterrows():
             lid = int(row.iloc[0])
             result[lid] = {
                 'name':      row.iloc[1],
-                'rho_s':     float(row.iloc[2]),     # кг/м³
-                'lambda_20': float(row.iloc[3]),     # Вт/(м·К)
-                'c20_kcal':  float(row.iloc[4]),     # ккал/(кг·К)
-                'c20_J':     float(row.iloc[5]),     # Дж/(кг·К)
+                'rho_s':     float(row.iloc[2]),     # kg/m³
+                'lambda_20': float(row.iloc[3]),     # W/(m K)
+                'c20_kcal':  float(row.iloc[4]),     # kcal/(kg K)
+                'c20_J':     float(row.iloc[5]),     # J/(kg K)
                 'U_ppm':     float(row.iloc[6]),
                 'Th_ppm':    float(row.iloc[7]),
                 'K_pct':     float(row.iloc[8]),
@@ -157,33 +157,33 @@ class BasinData:
         return result
 
     # -------------------------------------------------------------------
-    # Доступ к данным
+    # Data access
     # -------------------------------------------------------------------
 
     def layers_at(self, time):
-        """Список слоёв, существующих в момент time (отсортировано сверху вниз)."""
+        """Return layers present at the given age, sorted from top to bottom."""
         return [l for l in self.layers if time in self._layer_times.get(l, [])]
 
     def _get_slice(self, storage, layer, time):
-        """Извлекает строки для (layer, time) из хранилища."""
+        """Return rows for the given layer and age."""
         df = storage.get(layer)
         if df is None:
-            raise KeyError(f'Слой {layer} не найден')
+            raise KeyError(f'Layer {layer} not found')
         sub = df[df.iloc[:, 1] == time]
         if len(sub) == 0:
             raise KeyError(
-                f'Слой {layer} не существует в момент {time} Ma'
+                f'Layer {layer} is not present at age {time} Ma'
             )
         return sub
 
     def geometry(self, layer, time):
         """
-        Геометрия слоя.
+        Layer geometry.
 
-        Возвращает:
-            x     : np.array — координата вдоль разреза [м]
-            z_top : np.array — глубина кровли [м]
-            z_bot : np.array — глубина подошвы [м]
+        Returns:
+            x     : np.array, horizontal coordinate [m]
+            z_top : np.array, top depth [m]
+            z_bot : np.array, bottom depth [m]
         """
         sub = self._get_slice(self._depth, layer, time)
         return (sub.iloc[:, 0].values.astype(np.float64),
@@ -191,30 +191,30 @@ class BasinData:
                 sub.iloc[:, 3].values.astype(np.float64))
 
     def lithology(self, layer, time):
-        """Коды литотипов (Aver). Возвращает np.array of int."""
+        """Return lithotype codes (Aver) as an integer array."""
         sub = self._get_slice(self._lith, layer, time)
         return sub.iloc[:, 7].values.astype(int)
 
     def porosity(self, layer, time):
         """
-        Пористость (Aver).
+        Porosity (Aver).
 
-        Возвращает:
-            φ : np.array — пористость в **процентах**
-                Для формул (2)–(4) делите на 100.
+        Returns:
+            phi : np.array, porosity in percent.
+                  Divide by 100 for formulas (2)-(4).
         """
         sub = self._get_slice(self._poro, layer, time)
         return sub.iloc[:, 7].values.astype(np.float64)
 
     def tsurf(self, time):
         """
-        Температура поверхности Tsurf(x, t) — граничное условие (8).
+        Surface temperature Tsurf(x, t), boundary condition (8).
 
-        Возвращает:
-            x     : np.array [м]
+        Returns:
+            x     : np.array [m]
             tsurf : np.array [°C]
 
-        Берётся из самого верхнего слоя в момент time.
+        Read from the topmost layer at the given age.
         """
         top_layer = self.layers_at(time)[0]
         sub = self._get_slice(self._tsurf, top_layer, time)
@@ -223,13 +223,13 @@ class BasinData:
 
     def heat_flow(self, time):
         """
-        Базальный тепловой поток qbasal(x, t) — граничное условие (9).
+        Basal heat flux qbasal(x, t), boundary condition (9).
 
-        Возвращает:
-            x      : np.array [м]
-            qbasal : np.array [мВт/м²]
+        Returns:
+            x      : np.array [m]
+            qbasal : np.array [mW/m²]
 
-        Берётся из самого нижнего слоя в момент time.
+        Read from the bottommost layer at the given age.
         """
         bot_layer = self.layers_at(time)[-1]
         sub = self._get_slice(self._hf, bot_layer, time)
@@ -237,21 +237,21 @@ class BasinData:
                 sub.iloc[:, 7].values.astype(np.float64))
 
     # -------------------------------------------------------------------
-    # Полная конфигурация на момент времени
+    # Full configuration at a given age
     # -------------------------------------------------------------------
 
     def snapshot(self, time):
         """
-        Полный снимок бассейна в момент time.
+        Full basin configuration at the given age.
 
-        Возвращает list of dict (сверху вниз), каждый элемент:
+        Return a list of dictionaries ordered from top to bottom:
             {
                 'layer':    str,
                 'x':        np.array,
                 'z_top':    np.array,
                 'z_bot':    np.array,
                 'lith':     np.array (int),
-                'porosity': np.array (%, делить на 100 для формул),
+                'porosity': np.array (percent, divide by 100 for formulas),
             }
         """
         result = []

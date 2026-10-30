@@ -16,10 +16,10 @@ BasinForwardResult BasinForwardSolver::solve(const std::filesystem::path& output
     const auto snapshots = output / "snapshots";
     std::filesystem::create_directories(snapshots);
     const double prepare_output_s = elapsed_seconds(output_start);
-    std::size_t snapshot_number = 0;
     BasinForwardResult result = solve([&](const BasinSnapshot& snapshot) {
         std::ostringstream name;
-        name << "snapshot_" << std::setw(4) << std::setfill('0') << snapshot_number++ << ".cgrd";
+        name << "snapshot_e" << std::setw(2) << std::setfill('0') << snapshot.epoch + 1 << "_s"
+             << std::setw(4) << snapshot.step << ".cgrd";
         write_basin_binary(snapshots / name.str(), snapshot);
         if (observe)
             observe(snapshot);

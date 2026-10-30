@@ -1,3 +1,4 @@
+#include "basin/basin_snapshot.hpp"
 #include "basin/forward/basin_forward_solver.hpp"
 #include "basin/io/basin_forward_options.hpp"
 #include "basin/io/basin_statistics.hpp"
@@ -71,8 +72,23 @@ int main(int argc, const char* const argv[]) {
             const auto input_start = Clock::now();
             auto input = BasinInput::read(argv[1]);
             input_s = elapsed_seconds(input_start);
+            const auto configs = input.configs();
             BasinForwardSolver solver(std::move(input), settings);
-            result = solver.solve(output_directory);
+            result = solver.solve(output_directory, [configs](const BasinSnapshot& snapshot) {
+                if (snapshot.kind == BasinSnapshot::Kind::after_event)
+                    return;
+                if (snapshot.kind == BasinSnapshot::Kind::initial) {
+                    std::cout << "Starting calculation: age " << snapshot.age_ma << " Ma\n"
+                              << std::flush;
+                    return;
+                }
+                const double progress = 100.0 * (configs.front().age_ma - snapshot.age_ma) /
+                                        (configs.front().age_ma - configs.back().age_ma);
+                std::cout << "Epoch " << snapshot.epoch + 1 << '/' << configs.size() - 1
+                          << ", step " << snapshot.step << ": age " << snapshot.age_ma << " Ma; "
+                          << progress << "% of model time completed\n"
+                          << std::flush;
+            });
             std::cout << "timesteps=" << result.timesteps
                       << " nonlinear_iterations=" << result.nonlinear_iterations
                       << " linear_iterations=" << result.linear_iterations << '\n';

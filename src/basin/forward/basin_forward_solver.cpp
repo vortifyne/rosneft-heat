@@ -92,7 +92,8 @@ State initial_state(const ColEpochGrid& epoch, const BasinConfig& cfg0, const Ba
 }
 
 void observe_state(const State& state, const EasyRoModel& easy_ro, BasinSnapshot::Kind kind,
-                   double age_ma, const BasinObserver& observer, BasinTimings& timings) {
+                   std::size_t epoch, int step, double age_ma, const BasinObserver& observer,
+                   BasinTimings& timings) {
     if (!observer)
         return;
     auto start = Clock::now();
@@ -101,6 +102,8 @@ void observe_state(const State& state, const EasyRoModel& easy_ro, BasinSnapshot
     timings.easy_ro_s += elapsed_seconds(start);
     start = Clock::now();
     observer({.kind = kind,
+              .epoch = epoch,
+              .step = step,
               .age_ma = age_ma,
               .grid = state.grid,
               .T = values(state.T),
@@ -170,8 +173,8 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
     integrator.set_linear_solver(settings.linear_solver);
     integrator.set_preconditioner_reuse(settings.pc_reuse);
     result.timings.grid_s += elapsed_seconds(grid_start);
-    observe_state(state, easy_ro, BasinSnapshot::Kind::initial, configs.front().age_ma, observe,
-                  result.timings);
+    observe_state(state, easy_ro, BasinSnapshot::Kind::initial, 0, 0, configs.front().age_ma,
+                  observe, result.timings);
 
     for (std::size_t epoch_index = 0; epoch_index + 1 < configs.size(); ++epoch_index) {
         const auto epoch_start = Clock::now();
@@ -245,6 +248,12 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
             state.grid = std::move(grid);
             state.T = T1;
             t = t_next;
+            const bool at_event = t == duration;
+            observe_state(
+                state, easy_ro,
+                at_event ? BasinSnapshot::Kind::before_event : BasinSnapshot::Kind::timestep,
+                epoch_index, epoch_stats.timesteps + step_stats.timesteps,
+                at_event ? cfg1.age_ma : step_stats.age_end_ma, observe, step_stats.timings);
             step_stats.timings.total_s = elapsed_seconds(step_start);
             epoch_stats.timesteps += step_stats.timesteps;
             epoch_stats.nonlinear_iterations += step_stats.nonlinear_iterations;
@@ -252,8 +261,6 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
             epoch_stats.timings += step_stats.timings;
             result.steps.push_back(step_stats);
         }
-        observe_state(state, easy_ro, BasinSnapshot::Kind::before_event, cfg1.age_ma, observe,
-                      epoch_stats.timings);
         grid_start = Clock::now();
         const bool last = epoch_index + 2 == configs.size();
         const int born = epoch.born_layer_id.value_or(-1);
@@ -274,8 +281,8 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
         const auto transfer_start = Clock::now();
         state = transfer_state(state, std::move(next_grid), easy_ro, born);
         epoch_stats.timings.transfer_s += elapsed_seconds(transfer_start);
-        observe_state(state, easy_ro, BasinSnapshot::Kind::after_event, cfg1.age_ma, observe,
-                      epoch_stats.timings);
+        observe_state(state, easy_ro, BasinSnapshot::Kind::after_event, epoch_index + 1, 0,
+                      cfg1.age_ma, observe, epoch_stats.timings);
         epoch_stats.timings.total_s = elapsed_seconds(epoch_start);
         result.timesteps += epoch_stats.timesteps;
         result.nonlinear_iterations += epoch_stats.nonlinear_iterations;

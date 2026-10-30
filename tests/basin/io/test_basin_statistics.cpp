@@ -18,7 +18,7 @@ std::vector<Row> timing_tree(const std::string& report) {
     std::istringstream input(report);
     std::vector<Row> rows;
     for (std::string line; std::getline(input, line);) {
-        if (rows.empty() && !line.starts_with("Программа"))
+        if (rows.empty() && !line.starts_with("Program"))
             continue;
         if (line.empty())
             break;
@@ -68,9 +68,11 @@ TEST(BasinStatistics, ChildrenSumToParentsAndPercentagesUseProgramTime) {
             EXPECT_DOUBLE_EQ(children, rows[i].seconds);
         }
     }
-    EXPECT_NE(output.str().find("Свойства, всего (включены в сборку)"), std::string::npos);
-    EXPECT_NE(output.str().find("В среднем нелинейных итераций на шаг: 3.00"), std::string::npos);
-    EXPECT_NE(output.str().find("линейных на нелинейную: 4.00"), std::string::npos);
+    EXPECT_NE(output.str().find("Properties, total (included in assembly)"), std::string::npos);
+    EXPECT_NE(output.str().find("Average nonlinear iterations per timestep: 3.00"),
+              std::string::npos);
+    EXPECT_NE(output.str().find("linear iterations per nonlinear iteration: 4.00"),
+              std::string::npos);
 }
 
 TEST(BasinStatistics, EmptyCalculationHasFiniteZeroStatistics) {

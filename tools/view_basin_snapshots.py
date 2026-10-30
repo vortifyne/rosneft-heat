@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 
 import matplotlib.pyplot as plt
 from matplotlib.collections import PolyCollection
@@ -29,7 +30,8 @@ def main() -> None:
     parser.add_argument("--field", choices=("temperature", "reflectance", "layer"),
                         default="temperature")
     arguments = parser.parse_args()
-    paths = sorted((arguments.directory / "snapshots").glob("snapshot_*.cgrd"))
+    paths = sorted((arguments.directory / "snapshots").glob("snapshot_*.cgrd"),
+                   key=lambda path: tuple(map(int, re.findall(r"\d+", path.stem))))
     if not paths:
         parser.error(f"No snapshot_*.cgrd files found in {arguments.directory / 'snapshots'}")
     snapshots = [read_snapshot(path) for path in paths]
@@ -58,7 +60,7 @@ def main() -> None:
 
     def title(index: int) -> str:
         snapshot = snapshots[index]
-        phase = ("initial", "before event", "after event")[snapshot["kind"]]
+        phase = ("initial", "before event", "after event", "timestep")[snapshot["kind"]]
         return f"{snapshot['age']:g} Ma — {phase} — {snapshot['path'].name}"
 
     axis.set_title(title(0))

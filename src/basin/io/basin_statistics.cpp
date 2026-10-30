@@ -51,41 +51,44 @@ void write_basin_statistics(std::ostream& output, const BasinForwardResult& resu
         return program_s > 0.0 ? 100.0 * seconds / program_s : 0.0;
     };
     const auto row = [&](std::string_view label, double seconds) {
-        const auto width = static_cast<std::size_t>(std::count_if(
-            label.begin(), label.end(), [](unsigned char c) { return (c & 0xc0) != 0x80; }));
-        output << label << std::string(width < 52 ? 52 - width : 1, ' ') << std::right << std::fixed
-               << std::setw(14) << std::setprecision(6) << seconds << std::setw(11)
-               << std::setprecision(2) << percent(seconds) << '\n';
+        output << std::left << std::setw(52) << label << std::right << std::fixed << std::setw(14)
+               << std::setprecision(6) << seconds << std::setw(11) << std::setprecision(2)
+               << percent(seconds) << '\n';
     };
-    output << "\nЧасть программы                                      Время, с   % программы\n";
+    output << '\n'
+           << std::left << std::setw(52) << "Stage" << std::right << std::setw(14) << "Time, s"
+           << std::setw(11) << "% program" << '\n';
     const auto& t = result.timings;
     const auto& nonlinear = t.nonlinear;
-    row("Программа", program_s);
-    row("  Инициализация и завершение", initialization_s);
-    row("  Чтение входных данных", input_s);
-    row("  Прямой расчёт", t.total_s);
-    row("    Геометрия, сетка и подготовка шагов", t.grid_s);
-    row("    Перенос состояния", t.transfer_s);
-    row("    Нелинейное решение", nonlinear.total_s);
-    row("      Сборка", nonlinear.assembly.total_s());
-    row("        Невязка", nonlinear.assembly.residual_s);
-    row("          Свойства", t.properties.residual_s);
-    row("          Прочее", std::max(0.0, nonlinear.assembly.residual_s - t.properties.residual_s));
-    row("        Матрица", nonlinear.assembly.matrix_s);
-    row("          Свойства", t.properties.matrix_s);
-    row("          Прочее", std::max(0.0, nonlinear.assembly.matrix_s - t.properties.matrix_s));
-    row("      Линейное решение", nonlinear.linear_s);
-    row("      Прочее",
+    row("Program", program_s);
+    row("  Initialization and shutdown", initialization_s);
+    row("  Input", input_s);
+    row("  Forward solve", t.total_s);
+    row("    Geometry, grid and step preparation", t.grid_s);
+    row("    State transfer", t.transfer_s);
+    row("    Nonlinear solve", nonlinear.total_s);
+    row("      Assembly", nonlinear.assembly.total_s());
+    row("        Residual", nonlinear.assembly.residual_s);
+    row("          Properties", t.properties.residual_s);
+    row("          Other", std::max(0.0, nonlinear.assembly.residual_s - t.properties.residual_s));
+    row("        Matrix", nonlinear.assembly.matrix_s);
+    row("          Properties", t.properties.matrix_s);
+    row("          Other", std::max(0.0, nonlinear.assembly.matrix_s - t.properties.matrix_s));
+    row("      Linear solve", nonlinear.linear_s);
+    row("      Other",
         std::max(0.0, nonlinear.total_s - nonlinear.assembly.total_s() - nonlinear.linear_s));
     row("    EASY%Ro", t.easy_ro_s);
-    row("    Запись результатов", t.output_s);
-    row("    Прочее", other_seconds(t));
-    row("  Прочее", std::max(0.0, program_s - initialization_s - input_s - t.total_s));
+    row("    Output", t.output_s);
+    row("    Other", other_seconds(t));
+    row("  Other", std::max(0.0, program_s - initialization_s - input_s - t.total_s));
     output << '\n';
-    row("Свойства, всего (включены в сборку)", t.properties.total_s());
+    row("Properties, total (included in assembly)", t.properties.total_s());
 
-    output << "\nЭпоха  Возраст начала  Возраст конца  Шаги  Нелин. ит.  Лин. ит."
-              "      Время, с  % программы\n";
+    output << '\n'
+           << std::setw(5) << "Epoch" << std::setw(16) << "Start age, Ma" << std::setw(14)
+           << "End age, Ma" << std::setw(6) << "Steps" << std::setw(12) << "Nonlin. it."
+           << std::setw(10) << "Lin. it." << std::setw(14) << "Time, s" << std::setw(13)
+           << "% program" << '\n';
     for (const auto& epoch : result.epochs) {
         output << std::setw(5) << epoch.epoch + 1 << std::setprecision(3) << std::setw(16)
                << epoch.age_begin_ma << std::setw(14) << epoch.age_end_ma << std::setw(6)
@@ -94,14 +97,14 @@ void write_basin_statistics(std::ostream& output, const BasinForwardResult& resu
                << epoch.timings.total_s << std::setw(13) << std::setprecision(2)
                << percent(epoch.timings.total_s) << '\n';
     }
-    output << "\nВсего шагов: " << result.timesteps
-           << "; нелинейных итераций: " << result.nonlinear_iterations
-           << "; линейных итераций: " << result.linear_iterations << '\n';
-    output << "В среднем нелинейных итераций на шаг: "
+    output << "\nTotal timesteps: " << result.timesteps
+           << "; nonlinear iterations: " << result.nonlinear_iterations
+           << "; linear iterations: " << result.linear_iterations << '\n';
+    output << "Average nonlinear iterations per timestep: "
            << (result.timesteps > 0
                    ? static_cast<double>(result.nonlinear_iterations) / result.timesteps
                    : 0.0)
-           << "; линейных на нелинейную: "
+           << "; linear iterations per nonlinear iteration: "
            << (result.nonlinear_iterations > 0
                    ? static_cast<double>(result.linear_iterations) / result.nonlinear_iterations
                    : 0.0)
