@@ -1,6 +1,6 @@
 #include "numerics/linear/petsc_krylov_linear_solver.hpp"
 #include "numerics/nonlinear/nonlinear_solver.hpp"
-#include "petsc_test_session.hpp"
+#include "support/petsc_test_session.hpp"
 
 #include <gtest/gtest.h>
 #include <vector>

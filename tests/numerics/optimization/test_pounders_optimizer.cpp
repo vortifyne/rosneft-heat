@@ -1,5 +1,5 @@
 #include "numerics/optimization/pounders_optimizer.hpp"
-#include "petsc_test_session.hpp"
+#include "support/petsc_test_session.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>

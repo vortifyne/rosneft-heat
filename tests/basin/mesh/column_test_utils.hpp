@@ -1,9 +1,13 @@
 #pragma once
 
+#include "basin/geometry/basin_geometry.hpp"
 #include "basin/mesh/nonmatching_column_grid.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <optional>
+#include <span>
+#include <vector>
 
 inline NonmatchingColumnGrid make_test_column_grid(std::size_t nx, std::size_t nz, double width,
                                                    double depth) {
@@ -31,4 +35,22 @@ inline NonmatchingColumnGrid make_test_column_grid(std::size_t nx, std::size_t n
     }
     rebuild_nonmatching_column_faces(grid);
     return grid;
+}
+
+inline BasinGeometry make_test_layered_geometry() {
+    const std::vector<double> x{0.0, 1.0, 2.0};
+    return {.x = x,
+            .boundaries = {{0.0, 0.4, 0.0}, {0.8, 1.2, 1.0}, {2.0, 2.4, 2.2}},
+            .layers = {{1, 0.0, 2.0}, {2, 0.0, 2.0}}};
+}
+
+inline double area_weighted_error(const NonmatchingColumnGrid& grid,
+                                  std::span<const double> solution, const auto& exact) {
+    double squared_error = 0.0;
+    for (const auto& cell : grid.cells) {
+        const Point2D point = cell.center();
+        const double difference = solution[cell.index] - exact(point.x, point.z);
+        squared_error += cell.area() * difference * difference;
+    }
+    return std::sqrt(squared_error / grid.area());
 }

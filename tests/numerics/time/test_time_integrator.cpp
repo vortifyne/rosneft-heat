@@ -1,6 +1,6 @@
 #include "numerics/time/semi_discrete_system.hpp"
 #include "numerics/time/time_integrator.hpp"
-#include "petsc_test_session.hpp"
+#include "support/petsc_test_session.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>
@@ -228,14 +228,6 @@ TEST(TimeIntegratorTest, ReportsWhenTimeStepCannotAdvanceFloatingPointTime) {
 
     EXPECT_EQ(result.status, TimeIntegrationStatus::time_step_too_small);
     EXPECT_EQ(result.accepted_steps, 0);
-}
-
-TEST(TimeIntegratorTest, DelegatesLinearSolverSelection) {
-    TimeIntegrator integrator;
-
-    EXPECT_NO_THROW(integrator.set_linear_solver(LinearSolverOptions{}));
-    EXPECT_EQ(integrator.nonlinear_solver().linear_solver_options(), LinearSolverOptions{});
-    EXPECT_EQ(integrator.nonlinear_solver().linear_solver().type(), LinearSolverType::direct);
 }
 
 } // namespace

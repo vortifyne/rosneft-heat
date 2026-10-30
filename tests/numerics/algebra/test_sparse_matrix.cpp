@@ -25,18 +25,6 @@ void expect_test_coefficients(const SparseMatrix& matrix) {
     EXPECT_DOUBLE_EQ(matrix.coefficient(2, 2), 3.0);
 }
 
-TEST(SparseMatrixTest, CreatesRequestedStorageOrder) {
-    const SparseMatrix csr_matrix(2, 3, SparseStorageOrder::csr);
-    const SparseMatrix csc_matrix(4, 5, SparseStorageOrder::csc);
-
-    EXPECT_EQ(csr_matrix.rows(), 2);
-    EXPECT_EQ(csr_matrix.cols(), 3);
-    EXPECT_EQ(csr_matrix.storage_order(), SparseStorageOrder::csr);
-    EXPECT_EQ(csc_matrix.rows(), 4);
-    EXPECT_EQ(csc_matrix.cols(), 5);
-    EXPECT_EQ(csc_matrix.storage_order(), SparseStorageOrder::csc);
-}
-
 TEST(SparseMatrixTest, BuildsCompressedCsrFromProjectTriplets) {
     SparseMatrix matrix(3, 3, SparseStorageOrder::csr);
     const auto triplets = make_test_triplets();

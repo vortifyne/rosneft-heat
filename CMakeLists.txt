@@ -107,48 +107,62 @@ if(BUILD_TESTING)
   enable_testing()
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
-  add_executable(heat_tests
-    tests/test_bdf1.cpp
-    tests/test_nonlinear_solver.cpp
-    tests/test_sparse_matrix.cpp
-    tests/test_time_integrator.cpp
-    tests/test_umfpack_linear_solver.cpp
-    tests/test_petsc_krylov_linear_solver.cpp
-    tests/test_vector.cpp
-    tests/test_pounders_optimizer.cpp
-    tests/test_easy_ro.cpp
-    tests/test_basin_geometry.cpp
-    tests/test_column_epoch_grid.cpp
-    tests/test_column_field_transfer.cpp
-    tests/test_basin_forward_solver.cpp
-    tests/test_manufactured_heat_solution.cpp
-    tests/test_nonmatching_column_grid.cpp
-    tests/test_nonmatching_column_accuracy.cpp
-    tests/test_nonmatching_column_transient_system.cpp
-    tests/test_thermophysical_properties.cpp
+  add_executable(heat_numerics_tests
+    tests/numerics/algebra/test_sparse_matrix.cpp
+    tests/numerics/algebra/test_vector.cpp
+    tests/numerics/linear/test_umfpack_linear_solver.cpp
+    tests/numerics/linear/test_petsc_krylov_linear_solver.cpp
+    tests/numerics/nonlinear/test_nonlinear_solver.cpp
+    tests/numerics/time/test_bdf1.cpp
+    tests/numerics/time/test_time_integrator.cpp
+    tests/numerics/optimization/test_pounders_optimizer.cpp
   )
-  heat_configure_target(heat_tests)
-  target_link_libraries(heat_tests PRIVATE
-    basin_heat_forward heat_opt
+  heat_configure_target(heat_numerics_tests)
+  target_include_directories(heat_numerics_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+  target_link_libraries(heat_numerics_tests PRIVATE
+    heat_numerics heat_opt
     GTest::gtest_main PkgConfig::PETSc MPI::MPI_CXX
   )
-  gtest_discover_tests(heat_tests)
+  gtest_discover_tests(heat_numerics_tests PROPERTIES LABELS numerics)
+
+  add_executable(basin_heat_tests
+    tests/basin/geometry/test_basin_geometry.cpp
+    tests/basin/mesh/test_column_epoch_grid.cpp
+    tests/basin/mesh/test_column_field_transfer.cpp
+    tests/basin/mesh/test_nonmatching_column_grid.cpp
+    tests/basin/discretization/test_nonmatching_column_flux.cpp
+    tests/basin/discretization/test_nonmatching_column_heat_system.cpp
+    tests/basin/discretization/test_nonmatching_column_accuracy.cpp
+    tests/basin/discretization/test_nonmatching_column_time.cpp
+    tests/basin/physics/test_easy_ro.cpp
+    tests/basin/physics/test_thermophysical_properties.cpp
+    tests/basin/io/test_basin_forward_options.cpp
+    tests/basin/forward/test_basin_forward_solver.cpp
+  )
+  heat_configure_target(basin_heat_tests)
+  target_include_directories(basin_heat_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+  target_link_libraries(basin_heat_tests PRIVATE
+    basin_heat_forward
+    GTest::gtest_main PkgConfig::PETSc MPI::MPI_CXX
+  )
+  gtest_discover_tests(basin_heat_tests PROPERTIES LABELS basin)
 
   if(HEAT_BUILD_MODEL)
     add_executable(model_heat_tests
-      tests/test_model_heat_forward_solver.cpp
-      tests/test_model_heat_system.cpp
-      tests/test_model_heat_inverse_recovery.cpp
-      tests/test_model_heat_inverse_solver.cpp
-      tests/test_model_heat_observation_data.cpp
-      tests/test_model_heat_parameter_space.cpp
-      tests/test_model_heat_residual_evaluator.cpp
+      tests/model/forward/test_model_heat_forward_solver.cpp
+      tests/model/forward/test_model_heat_system.cpp
+      tests/model/inverse/test_model_heat_inverse_recovery.cpp
+      tests/model/inverse/test_model_heat_inverse_solver.cpp
+      tests/model/inverse/test_model_heat_observation_data.cpp
+      tests/model/inverse/test_model_heat_parameter_space.cpp
+      tests/model/inverse/test_model_heat_residual_evaluator.cpp
     )
     heat_configure_target(model_heat_tests)
+    target_include_directories(model_heat_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
     target_link_libraries(model_heat_tests PRIVATE
       model_heat_inverse GTest::gtest_main PkgConfig::PETSc MPI::MPI_CXX
     )
-    gtest_discover_tests(model_heat_tests)
+    gtest_discover_tests(model_heat_tests PROPERTIES LABELS model)
   endif()
 endif()
 

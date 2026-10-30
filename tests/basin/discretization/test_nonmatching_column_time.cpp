@@ -1,10 +1,12 @@
 #include "basin/discretization/nonmatching_column_heat_system.hpp"
 #include "basin/geometry/basin_geometry.hpp"
+#include "basin/mesh/column_test_utils.hpp"
 #include "numerics/time/time_integrator.hpp"
-#include "petsc_test_session.hpp"
+#include "support/petsc_test_session.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>
+#include <numbers>
 #include <optional>
 #include <vector>
 
@@ -119,6 +121,43 @@ Vector solve_temperature_dependent_case(double timestep, LinearSolverOptions lin
     const TimeIntegrationResult result = integrator.advance_to(system, 1.0e6, nonlinear, linear);
     EXPECT_TRUE(result.completed());
     return integrator.current_snapshot().solution;
+}
+
+double transient_error(double timestep) {
+    constexpr double conductivity = 2.0;
+    constexpr double capacity = 3.0;
+    constexpr double amplitude = 10.0;
+    constexpr double final_time = 0.8;
+    constexpr double kz = std::numbers::pi / 4.0;
+    constexpr double decay = conductivity * kz * kz / capacity;
+    const auto grid = make_test_column_grid(1, 128, 1.0, 2.0);
+    const std::vector<double> coefficients(grid.cells.size(), conductivity);
+    const std::vector<double> capacities(grid.cells.size(), capacity);
+    const std::vector<double> source(grid.cells.size(), 0.0);
+    NonmatchingColumnHeatSystem system(grid, coefficients, source,
+                                       {.surface_temperature = [](Point2D) { return 300.0; },
+                                        .basal_inward_flux = [](Point2D) { return 0.0; }},
+                                       capacities);
+    Vector initial(static_cast<Vector::Index>(grid.cells.size()));
+    for (const auto& cell : grid.cells) {
+        initial[static_cast<Vector::Index>(cell.index)] =
+            300.0 + amplitude * std::sin(kz * cell.center().z);
+    }
+    TimeIntegrator integrator;
+    integrator.set_initial_solution(0.0, initial);
+    integrator.set_timestep(timestep);
+    const auto result = integrator.advance_to(system, final_time,
+                                              {.nonlinear_method = NonlinearMethod::picard,
+                                               .relative_tolerance = 1e-12,
+                                               .absolute_tolerance = 1e-8,
+                                               .max_iterations = 10},
+                                              {});
+    EXPECT_TRUE(result.completed()) << "residual=" << result.last_residual_norm;
+    return area_weighted_error(
+        grid, {integrator.current_snapshot().solution.native().data(), grid.cells.size()},
+        [](double, double z) {
+            return 300.0 + amplitude * std::exp(-decay * final_time) * std::sin(kz * z);
+        });
 }
 
 } // namespace
@@ -246,4 +285,12 @@ TEST(NonmatchingColumnHeatSystem, TemperatureDependentCaseRefinesAndAgreesWithGa
         0.125,
         LinearSolverOptions{.method = LinearMethod::gmres, .preconditioner = Preconditioner::gamg});
     EXPECT_LT((gamg - medium).infinity_norm(), 1.0e-5);
+}
+
+TEST(NonmatchingColumnHeatSystem, HasFirstOrderBdf1Convergence) {
+    const double coarse = transient_error(0.1);
+    const double medium = transient_error(0.05);
+    const double fine = transient_error(0.025);
+    EXPECT_GT(coarse / medium, 1.7);
+    EXPECT_GT(medium / fine, 1.7);
 }

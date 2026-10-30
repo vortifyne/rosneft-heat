@@ -1,8 +1,10 @@
 #include "basin/geometry/basin_geometry.hpp"
 #include "basin/mesh/column_field_transfer.hpp"
-#include "column_test_utils.hpp"
+#include "basin/mesh/column_test_utils.hpp"
 
+#include <cmath>
 #include <gtest/gtest.h>
+#include <numbers>
 #include <vector>
 
 TEST(ColumnFieldTransfer, BilinearFieldAndNewLayerHistory) {
@@ -46,4 +48,30 @@ TEST(ColumnFieldTransfer, PreservesConstantAcrossDifferentColumnPartitions) {
         EXPECT_NEAR(value, 315.0, 1e-12);
     for (double value : transfer.interpolate_same_layer(values))
         EXPECT_NEAR(value, 315.0, 1e-12);
+}
+
+namespace {
+
+double transfer_error(std::size_t nx, std::size_t nz) {
+    constexpr double kx = std::numbers::pi / 4.0;
+    constexpr double kz = std::numbers::pi / 2.0;
+    const auto source = make_test_column_grid(nx, nz, 4.0, 2.0);
+    const auto target = make_test_column_grid(nx * 2, nz * 2, 4.0, 2.0);
+    const auto exact = [](double x, double z) {
+        return 300.0 + 15.0 * std::cos(kx * x) * std::sin(kz * z);
+    };
+    std::vector<double> values(source.cells.size());
+    for (const auto& cell : source.cells)
+        values[cell.index] = exact(cell.center().x, cell.center().z);
+    const auto transferred =
+        make_column_field_transfer(source, target).interpolate_temperature(values);
+    return area_weighted_error(target, transferred, exact);
+}
+
+} // namespace
+
+TEST(ColumnFieldTransfer, SmoothFieldConvergesUnderRefinement) {
+    const double coarse = transfer_error(8, 4);
+    const double fine = transfer_error(16, 8);
+    EXPECT_GT(coarse / fine, 1.7) << coarse << ", " << fine;
 }

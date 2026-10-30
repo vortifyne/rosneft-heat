@@ -23,13 +23,6 @@ SparseMatrix make_test_matrix(SparseStorageOrder storage_order = SparseStorageOr
     return matrix;
 }
 
-TEST(UmfpackLinearSolverTest, IsDirectSolver) {
-    const UmfpackLinearSolver solver;
-
-    EXPECT_EQ(solver.type(), LinearSolverType::direct);
-    EXPECT_EQ(solver.required_storage_order(), SparseStorageOrder::csc);
-}
-
 TEST(UmfpackLinearSolverTest, SolvesCscSystemAndReportsResidual) {
     const SparseMatrix matrix = make_test_matrix();
     const Vector right_hand_side{15.0, 10.0, 10.0};

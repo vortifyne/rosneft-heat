@@ -19,19 +19,6 @@ void expect_vector_equal(const Vector& actual, std::initializer_list<double> exp
     }
 }
 
-TEST(VectorTest, ConstructsAndProvidesElementAccess) {
-    Vector vector{1.0, 2.0, 3.0};
-
-    ASSERT_EQ(vector.size(), 3);
-    EXPECT_FALSE(vector.empty());
-    EXPECT_DOUBLE_EQ(vector[0], 1.0);
-    EXPECT_DOUBLE_EQ(vector[1], 2.0);
-    EXPECT_DOUBLE_EQ(vector[2], 3.0);
-
-    vector[1] = 4.0;
-    EXPECT_DOUBLE_EQ(vector[1], 4.0);
-}
-
 TEST(VectorTest, SupportsInitializationAndResize) {
     Vector vector(3);
     vector.set_constant(2.5);

@@ -1,5 +1,5 @@
 #include "model_heat_inverse_test_problem.hpp"
-#include "petsc_test_session.hpp"
+#include "support/petsc_test_session.hpp"
 
 #include <Eigen/SVD>
 #include <array>

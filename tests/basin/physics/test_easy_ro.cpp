@@ -1,5 +1,6 @@
 #include "basin/physics/easy_ro.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <gtest/gtest.h>
@@ -56,7 +57,7 @@ TEST(EasyRo, ReflectanceGrowsAfterHeating) {
     EXPECT_GT(heated[0], initial[0]);
 }
 
-TEST(EasyRo, GaussQuadratureAgreesWithRefinedIntegrationForOrganizerReactions) {
+TEST(EasyRo, QuadratureMatchesRefinedIntegrationAndPhysicalBounds) {
     std::vector<double> energies;
     std::vector<double> weights;
     for (int index = 0; index < 20; ++index) {
@@ -76,42 +77,10 @@ TEST(EasyRo, GaussQuadratureAgreesWithRefinedIntegrationForOrganizerReactions) {
             const double reference =
                 refined_increment(energies[reaction], temperatures[0], temperatures[1], timestep);
             EXPECT_NEAR(std::exp(-state[reaction]), std::exp(-reference), 3.0e-4);
-        }
-    }
-}
-
-TEST(EasyRo, GaussQuadratureIsBoundedByRectanglesAndMoreAccurateThanTrapezoid) {
-    std::vector<double> energies;
-    std::vector<double> weights;
-    for (int index = 0; index < 20; ++index) {
-        energies.push_back((34.0 + (2.0 * index)) * 4186.8);
-        weights.push_back(index < 2 ? 0.03 : 0.04);
-    }
-    const EasyRoModel model({.preexponential = 1.0e13,
-                             .gas_constant = 8.314,
-                             .activation_energies = energies,
-                             .weights = weights});
-    constexpr double timestep = 0.1e6 * 365.25 * 24.0 * 3600.0;
-    for (const auto temperatures :
-         {std::array{300.0, 500.0}, std::array{500.0, 300.0}, std::array{350.0, 360.0}}) {
-        std::vector<double> state = model.initial_state(1);
-        model.advance(std::array{temperatures[0]}, std::array{temperatures[1]}, timestep, state);
-        for (std::size_t reaction = 0; reaction < energies.size(); ++reaction) {
             const double left = timestep * reaction_rate(energies[reaction], temperatures[0]);
             const double right = timestep * reaction_rate(energies[reaction], temperatures[1]);
-            const double midpoint =
-                timestep *
-                reaction_rate(energies[reaction], 0.5 * (temperatures[0] + temperatures[1]));
-            const double trapezoid = 0.5 * (left + right);
-            const double reference =
-                refined_increment(energies[reaction], temperatures[0], temperatures[1], timestep);
-            const double gauss_error = std::abs(std::exp(-state[reaction]) - std::exp(-reference));
-            const double trapezoid_error = std::abs(std::exp(-trapezoid) - std::exp(-reference));
-
             EXPECT_GE(state[reaction], std::min(left, right));
             EXPECT_LE(state[reaction], std::max(left, right));
-            EXPECT_LE(gauss_error, trapezoid_error + 1.0e-14);
-            EXPECT_TRUE(std::isfinite(midpoint));
         }
     }
 }

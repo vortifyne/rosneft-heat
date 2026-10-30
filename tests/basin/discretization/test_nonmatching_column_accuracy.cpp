@@ -1,8 +1,10 @@
 #include "basin/discretization/nonmatching_column_heat_system.hpp"
 #include "basin/geometry/basin_geometry.hpp"
+#include "basin/mesh/column_test_utils.hpp"
 #include "basin/mesh/nonmatching_column_grid.hpp"
 #include "basin/postprocessing/energy_rates.hpp"
 #include "numerics/linear/umfpack_linear_solver.hpp"
+#include "numerics/nonlinear/nonlinear_solver.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -18,6 +20,26 @@
 #include <vector>
 
 namespace {
+
+class SteadySystem final : public NonlinearSystem {
+public:
+    explicit SteadySystem(const NonmatchingColumnHeatSystem& system) : system_(system) {}
+
+    void assemble_residual(const Vector& solution, Vector& residual) const override {
+        system_.assemble_residual(solution, residual);
+    }
+
+private:
+    void assemble_picard_matrix(const Vector& solution, SparseMatrix& matrix) const override {
+        system_.assemble_matrix(solution, matrix);
+    }
+
+    void assemble_newton_matrix(const Vector&, SparseMatrix&) const override {
+        throw std::invalid_argument("Stationary column verification supports Picard only");
+    }
+
+    const NonmatchingColumnHeatSystem& system_;
+};
 
 constexpr double kWidth = 4.0;
 constexpr double kDepth = 4.0;
@@ -406,5 +428,66 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::Values(MultipointFluxScheme::linear,
                                      MultipointFluxScheme::nonlinear_conservative)),
     accuracy_case_name);
+
+double steady_spatial_error(std::size_t nx, std::size_t nz, MultipointFluxScheme scheme) {
+    constexpr double width = 4.0;
+    constexpr double depth = 2.0;
+    constexpr double conductivity = 2.0;
+    constexpr double amplitude = 20.0;
+    constexpr double kx = std::numbers::pi / width;
+    constexpr double kz = std::numbers::pi / (2.0 * depth);
+    const auto grid = make_test_column_grid(nx, nz, width, depth);
+    const auto exact = [](double x, double z) {
+        return kBaseTemperature + amplitude * std::cos(kx * x) * std::sin(kz * z);
+    };
+    std::vector<double> source(grid.cells.size());
+    for (const auto& cell : grid.cells) {
+        const auto point = cell.center();
+        source[cell.index] =
+            conductivity * (kx * kx + kz * kz) * (exact(point.x, point.z) - kBaseTemperature);
+    }
+    const std::vector<double> coefficients(grid.cells.size(), conductivity);
+    const NonmatchingColumnBoundaryData boundary_data{
+        .surface_temperature = [](Point2D) { return kBaseTemperature; },
+        .basal_inward_flux = [](Point2D) { return 0.0; }};
+    NonmatchingColumnHeatSystem system(grid, coefficients, source, boundary_data);
+    system.set_flux_scheme(scheme);
+    Vector temperature(static_cast<Vector::Index>(grid.cells.size()));
+    temperature.set_constant(kBaseTemperature);
+    NonlinearSolver solver;
+    const auto result = solver.solve(SteadySystem(system), temperature,
+                                     {.nonlinear_method = NonlinearMethod::picard,
+                                      .relative_tolerance = 1e-12,
+                                      .absolute_tolerance = 1e-10,
+                                      .max_iterations = 100},
+                                     {});
+    EXPECT_TRUE(result.converged()) << "residual=" << result.final_residual_norm;
+    const auto rates =
+        nonmatching_column_energy_rates(grid, {temperature.native().data(), grid.cells.size()},
+                                        coefficients, source, boundary_data);
+    EXPECT_NEAR(rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow,
+                rates.heat_production, 1e-8);
+    return area_weighted_error(grid, {temperature.native().data(), grid.cells.size()}, exact);
+}
+
+TEST(NonmatchingColumnAccuracy, HasSecondOrderSpatialConvergence) {
+    for (auto scheme :
+         {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
+        SCOPED_TRACE(static_cast<int>(scheme));
+        const double coarse = steady_spatial_error(16, 8, scheme);
+        const double medium = steady_spatial_error(32, 16, scheme);
+        const double fine = steady_spatial_error(64, 32, scheme);
+        const double finer = steady_spatial_error(128, 64, scheme);
+        const std::string prefix = scheme == MultipointFluxScheme::linear ? "linear" : "nmpfa";
+        testing::Test::RecordProperty(prefix + "_coarse_error", std::to_string(coarse));
+        testing::Test::RecordProperty(prefix + "_medium_error", std::to_string(medium));
+        testing::Test::RecordProperty(prefix + "_fine_error", std::to_string(fine));
+        testing::Test::RecordProperty(prefix + "_finer_error", std::to_string(finer));
+        // The coarsest NMPFA grid precedes the asymptotic second-order range.
+        EXPECT_GT(coarse, medium);
+        EXPECT_GT(medium / fine, 3.5) << medium << ", " << fine;
+        EXPECT_GT(fine / finer, 3.5) << fine << ", " << finer;
+    }
+}
 
 } // namespace

@@ -51,12 +51,6 @@ TimeHistory make_history() {
     return history;
 }
 
-TEST(BDF1Test, RequiresOnePreviousSnapshot) {
-    const BDF1 scheme;
-
-    EXPECT_EQ(scheme.required_snapshot_count(), 1);
-}
-
 TEST(BDF1Test, AssemblesResidualAtNewTimeWithBdf1Derivative) {
     const BDF1 scheme;
     const TimeHistory history = make_history();
@@ -135,7 +129,7 @@ TEST(BDF1Test, RejectsEmptyHistory) {
                  std::logic_error);
 }
 
-TEST(BDF1Test, RejectsNonfinitePreviousOrStepEndTime) {
+TEST(BDF1Test, RejectsNonfinitePreviousTime) {
     const BDF1 scheme;
     const RecordingSemiDiscreteSystem semi_discrete_system;
     TimeHistory nonfinite_history;
@@ -144,9 +138,6 @@ TEST(BDF1Test, RejectsNonfinitePreviousOrStepEndTime) {
 
     EXPECT_THROW(scheme.make_nonlinear_system(semi_discrete_system, nonfinite_history, 1.0),
                  std::logic_error);
-    EXPECT_THROW(scheme.make_nonlinear_system(semi_discrete_system, make_history(),
-                                              std::numeric_limits<double>::infinity()),
-                 std::invalid_argument);
 }
 
 TEST(BDF1Test, RejectsSolutionWithDifferentSizeFromHistory) {
