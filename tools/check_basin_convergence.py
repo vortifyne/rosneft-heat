@@ -110,7 +110,7 @@ def main() -> None:
         with (directory / "run.log").open("w", encoding="utf-8") as log:
             subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
         elapsed = time.monotonic() - started
-        paths = sorted(directory.glob("snapshot_*.cgrd"))
+        paths = sorted((directory / "snapshots").glob("snapshot_*.cgrd"))
         if not paths:
             raise FileNotFoundError(f"No snapshots produced in {directory}")
         snapshot = read_snapshot(paths[-1])

@@ -3,6 +3,7 @@
 #include "numerics/linear/linear_solver.hpp"
 #include "numerics/nonlinear/nonlinear_method.hpp"
 #include "numerics/nonlinear/nonlinear_system.hpp"
+#include "numerics/timing.hpp"
 
 #include <memory>
 #include <optional>
@@ -12,17 +13,6 @@ struct NonlinearSolveRequest {
     double rtol = 1.0e-8;
     double atol = 1.0e-8;
     int maxiter = 200;
-};
-
-struct SolverTimings {
-    double assembly_seconds = 0.0;
-    double linear_solve_seconds = 0.0;
-
-    SolverTimings& operator+=(const SolverTimings& other) noexcept {
-        assembly_seconds += other.assembly_seconds;
-        linear_solve_seconds += other.linear_solve_seconds;
-        return *this;
-    }
 };
 
 enum class NonlinearSolveStatus {

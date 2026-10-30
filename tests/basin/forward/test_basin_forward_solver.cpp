@@ -18,6 +18,19 @@ void write_file(const std::filesystem::path& path, const char* contents) {
     output << contents;
 }
 
+void expect_timing_tree(const BasinTimings& t) {
+    const auto& n = t.nonlinear;
+    for (double seconds :
+         {t.total_s, t.grid_s, t.transfer_s, n.total_s, n.assembly.residual_s, n.assembly.matrix_s,
+          t.properties.residual_s, t.properties.matrix_s, n.linear_s, t.easy_ro_s, t.output_s}) {
+        EXPECT_GE(seconds, 0.0);
+    }
+    EXPECT_LE(t.grid_s + t.transfer_s + n.total_s + t.easy_ro_s + t.output_s, t.total_s + 1e-10);
+    EXPECT_LE(n.assembly.total_s() + n.linear_s, n.total_s + 1e-10);
+    EXPECT_LE(t.properties.residual_s, n.assembly.residual_s + 1e-10);
+    EXPECT_LE(t.properties.matrix_s, n.assembly.matrix_s + 1e-10);
+}
+
 } // namespace
 
 TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
@@ -73,6 +86,32 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
     EXPECT_TRUE(saw_final);
     EXPECT_TRUE(saw_initial_axis);
     EXPECT_EQ(result.timesteps, 2);
+    ASSERT_EQ(result.epochs.size(), 1U);
+    ASSERT_EQ(result.steps.size(), 2U);
+    EXPECT_EQ(result.epochs.front().timesteps, result.timesteps);
+    EXPECT_EQ(result.epochs.front().nonlinear_iterations, result.nonlinear_iterations);
+    EXPECT_EQ(result.epochs.front().linear_iterations, result.linear_iterations);
+    expect_timing_tree(result.timings);
+    expect_timing_tree(result.epochs.front().timings);
+    int nonlinear_iterations = 0;
+    int linear_iterations = 0;
+    double step_seconds = 0.0;
+    double age = 1.0;
+    for (const auto& step : result.steps) {
+        EXPECT_EQ(step.epoch, 0U);
+        EXPECT_EQ(step.timesteps, 1);
+        EXPECT_DOUBLE_EQ(step.age_begin_ma, age);
+        age = step.age_end_ma;
+        nonlinear_iterations += step.nonlinear_iterations;
+        linear_iterations += step.linear_iterations;
+        step_seconds += step.timings.total_s;
+        expect_timing_tree(step.timings);
+    }
+    EXPECT_DOUBLE_EQ(age, 0.0);
+    EXPECT_EQ(nonlinear_iterations, result.nonlinear_iterations);
+    EXPECT_EQ(linear_iterations, result.linear_iterations);
+    EXPECT_LE(step_seconds, result.epochs.front().timings.total_s);
+    EXPECT_LE(result.epochs.front().timings.total_s, result.timings.total_s);
     const auto output_directory = directory / "output";
     const auto repeated = solver.solve(output_directory, [&](const BasinSnapshot& snapshot) {
         if (snapshot.kind == BasinSnapshot::Kind::initial) {
@@ -84,9 +123,22 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
     EXPECT_EQ(repeated.timesteps, result.timesteps);
     EXPECT_EQ(repeated.nonlinear_iterations, result.nonlinear_iterations);
     EXPECT_EQ(repeated.linear_iterations, result.linear_iterations);
+    expect_timing_tree(repeated.timings);
     EXPECT_TRUE(std::filesystem::is_regular_file(output_directory / "summary.txt"));
+    for (const auto* name : {"epochs.csv", "timesteps.csv"}) {
+        std::ifstream statistics(output_directory / name);
+        std::string line;
+        ASSERT_TRUE(std::getline(statistics, line));
+        EXPECT_TRUE(line.starts_with("index,epoch,age_begin_ma,age_end_ma,timesteps,"));
+        std::size_t rows = 0;
+        while (std::getline(statistics, line))
+            ++rows;
+        EXPECT_EQ(rows, std::string(name) == "epochs.csv" ? repeated.epochs.size()
+                                                          : repeated.steps.size());
+    }
     for (const auto* name : {"snapshot_0000.cgrd", "snapshot_0001.cgrd", "snapshot_0002.cgrd"}) {
-        EXPECT_GT(std::filesystem::file_size(output_directory / name), 40U);
+        EXPECT_GT(std::filesystem::file_size(output_directory / "snapshots" / name), 40U);
+        EXPECT_FALSE(std::filesystem::exists(output_directory / name));
     }
     std::filesystem::remove_all(directory);
 }

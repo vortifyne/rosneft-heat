@@ -25,13 +25,13 @@ def polygons(snapshot: dict) -> np.ndarray:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("directory", type=Path)
+    parser.add_argument("directory", type=Path, help="Calculation output directory")
     parser.add_argument("--field", choices=("temperature", "reflectance", "layer"),
                         default="temperature")
     arguments = parser.parse_args()
-    paths = sorted(arguments.directory.glob("snapshot_*.cgrd"))
+    paths = sorted((arguments.directory / "snapshots").glob("snapshot_*.cgrd"))
     if not paths:
-        parser.error("No snapshot_*.cgrd files found")
+        parser.error(f"No snapshot_*.cgrd files found in {arguments.directory / 'snapshots'}")
     snapshots = [read_snapshot(path) for path in paths]
     key = arguments.field
     data = [snapshot[key] for snapshot in snapshots]

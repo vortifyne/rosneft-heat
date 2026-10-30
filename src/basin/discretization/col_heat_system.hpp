@@ -3,6 +3,7 @@
 #include "basin/discretization/col_flux.hpp"
 #include "basin/physics/thermal_properties.hpp"
 #include "numerics/time/semi_discrete_system.hpp"
+#include "numerics/timing.hpp"
 
 #include <span>
 #include <vector>
@@ -21,6 +22,10 @@ public:
     void set_flux_scheme(MultipointFluxScheme scheme) noexcept;
     [[nodiscard]] Vector::Index size() const noexcept;
 
+    [[nodiscard]] const AssemblyTimings& property_timings() const noexcept {
+        return property_timings_;
+    }
+
     void assemble_residual(const Vector& T, Vector& r) const;
     void assemble_matrix(const Vector& T, SparseMatrix& M) const;
 
@@ -30,7 +35,7 @@ public:
                          double alpha, SparseMatrix& M) const override;
 
 private:
-    void update_coefficients(const Vector& T) const;
+    void update_coefficients(const Vector& T, double& property_s) const;
     [[nodiscard]] double horizontal_transmissibility(const HorizontalFace& face) const;
 
     void add_vertical_flux_residual(const Vector& T, Vector& r) const;
@@ -56,4 +61,5 @@ private:
     HeatBoundaryData bc_;
     MultipointFluxScheme scheme_ = MultipointFluxScheme::linear;
     mutable std::vector<MatrixTriplet> triplets_;
+    mutable AssemblyTimings property_timings_;
 };

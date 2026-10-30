@@ -73,6 +73,7 @@ add_library(basin_heat_forward STATIC
   src/basin/forward/basin_forward_solver.cpp
   src/basin/io/basin_forward_options.cpp
   src/basin/io/basin_forward_output.cpp
+  src/basin/io/basin_statistics.cpp
   src/basin/discretization/col_flux.cpp
   src/basin/discretization/col_heat_system.cpp
   src/basin/postprocessing/energy_rates.cpp
@@ -137,6 +138,7 @@ if(BUILD_TESTING)
     tests/basin/physics/test_easy_ro.cpp
     tests/basin/physics/test_thermal_properties.cpp
     tests/basin/io/test_basin_forward_options.cpp
+    tests/basin/io/test_basin_statistics.cpp
     tests/basin/forward/test_basin_forward_solver.cpp
   )
   heat_configure_target(basin_heat_tests)

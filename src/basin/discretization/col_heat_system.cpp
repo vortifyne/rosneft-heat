@@ -50,13 +50,15 @@ Vector::Index ColHeatSystem::size() const noexcept {
     return static_cast<Vector::Index>(grid_->cells.size());
 }
 
-void ColHeatSystem::update_coefficients(const Vector& T) const {
+void ColHeatSystem::update_coefficients(const Vector& T, double& property_s) const {
     if (T.size() != size()) {
         throw std::invalid_argument("Nonmatching-column solution size does not match the grid");
     }
     if (!lithotypes_.empty()) {
+        const auto start = Clock::now();
         update_thermal_fields({T.native().data(), static_cast<std::size_t>(T.size())}, phi_,
                               lithotypes_, fluid_, lambda_, rho_c_, A_);
+        property_s += elapsed_seconds(start);
     }
 }
 
@@ -71,7 +73,7 @@ double ColHeatSystem::horizontal_transmissibility(const HorizontalFace& face) co
 }
 
 void ColHeatSystem::assemble_residual(const Vector& T, Vector& r) const {
-    update_coefficients(T);
+    update_coefficients(T, property_timings_.residual_s);
     r.resize(size());
     r.set_zero();
     add_vertical_flux_residual(T, r);
@@ -106,7 +108,7 @@ void ColHeatSystem::assemble_matrix(NonlinearMethod method, double, const Vector
 }
 
 void ColHeatSystem::assemble_matrix(const Vector& T, double alpha, SparseMatrix& M) const {
-    update_coefficients(T);
+    update_coefficients(T, property_timings_.matrix_s);
     triplets_.clear();
     add_vertical_flux_matrix(T);
     add_surface_step_matrix();
