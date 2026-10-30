@@ -36,7 +36,7 @@ int main(int argc, const char* const argv[]) {
         std::cerr << "Usage: basin_forward_solver <input-dir> <output-dir> "
                      "[--dx m] [--dz m] [--dt-ma Ma] [--nonlinear-rtol tolerance] "
                      "[--nonlinear-atol tolerance] [--nonlinear-maxiter n] [--min-height m] "
-                     "[--rdp-tol m] [--axis-rdp-tol m] [--pinchout positive|zero] "
+                     "[--rdp-tol m] [--axis-rdp-tol m] "
                      "[--scheme linear|nmpfa] "
                      "[--linear-method lu|gmres|bicgstab] [--pc ilu|ilu2|gamg|boomeramg] "
                      "[--pc-reuse none|step|epoch] [--linear-rtol tolerance] [--linear-atol "

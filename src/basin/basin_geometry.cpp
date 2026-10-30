@@ -4,96 +4,34 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iterator>
-#include <limits>
 #include <set>
 #include <stdexcept>
 #include <utility>
 
-double BasinLayerGeometry::top_at(const double coordinate) const {
-    return basin_detail::interpolate(x, top, coordinate);
+double BasinGeometry::boundary_at(std::size_t contact, double coordinate) const {
+    return basin_detail::interpolate(x, boundaries[contact], coordinate);
 }
 
-double BasinLayerGeometry::bottom_at(const double coordinate) const {
-    return basin_detail::interpolate(x, bottom, coordinate);
-}
-
-BasinLayerGeometry BasinGeometry::layer(const int id) const {
-    const auto found = std::find_if(layers.begin(), layers.end(),
-                                    [id](const auto& value) { return value.id == id; });
-    if (found == layers.end())
-        throw std::out_of_range("Unknown basin geometry layer");
-    const auto& top = boundaries.at(found->top_boundary).depth;
-    const auto& bottom = boundaries.at(found->bottom_boundary).depth;
-    std::vector<double> x{found->x_min, found->x_max};
-    for (const auto* curve : {&top, &bottom})
-        for (const double p : curve->x) {
-            if (p > found->x_min && p < found->x_max)
-                x.push_back(p);
+std::vector<double> BasinGeometry::mean_boundaries(double left, double right) const {
+    std::vector<double> points{left, right};
+    for (const double coordinate : x) {
+        if (coordinate > left && coordinate < right)
+            points.push_back(coordinate);
+    }
+    std::sort(points.begin(), points.end());
+    std::vector<double> result(boundaries.size(), 0.0);
+    for (std::size_t contact = 0; contact < boundaries.size(); ++contact) {
+        for (std::size_t i = 1; i < points.size(); ++i) {
+            result[contact] +=
+                0.5 * (boundary_at(contact, points[i - 1]) + boundary_at(contact, points[i])) *
+                (points[i] - points[i - 1]);
         }
-    std::sort(x.begin(), x.end());
-    x.erase(std::unique(x.begin(), x.end()), x.end());
-    BasinLayerGeometry result{.id = id, .x = std::move(x), .top = {}, .bottom = {}};
-    for (const double p : result.x) {
-        result.top.push_back(top.at(p));
-        result.bottom.push_back(bottom.at(p));
+        result[contact] /= right - left;
     }
     return result;
 }
-
-namespace {
-
-struct PreparedLayers {
-    double age_ma;
-    std::vector<BasinLayerGeometry> layers;
-};
-
-BasinGeometry boundary_geometry(const PreparedLayers& prepared) {
-    BasinGeometry result{.age_ma = prepared.age_ma, .boundaries = {}, .layers = {}};
-    if (prepared.layers.empty())
-        return result;
-    std::vector<double> x;
-    for (const auto& layer : prepared.layers)
-        x.insert(x.end(), layer.x.begin(), layer.x.end());
-    std::sort(x.begin(), x.end());
-    x.erase(std::unique(x.begin(), x.end()), x.end());
-    std::vector<std::vector<double>> depths(prepared.layers.size() + 1);
-    for (const double p : x) {
-        double cursor = prepared.layers.front().top_at(p);
-        for (const auto& layer : prepared.layers) {
-            if (p >= layer.x.front() && p <= layer.x.back() &&
-                layer.bottom_at(p) > layer.top_at(p)) {
-                cursor = layer.top_at(p);
-                break;
-            }
-        }
-        depths.front().push_back(cursor);
-        for (std::size_t i = 0; i < prepared.layers.size(); ++i) {
-            const auto& layer = prepared.layers[i];
-            if (p >= layer.x.front() && p <= layer.x.back() &&
-                layer.bottom_at(p) > layer.top_at(p)) {
-                if (std::abs(layer.top_at(p) - cursor) > 1e-7)
-                    throw std::runtime_error("Layer boundaries do not form a continuous section");
-                cursor = layer.bottom_at(p);
-            }
-            // An absent layer has coincident boundaries at the physical contact.
-            // Its unused source zero-thickness curve does not define another surface.
-            depths[i + 1].push_back(cursor);
-        }
-    }
-    for (const auto& values : depths)
-        result.boundaries.push_back({ScalarProfile{x, values}});
-    for (std::size_t i = 0; i < prepared.layers.size(); ++i) {
-        const auto& layer = prepared.layers[i];
-        result.layers.push_back({layer.id, i, i + 1, layer.x.front(), layer.x.back()});
-    }
-    return result;
-}
-
-} // namespace
 
 BasinGeometry make_basin_geometry(const BasinConfiguration& configuration) {
-    PreparedLayers result{.age_ma = configuration.age_ma, .layers = {}};
     std::set<int> identifiers;
     for (const auto& layer : configuration.layers) {
         if (layer.x.size() < 2 || layer.top.size() != layer.x.size() ||
@@ -108,7 +46,73 @@ BasinGeometry make_basin_geometry(const BasinConfiguration& configuration) {
                     "Basin geometry requires ordered, non-negative profiles");
             }
         }
-        result.layers.push_back({layer.id, layer.x, layer.top, layer.bottom});
     }
-    return boundary_geometry(result);
+    BasinGeometry result{.age_ma = configuration.age_ma, .x = {}, .boundaries = {}, .layers = {}};
+    if (configuration.layers.empty())
+        return result;
+    auto& x = result.x;
+    for (const auto& layer : configuration.layers)
+        x.insert(x.end(), layer.x.begin(), layer.x.end());
+    std::sort(x.begin(), x.end());
+    x.erase(std::unique(x.begin(), x.end()), x.end());
+    std::vector<std::vector<double>> depths(configuration.layers.size() + 1);
+    for (const double p : x) {
+        double cursor = configuration.layers.front().top_at(p);
+        for (const auto& layer : configuration.layers) {
+            if (p >= layer.x.front() && p <= layer.x.back() &&
+                layer.bottom_at(p) > layer.top_at(p)) {
+                cursor = layer.top_at(p);
+                break;
+            }
+        }
+        depths.front().push_back(cursor);
+        for (std::size_t i = 0; i < configuration.layers.size(); ++i) {
+            const auto& layer = configuration.layers[i];
+            if (p >= layer.x.front() && p <= layer.x.back() &&
+                layer.bottom_at(p) > layer.top_at(p)) {
+                if (std::abs(layer.top_at(p) - cursor) > 1e-7)
+                    throw std::runtime_error("Layer boundaries do not form a continuous section");
+                cursor = layer.bottom_at(p);
+            }
+            // An absent layer has coincident boundaries at the physical contact.
+            // Its unused source zero-thickness curve does not define another surface.
+            depths[i + 1].push_back(cursor);
+        }
+    }
+    result.boundaries = std::move(depths);
+    for (std::size_t i = 0; i < configuration.layers.size(); ++i) {
+        const auto& layer = configuration.layers[i];
+        result.layers.push_back({layer.id, layer.x.front(), layer.x.back()});
+    }
+    return result;
+}
+
+std::vector<double> make_column_axis(std::span<const double> knots, double horizontal_step,
+                                     std::span<const double> required_x, double phase) {
+    if (knots.size() < 2 || !std::isfinite(horizontal_step) || !(horizontal_step > 0.0) ||
+        !std::isfinite(phase) || std::abs(phase) > 0.45) {
+        throw std::invalid_argument(
+            "Column axis requires knots, a positive step and |phase| <= 0.45");
+    }
+    std::vector<double> events(knots.begin(), knots.end());
+    const auto [left, right] = std::minmax_element(knots.begin(), knots.end());
+    for (const double coordinate : required_x) {
+        if (!std::isfinite(coordinate) || coordinate < *left || coordinate > *right)
+            throw std::invalid_argument("Required column coordinate is outside the domain");
+        events.push_back(coordinate);
+    }
+    std::sort(events.begin(), events.end());
+    events.erase(std::unique(events.begin(), events.end()), events.end());
+    std::vector<double> axis;
+    for (std::size_t i = 1; i < events.size(); ++i) {
+        const auto count =
+            static_cast<std::size_t>(std::ceil((events[i] - events[i - 1]) / horizontal_step));
+        axis.push_back(events[i - 1]);
+        for (std::size_t j = 1; j < count; ++j)
+            axis.push_back(
+                std::lerp(events[i - 1], events[i],
+                          (static_cast<double>(j) + phase) / static_cast<double>(count)));
+    }
+    axis.push_back(events.back());
+    return axis;
 }

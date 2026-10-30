@@ -4,18 +4,9 @@ from __future__ import annotations
 
 import argparse
 import csv
-import importlib.util
 from pathlib import Path
-from types import ModuleType
 
-
-def load_module(path: Path) -> ModuleType:
-    specification = importlib.util.spec_from_file_location("organizer_basin_data", path)
-    if specification is None or specification.loader is None:
-        raise RuntimeError(f"Cannot load {path}")
-    module = importlib.util.module_from_spec(specification)
-    specification.loader.exec_module(module)
-    return module
+from basin_data import BasinData
 
 
 def write_csv(path: Path, header: tuple[str, ...], rows: list[tuple[object, ...]]) -> None:
@@ -29,15 +20,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare compact forward-problem input")
     parser.add_argument("data_dir", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument(
-        "--basin-data",
-        type=Path,
-        default=Path("tools/basin_data.py"),
-    )
     arguments = parser.parse_args()
 
-    module = load_module(arguments.basin_data)
-    data = module.BasinData(arguments.data_dir)
+    data = BasinData(arguments.data_dir)
     ages = tuple(reversed([float(age) for age in data.times]))
 
     arguments.output.mkdir(parents=True, exist_ok=True)

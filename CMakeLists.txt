@@ -60,7 +60,6 @@ add_library(basin_data STATIC
   src/basin/basin_input.cpp
   src/basin/basin_geometry.cpp
   src/basin/basin_geometry_rdp.cpp
-  src/basin/column_epoch_geometry.cpp
   src/basin/column_epoch_grid.cpp
   src/basin/column_field_transfer.cpp
   src/basin/nonmatching_column_grid.cpp
@@ -118,7 +117,7 @@ if(BUILD_TESTING)
     tests/test_pounders_optimizer.cpp
     tests/test_easy_ro.cpp
     tests/test_basin_geometry.cpp
-    tests/test_column_epoch_geometry.cpp
+    tests/test_column_epoch_grid.cpp
     tests/test_column_field_transfer.cpp
     tests/test_basin_forward_solver.cpp
     tests/test_manufactured_heat_solution.cpp

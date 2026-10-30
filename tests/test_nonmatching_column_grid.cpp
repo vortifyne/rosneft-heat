@@ -7,25 +7,21 @@
 
 namespace {
 
-ScalarProfile profile(std::vector<double> x, std::vector<double> values) {
-    return {.x = std::move(x), .values = std::move(values)};
-}
-
 BasinGeometry geometry() {
     const std::vector<double> x{0.0, 1.0, 2.0};
     return {.age_ma = 0.0,
-            .boundaries = {{profile(x, {0.0, 0.4, 0.0})},
-                           {profile(x, {0.8, 1.2, 1.0})},
-                           {profile(x, {2.0, 2.4, 2.2})}},
-            .layers = {{1, 0, 1, 0.0, 2.0}, {2, 1, 2, 0.0, 2.0}}};
+            .x = x,
+            .boundaries = {{0.0, 0.4, 0.0}, {0.8, 1.2, 1.0}, {2.0, 2.4, 2.2}},
+            .layers = {{1, 0.0, 2.0}, {2, 0.0, 2.0}}};
 }
 
 } // namespace
 
 TEST(NonmatchingColumnGrid, PreservesEveryLayerAreaWithMeanHorizontalBoundaries) {
     const BasinGeometry source = geometry();
-    const LayeredMeshLayout layout{.x = {0.0, 1.0, 2.0}, .cell_size = 0.55};
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+    const std::vector<double> layout = {0.0, 1.0, 2.0};
+    const double vertical_step = 0.55;
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
 
     std::map<int, double> area;
     for (const NonmatchingColumnCell& cell : grid.cells) {
@@ -39,8 +35,9 @@ TEST(NonmatchingColumnGrid, PreservesEveryLayerAreaWithMeanHorizontalBoundaries)
 
 TEST(NonmatchingColumnGrid, MergeCreatesSubfacesWithoutCreatingCells) {
     const BasinGeometry source = geometry();
-    const LayeredMeshLayout layout{.x = {0.0, 1.0, 2.0}, .cell_size = 0.55};
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+    const std::vector<double> layout = {0.0, 1.0, 2.0};
+    const double vertical_step = 0.55;
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
 
     ASSERT_EQ(grid.columns.size(), 2U);
     const std::size_t cells_before_merge = grid.columns[0].size() + grid.columns[1].size();
@@ -58,14 +55,13 @@ TEST(NonmatchingColumnGrid, MergeCreatesSubfacesWithoutCreatingCells) {
     EXPECT_NEAR(interface_length, common_bottom - common_top, 1.0e-14);
 }
 
-TEST(NonmatchingColumnGrid, LayoutRetainsContourSamplesAndPhasesOnlyInsertedLines) {
+TEST(NonmatchingColumnGrid, AxisRetainsContourSamplesAndPhasesOnlyInsertedLines) {
     const BasinGeometry source = geometry();
-    const LayeredMeshLayout layout = make_nonmatching_column_layout(source, 0.75);
-    EXPECT_EQ(layout.x, (std::vector<double>{0.0, 0.5, 1.0, 1.5, 2.0}));
+    const auto layout = make_column_axis(source.x, 0.75);
+    EXPECT_EQ(layout, (std::vector<double>{0.0, 0.5, 1.0, 1.5, 2.0}));
 
-    const LayeredMeshLayout shifted = make_nonmatching_column_layout(source, 0.75, 0.4, 0.25);
-    EXPECT_EQ(shifted.x, (std::vector<double>{0.0, 0.625, 1.0, 1.625, 2.0}));
-    EXPECT_DOUBLE_EQ(shifted.cell_size, 0.4);
+    const auto shifted = make_column_axis(source.x, 0.75, {}, 0.25);
+    EXPECT_EQ(shifted, (std::vector<double>{0.0, 0.625, 1.0, 1.625, 2.0}));
 }
 
 TEST(NonmatchingColumnGrid, PreservesLayerAreasAndCoversEveryColumnInterfaceAcrossLayouts) {
@@ -76,7 +72,7 @@ TEST(NonmatchingColumnGrid, PreservesLayerAreasAndCoversEveryColumnInterfaceAcro
                 SCOPED_TRACE(testing::Message()
                              << "dx=" << dx << " dz=" << dz << " phase=" << phase);
                 const auto grid = make_nonmatching_column_grid(
-                    source, make_nonmatching_column_layout(source, dx, dz, phase));
+                    source, make_column_axis(source.x, dx, {}, phase), dz);
                 std::map<int, double> area;
                 std::vector<double> coverage(grid.columns.size() - 1, 0.0);
                 for (const auto& cell : grid.cells) {
@@ -108,12 +104,12 @@ TEST(NonmatchingColumnGrid, PreservesLayerAreasAndCoversEveryColumnInterfaceAcro
 TEST(NonmatchingColumnGrid, RepresentsVerticalOuterBoundarySteps) {
     const std::vector<double> x{0.0, 1.0, 2.0};
     const BasinGeometry source{.age_ma = 0.0,
-                               .boundaries = {{profile(x, {0.0, 0.4, 0.8})},
-                                              {profile(x, {1.0, 1.4, 1.8})},
-                                              {profile(x, {2.0, 2.4, 2.8})}},
-                               .layers = {{1, 0, 1, 0.0, 2.0}, {2, 1, 2, 0.0, 2.0}}};
-    const LayeredMeshLayout layout{.x = {0.0, 1.0, 2.0}, .cell_size = 0.55};
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+                               .x = x,
+                               .boundaries = {{0.0, 0.4, 0.8}, {1.0, 1.4, 1.8}, {2.0, 2.4, 2.8}},
+                               .layers = {{1, 0.0, 2.0}, {2, 0.0, 2.0}}};
+    const std::vector<double> layout = {0.0, 1.0, 2.0};
+    const double vertical_step = 0.55;
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
 
     ASSERT_EQ(grid.surface_vertical_faces.size(), 1U);
     EXPECT_NEAR(grid.surface_vertical_faces.front().length(), 0.4, 1.0e-14);
@@ -126,12 +122,13 @@ TEST(NonmatchingColumnGrid, RepresentsVerticalOuterBoundarySteps) {
 
 TEST(NonmatchingColumnHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
     const std::vector<double> x{0.0, 1.0, 2.0};
-    const BasinGeometry source{
-        .age_ma = 0.0,
-        .boundaries = {{profile(x, {0.0, 0.4, 0.8})}, {profile(x, {3.0, 3.0, 3.0})}},
-        .layers = {{1, 0, 1, 0.0, 2.0}}};
-    const LayeredMeshLayout layout{.x = {0.0, 1.0, 2.0}, .cell_size = 0.45};
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+    const BasinGeometry source{.age_ma = 0.0,
+                               .x = x,
+                               .boundaries = {{0.0, 0.4, 0.8}, {3.0, 3.0, 3.0}},
+                               .layers = {{1, 0.0, 2.0}}};
+    const std::vector<double> layout = {0.0, 1.0, 2.0};
+    const double vertical_step = 0.45;
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
     ASSERT_FALSE(grid.surface_vertical_faces.empty());
     ASSERT_TRUE(grid.basal_vertical_faces.empty());
 
@@ -168,8 +165,9 @@ TEST(NonmatchingColumnHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
 
 TEST(NonmatchingColumnFlux, ReproducesAffineFluxOnMergedSubfaces) {
     const BasinGeometry source = geometry();
-    const LayeredMeshLayout layout{.x = {0.0, 1.0, 2.0}, .cell_size = 0.55};
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+    const std::vector<double> layout = {0.0, 1.0, 2.0};
+    const double vertical_step = 0.55;
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
     const std::vector<double> conductivity(grid.cells.size(), 2.5);
     std::vector<double> temperature(grid.cells.size());
     constexpr double x_gradient = 3.0;
@@ -243,8 +241,9 @@ TEST(NonmatchingColumnFlux, UsesHarmonicNormalFluxAcrossMaterialJump) {
 
 TEST(NonmatchingColumnHeatSystem, LinearMatrixMatchesResidual) {
     const BasinGeometry source = geometry();
-    const LayeredMeshLayout layout = make_nonmatching_column_layout(source, 0.55);
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+    const auto layout = make_column_axis(source.x, 0.55);
+    const double vertical_step = 0.55;
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
     const std::vector<double> conductivity(grid.cells.size(), 2.5);
     const std::vector<double> production(grid.cells.size(), 0.01);
     NonmatchingColumnHeatSystem system(

@@ -84,10 +84,13 @@ double integrate_moving_quadratic(double timestep) {
 Vector solve_temperature_dependent_case(double timestep, LinearSolverOptions linear_solver) {
     const std::vector<double> x{0.0, 1.0, 2.0};
     const BasinGeometry geometry{.age_ma = 0.0,
-                                 .boundaries = {{{x, {0.0, 0.2, 0.0}}}, {{x, {2.0, 2.2, 2.0}}}},
-                                 .layers = {{1, 0, 1, 0.0, 2.0}}};
-    const LayeredMeshLayout layout{.x = {0.0, 0.5, 1.0, 1.5, 2.0}, .cell_size = 0.4};
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(geometry, layout);
+                                 .x = x,
+                                 .boundaries = {{0.0, 0.2, 0.0}, {2.0, 2.2, 2.0}},
+                                 .layers = {{1, 0.0, 2.0}}};
+    const std::vector<double> layout = {0.0, 0.5, 1.0, 1.5, 2.0};
+    const double vertical_step = 0.4;
+    const NonmatchingColumnGrid grid =
+        make_nonmatching_column_grid(geometry, layout, vertical_step);
     const std::vector<double> conductivity(grid.cells.size(), 1.0);
     const std::vector<double> source(grid.cells.size(), 0.0);
     const std::vector<double> capacity(grid.cells.size(), 1.5);
@@ -170,10 +173,12 @@ TEST(NonmatchingColumnTransientSystem, AccumulationUsesCurrentMovingCellAndPicar
 TEST(NonmatchingColumnTransientSystem, AdvancesAffineFieldOnIndependentColumns) {
     const std::vector<double> x{0.0, 1.0, 2.0};
     const BasinGeometry source{.age_ma = 0.0,
-                               .boundaries = {{{x, {0.0, 0.4, 0.8}}}, {{x, {3.0, 3.0, 3.0}}}},
-                               .layers = {{1, 0, 1, 0.0, 2.0}}};
-    const LayeredMeshLayout layout{.x = x, .cell_size = 0.45};
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout);
+                               .x = x,
+                               .boundaries = {{0.0, 0.4, 0.8}, {3.0, 3.0, 3.0}},
+                               .layers = {{1, 0.0, 2.0}}};
+    const std::vector<double> layout = x;
+    const double vertical_step = 0.45;
+    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
     constexpr double conductivity_value = 2.5;
     constexpr double capacity_value = 1.7;
     constexpr double x_gradient = 3.0;

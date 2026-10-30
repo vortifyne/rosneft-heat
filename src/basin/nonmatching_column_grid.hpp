@@ -1,11 +1,11 @@
 #pragma once
 
 #include "basin/basin_geometry.hpp"
-#include "basin/column_layout.hpp"
 #include "mesh/point2d.hpp"
 
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <vector>
 
 struct NonmatchingColumnCell {
@@ -75,14 +75,14 @@ void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& grid);
 // that x interval. Therefore every layer area is preserved before the independent
 // vertical subdivision. Merging neighbouring levels creates subfaces only.
 [[nodiscard]] NonmatchingColumnGrid make_nonmatching_column_grid(const BasinGeometry& geometry,
-                                                                 const LayeredMeshLayout& layout);
+                                                                 std::vector<double> x,
+                                                                 double vertical_step);
 
-// Retained contour coordinates and material-support endpoints are mandatory.
-// Long intervals are filled quasi-uniformly; phase only moves inserted points.
-[[nodiscard]] LayeredMeshLayout make_nonmatching_column_layout(const BasinGeometry& geometry,
-                                                               double cell_size);
+namespace basin_detail {
 
-[[nodiscard]] LayeredMeshLayout make_nonmatching_column_layout(const BasinGeometry& geometry,
-                                                               double horizontal_cell_size,
-                                                               double vertical_cell_size,
-                                                               double phase);
+// Shared cell construction for epoch grids and static geometry snapshots.
+void append_column_cells(NonmatchingColumnGrid& grid, std::size_t column,
+                         std::span<const int> layer_ids, std::span<const double> boundaries,
+                         std::span<const std::size_t> rows, double minimum_cell_height);
+
+} // namespace basin_detail

@@ -100,13 +100,6 @@ void set_basin_forward_option(BasinForwardSettings& settings, std::string_view o
             settings.scheme = MultipointFluxScheme::nonlinear_conservative;
         else
             throw std::invalid_argument("Unknown flux scheme");
-    } else if (option == "--pinchout") {
-        if (value == "positive")
-            settings.pinchout = BasinForwardSettings::Pinchout::positive_height;
-        else if (value == "zero")
-            settings.pinchout = BasinForwardSettings::Pinchout::exact_zero;
-        else
-            throw std::invalid_argument("Unknown pinchout handling");
     } else
         throw std::invalid_argument("Unknown option: " + std::string(option));
 }
@@ -123,10 +116,6 @@ void write_basin_forward_settings(std::ostream& output, const BasinForwardSettin
         output << "none";
     output << '\n'
            << "min_height=" << settings.minimum_cell_height << '\n'
-           << "pinchout="
-           << (settings.pinchout == BasinForwardSettings::Pinchout::exact_zero ? "zero"
-                                                                               : "positive")
-           << '\n'
            << "scheme=" << (settings.scheme == MultipointFluxScheme::linear ? "linear" : "nmpfa")
            << '\n'
            << "linear_method=" << name(settings.linear_solver.method, kMethods) << '\n'

@@ -1,6 +1,5 @@
 """
-Неизменённая по расчётной логике копия сценария, переданного организаторами
-Академического турнира 2026.
+Чтение исходных таблиц организаторов Академического турнира 2026.
 
 Читалка данных для задачи Академического турнира 2026:
 двумерная модель теплопереноса в осадочном чехле.
@@ -98,101 +97,18 @@ def _load_property_xlsx(filepath):
 
 
 # -----------------------------------------------------------------------
-# Модели Секигучи и Ваплеса
-# -----------------------------------------------------------------------
-
-def sekiguchi(T_K, lambda_20):
-    """
-    Теплопроводность скелета λs(T) по модели Sekiguchi (1984).
-
-    Параметры:
-        T_K       : температура [К]
-        lambda_20 : теплопроводность при 20°C [Вт/(м·К)]
-
-    Возвращает:
-        λs [Вт/(м·К)]
-    """
-    return 1.84 + 358.0 * (1.0227 * lambda_20 - 1.882) * (1.0 / T_K - 0.00068)
-
-
-def waples(T_K, c20_J):
-    """
-    Удельная теплоёмкость скелета cs(T) по модели Waples (2004).
-
-    Параметры:
-        T_K   : температура [К]
-        c20_J : теплоёмкость при 20°C [Дж/(кг·К)]
-
-    Возвращает:
-        cs [Дж/(кг·К)]
-    """
-    Tc = T_K - 273.15
-    return c20_J * (0.953 + 2.29e-3 * Tc - 2.835e-6 * Tc**2 + 1.191e-9 * Tc**3)
-
-
-# -----------------------------------------------------------------------
-# Эффективные свойства среды
-# -----------------------------------------------------------------------
-
-def effective_lambda(T_K, lambda_20, phi, lambda_f=0.7):
-    """
-    Эффективная теплопроводность: λ = λs^(1-φ) · λf^φ  (геом. среднее).
-
-    Параметры:
-        T_K       : температура [К]
-        lambda_20 : теплопроводность скелета при 20°C [Вт/(м·К)]
-        phi       : пористость (доля, 0..1)
-        lambda_f  : теплопроводность флюида [Вт/(м·К)], по умолч. 0.7
-    """
-    ls = sekiguchi(T_K, lambda_20)
-    return ls**(1.0 - phi) * lambda_f**phi
-
-
-def effective_rho_c(T_K, c20_J, rho_s, phi,
-                    rho_f=1040.0, c_f=4184.0):
-    """
-    Эффективная объёмная теплоёмкость: (ρc) = (1-φ)ρs·cs + φ·ρf·cf.
-
-    Параметры:
-        T_K   : температура [К]
-        c20_J : теплоёмкость скелета при 20°C [Дж/(кг·К)]
-        rho_s : плотность скелета [кг/м³]
-        phi   : пористость (доля, 0..1)
-        rho_f : плотность флюида [кг/м³]
-        c_f   : теплоёмкость флюида [Дж/(кг·К)]
-    """
-    cs = waples(T_K, c20_J)
-    return (1.0 - phi) * rho_s * cs + phi * rho_f * c_f
-
-
-def effective_A(As, phi):
-    """
-    Эффективное радиогенное тепловыделение: A = (1-φ)·As.
-
-    Параметры:
-        As  : тепловыделение скелета [µW/m³]
-        phi : пористость (доля, 0..1)
-    """
-    return (1.0 - phi) * As
-
-
-# -----------------------------------------------------------------------
 # Основной класс
 # -----------------------------------------------------------------------
 
 class BasinData:
     """Контейнер данных бассейна для задачи теплопереноса."""
 
-    def __init__(self, xlsx_dir, lithotype_file=None):
+    def __init__(self, xlsx_dir):
         """
         Параметры:
             xlsx_dir       : папка с Depth.xlsx, Lithology.xlsx, Porosity.xlsx,
                              Heat_Flow_Basal.xlsx, Tsurf.xlsx
-            lithotype_file : путь к lithotype_properties.xlsx
-                             (по умолчанию ищет в xlsx_dir)
         """
-        self._dir = xlsx_dir
-
         # Загрузка свойств-полей
         self._depth = _load_property_xlsx(os.path.join(xlsx_dir, 'Depth.xlsx'))
         self._lith = _load_property_xlsx(os.path.join(xlsx_dir, 'Lithology.xlsx'))
@@ -213,9 +129,7 @@ class BasinData:
         self.times = sorted(all_times)
 
         # Свойства литотипов
-        if lithotype_file is None:
-            lithotype_file = os.path.join(xlsx_dir, 'lithotype_properties.xlsx')
-        self.lithotypes = self._load_lithotypes(lithotype_file)
+        self.lithotypes = self._load_lithotypes(os.path.join(xlsx_dir, 'lithotype_properties.xlsx'))
 
         # Кинетика EASY%Ro
         self.easy_ro = _EASY_RO.copy()
@@ -324,12 +238,6 @@ class BasinData:
         return (sub.iloc[:, 0].values.astype(np.float64),
                 sub.iloc[:, 7].values.astype(np.float64))
 
-    def get_lithotype(self, code):
-        """Свойства литотипа по коду. Возвращает dict."""
-        if code not in self.lithotypes:
-            raise KeyError(f'Литотип {code} не найден в библиотеке')
-        return self.lithotypes[code]
-
     # -------------------------------------------------------------------
     # Полная конфигурация на момент времени
     # -------------------------------------------------------------------
@@ -360,69 +268,3 @@ class BasinData:
                 'porosity': self.porosity(layer, time),
             })
         return result
-
-    # -------------------------------------------------------------------
-    # Информация
-    # -------------------------------------------------------------------
-
-    def __repr__(self):
-        return (
-            f'BasinData(\n'
-            f'  layers:    {len(self.layers)} ({self.layers[0]} .. {self.layers[-1]})\n'
-            f'  times:     {len(self.times)} шагов '
-            f'({self.times[0]:g} .. {self.times[-1]:g} Ma)\n'
-            f'  lithotypes: {list(self.lithotypes.keys())}\n'
-            f')'
-        )
-
-
-# -----------------------------------------------------------------------
-# Пример использования
-# -----------------------------------------------------------------------
-
-if __name__ == '__main__':
-    # ========== НАСТРОЙКИ ==========
-    # XLSX_DIR = r"C:\Users\DrWhite\Desktop\turnir_data_26\data1"
-    XLSX_DIR = r"C:\Users\DrWhite\Desktop\turnir_data_26\data2"
-    # ===============================
-
-    data = BasinData(XLSX_DIR)
-    print(data)
-
-    # Пример: конфигурация на 0 Ma
-    print('\n--- Снимок бассейна на 0 Ma ---')
-    snap = data.snapshot(0.0)
-    for s in snap:
-        lith_codes = np.unique(s['lith'])
-        names = [data.lithotypes[c]['name'] for c in lith_codes]
-        print(f"  {s['layer']:15s}  x: {s['x'][0]:.0f}..{s['x'][-1]:.0f} m  "
-              f"z: {s['z_top'].min():.0f}..{s['z_bot'].max():.0f} m  "
-              f"литотипы: {', '.join(names)}")
-
-    # Граничные условия
-    x, ts = data.tsurf(0.0)
-    x, qb = data.heat_flow(0.0)
-    print(f'\n--- Граничные условия на 0 Ma ---')
-    print(f'  Tsurf:  {ts.min():.1f} .. {ts.max():.1f} °C')
-    print(f'  qbasal: {qb.min():.1f} .. {qb.max():.1f} мВт/м²')
-
-    # Пример расчёта эффективных свойств
-    print(f'\n--- Эффективные свойства (Layer_5, 75 Ma, x=500 m) ---')
-    x, zt, zb = data.geometry('Layer_5', 75.0)
-    idx = np.argmin(np.abs(x - 500))
-    lith_code = data.lithology('Layer_5', 75.0)[idx]
-    phi_pct = data.porosity('Layer_5', 75.0)[idx]
-    phi = phi_pct / 100.0
-
-    lt = data.get_lithotype(lith_code)
-    T_K = 273.15 + 80  # допустим 80°C
-
-    lam = effective_lambda(T_K, lt['lambda_20'], phi)
-    rc = effective_rho_c(T_K, lt['c20_J'], lt['rho_s'], phi)
-    A = effective_A(lt['As'], phi)
-
-    print(f'  Литотип: {lt["name"]} (код {lith_code})')
-    print(f'  φ = {phi_pct:.1f}%')
-    print(f'  λ_eff = {lam:.3f} Вт/(м·К)')
-    print(f'  (ρc)_eff = {rc:.0f} Дж/(м³·К)')
-    print(f'  A_eff = {A:.4f} µВт/м³')

@@ -4,74 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
-
-namespace {
-
-double profile_mean(const ScalarProfile& profile, const double left, const double right) {
-    if (!(right > left)) {
-        throw std::invalid_argument("Column interval must have positive width");
-    }
-    std::vector<double> points{left, right};
-    for (const double x : profile.x) {
-        if (x > left && x < right) {
-            points.push_back(x);
-        }
-    }
-    std::sort(points.begin(), points.end());
-    points.erase(std::unique(points.begin(), points.end()), points.end());
-    double integral = 0.0;
-    for (std::size_t i = 1; i < points.size(); ++i) {
-        const double a = points[i - 1];
-        const double b = points[i];
-        integral += 0.5 * (profile.at(a) + profile.at(b)) * (b - a);
-    }
-    return integral / (right - left);
-}
-
-} // namespace
-
-LayeredMeshLayout make_nonmatching_column_layout(const BasinGeometry& geometry,
-                                                 const double cell_size) {
-    return make_nonmatching_column_layout(geometry, cell_size, cell_size, 0.0);
-}
-
-LayeredMeshLayout make_nonmatching_column_layout(const BasinGeometry& geometry,
-                                                 const double horizontal_cell_size,
-                                                 const double vertical_cell_size,
-                                                 const double phase) {
-    if (!std::isfinite(horizontal_cell_size) || !(horizontal_cell_size > 0.0) ||
-        !std::isfinite(vertical_cell_size) || !(vertical_cell_size > 0.0) ||
-        !std::isfinite(phase) || std::abs(phase) > 0.45 || geometry.layers.empty()) {
-        throw std::invalid_argument(
-            "Nonmatching-column layout requires geometry, positive steps, and |phase| <= 0.45");
-    }
-    std::vector<double> events;
-    events.reserve(2 * geometry.layers.size());
-    for (const BasinLayerRegion& region : geometry.layers) {
-        events.push_back(region.x_min);
-        events.push_back(region.x_max);
-    }
-    for (const BasinBoundary& boundary : geometry.boundaries) {
-        events.insert(events.end(), boundary.depth.x.begin(), boundary.depth.x.end());
-    }
-    std::sort(events.begin(), events.end());
-    events.erase(std::unique(events.begin(), events.end()), events.end());
-    LayeredMeshLayout result{.x = {}, .cell_size = vertical_cell_size};
-    for (std::size_t interval = 1; interval < events.size(); ++interval) {
-        const double left = events[interval - 1];
-        const double right = events[interval];
-        const std::size_t count = std::max<std::size_t>(
-            1, static_cast<std::size_t>(std::ceil((right - left) / horizontal_cell_size)));
-        result.x.push_back(left);
-        for (std::size_t part = 1; part < count; ++part) {
-            const double fraction = (static_cast<double>(part) + phase) /
-                                    static_cast<double>(count);
-            result.x.push_back(std::lerp(left, right, fraction));
-        }
-    }
-    result.x.push_back(events.back());
-    return result;
-}
+#include <utility>
 
 double NonmatchingColumnCell::width() const noexcept {
     return x_right - x_left;
@@ -150,8 +83,8 @@ void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& result) {
             lower.z_top = interface;
             upper.downward = lower.index;
             lower.upward = upper.index;
-            result.horizontal_faces.push_back({upper.index, lower.index, interface,
-                                               right - result.x[column]});
+            result.horizontal_faces.push_back(
+                {upper.index, lower.index, interface, right - result.x[column]});
         }
         result.top_cells[column] = column_cells.front();
         result.bottom_cells[column] = column_cells.back();
@@ -172,20 +105,19 @@ void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& result) {
             throw std::runtime_error("Neighbouring nonmatching columns do not overlap");
         }
 
-        const auto append_boundary_faces = [&result, tolerance](
-                                               const std::vector<std::size_t>& column,
-                                               const double z_top, const double z_bottom,
-                                               const double x, const double outward_x,
-                                               auto& output) {
-            for (const std::size_t cell_index : column) {
-                const NonmatchingColumnCell& cell = result.cells[cell_index];
-                const double top = std::max(z_top, cell.z_top);
-                const double bottom = std::min(z_bottom, cell.z_bottom);
-                if (bottom - top > tolerance) {
-                    output.push_back({cell_index, x, top, bottom, outward_x});
+        const auto append_boundary_faces =
+            [&result, tolerance](const std::vector<std::size_t>& column, const double z_top,
+                                 const double z_bottom, const double x, const double outward_x,
+                                 auto& output) {
+                for (const std::size_t cell_index : column) {
+                    const NonmatchingColumnCell& cell = result.cells[cell_index];
+                    const double top = std::max(z_top, cell.z_top);
+                    const double bottom = std::min(z_bottom, cell.z_bottom);
+                    if (bottom - top > tolerance) {
+                        output.push_back({cell_index, x, top, bottom, outward_x});
+                    }
                 }
-            }
-        };
+            };
         const double interface_x = result.x[interface];
         if (left_top < right_top - tolerance) {
             append_boundary_faces(left_cells, left_top, right_top, interface_x, 1.0,
@@ -225,63 +157,91 @@ void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& result) {
     }
 }
 
+void basin_detail::append_column_cells(NonmatchingColumnGrid& grid, std::size_t column,
+                                       std::span<const int> layer_ids,
+                                       std::span<const double> boundaries,
+                                       std::span<const std::size_t> rows,
+                                       double minimum_cell_height) {
+    std::vector<double> thickness(rows.size(), 0.0);
+    double required = 0.0, available = 0.0;
+    for (std::size_t layer = 0; layer < rows.size(); ++layer) {
+        if (rows[layer] == 0)
+            continue;
+        thickness[layer] = std::max(0.0, boundaries[layer + 1] - boundaries[layer]);
+        const double floor = static_cast<double>(rows[layer]) * minimum_cell_height;
+        required += std::max(0.0, floor - thickness[layer]);
+        available += std::max(0.0, thickness[layer] - floor);
+    }
+    if (required > available + 1.0e-9)
+        throw std::runtime_error("Minimum cell height exceeds column height");
+    if (required > 0.0) {
+        for (std::size_t layer = 0; layer < rows.size(); ++layer) {
+            if (rows[layer] == 0)
+                continue;
+            const double floor = static_cast<double>(rows[layer]) * minimum_cell_height;
+            if (thickness[layer] < floor)
+                thickness[layer] = floor;
+            else if (available > 0.0)
+                thickness[layer] -= required * (thickness[layer] - floor) / available;
+        }
+    }
+    double cursor = boundaries.front();
+    for (std::size_t layer = 0; layer < rows.size(); ++layer) {
+        const std::size_t count = rows[layer];
+        for (std::size_t row = 0; row < count; ++row) {
+            const double top =
+                cursor + thickness[layer] * static_cast<double>(row) / static_cast<double>(count);
+            const double bottom = cursor + thickness[layer] * static_cast<double>(row + 1) /
+                                               static_cast<double>(count);
+            const std::size_t index = grid.cells.size();
+            grid.cells.push_back({.index = index,
+                                  .column = column,
+                                  .layer_id = layer_ids[layer],
+                                  .x_left = grid.x[column],
+                                  .x_right = grid.x[column + 1],
+                                  .z_top = top,
+                                  .z_bottom = bottom,
+                                  .upward = std::nullopt,
+                                  .downward = std::nullopt});
+            grid.columns[column].push_back(index);
+        }
+        cursor += thickness[layer];
+    }
+}
+
 NonmatchingColumnGrid make_nonmatching_column_grid(const BasinGeometry& geometry,
-                                                   const LayeredMeshLayout& layout) {
-    if (layout.x.size() < 2 || !std::isfinite(layout.cell_size) || !(layout.cell_size > 0.0)) {
+                                                   std::vector<double> x, double vertical_step) {
+    if (x.size() < 2 || !std::isfinite(vertical_step) || !(vertical_step > 0.0))
         throw std::invalid_argument("Nonmatching columns require an axis and a positive step");
-    }
     NonmatchingColumnGrid result;
-    result.x = layout.x;
-    result.columns.resize(layout.x.size() - 1);
-    result.top_cells.resize(layout.x.size() - 1);
-    result.bottom_cells.resize(layout.x.size() - 1);
-
-    for (std::size_t column = 0; column + 1 < layout.x.size(); ++column) {
-        const double left = layout.x[column];
-        const double right = layout.x[column + 1];
-        if (!std::isfinite(left) || !std::isfinite(right) || !(right > left)) {
+    result.x = std::move(x);
+    result.columns.resize(result.x.size() - 1);
+    std::vector<int> layer_ids;
+    for (const auto& layer : geometry.layers)
+        layer_ids.push_back(layer.id);
+    for (std::size_t column = 0; column + 1 < result.x.size(); ++column) {
+        const double left = result.x[column], right = result.x[column + 1];
+        if (!std::isfinite(left) || !std::isfinite(right) || !(right > left))
             throw std::invalid_argument("Nonmatching-column axis must be increasing and finite");
-        }
-        auto& column_cells = result.columns[column];
-        for (const BasinLayerRegion& region : geometry.layers) {
-            if (left < region.x_min || right > region.x_max) {
+        const auto boundaries = geometry.mean_boundaries(left, right);
+        std::vector<std::size_t> rows(geometry.layers.size(), 0);
+        for (std::size_t layer = 0; layer < rows.size(); ++layer) {
+            const auto& region = geometry.layers[layer];
+            if (left < region.x_min || right > region.x_max)
                 continue;
-            }
-            const ScalarProfile& top = geometry.boundaries[region.top_boundary].depth;
-            const ScalarProfile& bottom = geometry.boundaries[region.bottom_boundary].depth;
-            const double z_top = profile_mean(top, left, right);
-            const double z_bottom = profile_mean(bottom, left, right);
-            const double thickness = z_bottom - z_top;
-            const double tolerance = 1.0e-12 * std::max({1.0, std::abs(z_top), std::abs(z_bottom)});
-            if (thickness < -tolerance) {
+            const double thickness = boundaries[layer + 1] - boundaries[layer];
+            const double tolerance = 1.0e-12 * std::max({1.0, std::abs(boundaries[layer]),
+                                                         std::abs(boundaries[layer + 1])});
+            if (thickness < -tolerance)
                 throw std::runtime_error("Area-preserving column has a negative layer thickness");
-            }
-            if (thickness <= tolerance) {
-                continue;
-            }
-            const std::size_t rows = std::max<std::size_t>(
-                1, static_cast<std::size_t>(std::ceil(thickness / layout.cell_size)));
-            for (std::size_t row = 0; row < rows; ++row) {
-                const double eta_top = static_cast<double>(row) / static_cast<double>(rows);
-                const double eta_bottom = static_cast<double>(row + 1) / static_cast<double>(rows);
-                const std::size_t index = result.cells.size();
-                result.cells.push_back({.index = index,
-                                        .column = column,
-                                        .layer_id = region.id,
-                                        .x_left = left,
-                                        .x_right = right,
-                                        .z_top = std::lerp(z_top, z_bottom, eta_top),
-                                        .z_bottom = std::lerp(z_top, z_bottom, eta_bottom),
-                                        .upward = std::nullopt,
-                                        .downward = std::nullopt});
-                column_cells.push_back(index);
-            }
+            if (thickness > tolerance)
+                rows[layer] = std::max<std::size_t>(
+                    1, static_cast<std::size_t>(std::ceil(thickness / vertical_step)));
         }
-        if (column_cells.empty()) {
+        basin_detail::append_column_cells(result, column, layer_ids, boundaries, rows, 0.0);
+        if (result.columns[column].empty())
             throw std::runtime_error("Nonmatching column contains no material");
-        }
     }
-
     rebuild_nonmatching_column_faces(result);
     return result;
 }

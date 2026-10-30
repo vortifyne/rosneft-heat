@@ -53,10 +53,6 @@ struct VerificationCase {
     double expected_interface_outflow = std::numeric_limits<double>::quiet_NaN();
 };
 
-ScalarProfile profile(const std::vector<double>& x, const std::vector<double>& values) {
-    return {.x = x, .values = values};
-}
-
 std::vector<double> axis() {
     return {0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0};
 }
@@ -74,10 +70,9 @@ BasinGeometry two_layer_geometry(const std::function<double(double)>& contact,
         bottom_values.push_back(bottom(coordinate));
     }
     return {.age_ma = 0.0,
-            .boundaries = {{profile(x, top_values)},
-                           {profile(x, contact_values)},
-                           {profile(x, bottom_values)}},
-            .layers = {{1, 0, 1, 0.0, kWidth}, {2, 1, 2, 0.0, kWidth}}};
+            .x = x,
+            .boundaries = {top_values, contact_values, bottom_values},
+            .layers = {{1, 0.0, kWidth}, {2, 0.0, kWidth}}};
 }
 
 BasinGeometry one_layer_geometry(const std::function<double(double)>& top,
@@ -90,8 +85,9 @@ BasinGeometry one_layer_geometry(const std::function<double(double)>& top,
         bottom_values.push_back(bottom(coordinate));
     }
     return {.age_ma = 0.0,
-            .boundaries = {{profile(x, top_values)}, {profile(x, bottom_values)}},
-            .layers = {{1, 0, 1, 0.0, kWidth}}};
+            .x = x,
+            .boundaries = {top_values, bottom_values},
+            .layers = {{1, 0.0, kWidth}}};
 }
 
 double smooth_temperature(const double x, const double z) {
@@ -345,8 +341,8 @@ std::vector<VerificationCase> cases() {
 }
 
 Metrics check_case(const VerificationCase& definition, double h, MultipointFluxScheme scheme) {
-    const auto layout = make_nonmatching_column_layout(definition.geometry, h, h, 0.0);
-    const auto grid = make_nonmatching_column_grid(definition.geometry, layout);
+    const auto layout = make_column_axis(definition.geometry.x, h);
+    const auto grid = make_nonmatching_column_grid(definition.geometry, layout, h);
     std::vector<double> conductivity(grid.cells.size()), source(grid.cells.size());
     for (const auto& cell : grid.cells) {
         conductivity[cell.index] = definition.conductivity(cell.center(), cell.layer_id);

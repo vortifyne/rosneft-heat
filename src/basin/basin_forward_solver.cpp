@@ -14,7 +14,6 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
-#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -202,15 +201,19 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
         throw std::invalid_argument("Invalid basin configurations or settings");
     }
     const EasyRoModel easy_ro = make_easy_ro(input);
-    const double minimum_height = settings.pinchout == BasinForwardSettings::Pinchout::exact_zero
-                                      ? 0.0
-                                      : settings.minimum_cell_height;
-    const auto first_material_x = lithotype_breakpoints(configurations[0], &configurations[1]);
-    const auto first_epoch = make_column_epoch_grid(
-        make_column_epoch_geometry(configurations[0], configurations[1], settings.rdp_tolerance),
-        settings.horizontal_step, settings.vertical_step, minimum_height,
-        settings.axis_rdp_tolerance, first_material_x);
-    State state = initial_state(first_epoch, configurations[0], input, easy_ro);
+    std::vector<BasinGeometry> geometries;
+    geometries.reserve(configurations.size());
+    for (const auto& configuration : configurations)
+        geometries.push_back(simplify_basin_geometry_rdp(make_basin_geometry(configuration),
+                                                         settings.rdp_tolerance));
+    const auto prepare_epoch = [&](std::size_t index) {
+        return make_column_epoch_grid(
+            geometries[index], geometries[index + 1], settings.horizontal_step,
+            settings.vertical_step, settings.minimum_cell_height, settings.axis_rdp_tolerance,
+            lithotype_breakpoints(configurations[index], &configurations[index + 1]));
+    };
+    auto epoch = prepare_epoch(0);
+    State state = initial_state(epoch, configurations[0], input, easy_ro);
     BasinForwardResult result;
     TimeIntegrator integrator;
     integrator.set_linear_solver(settings.linear_solver);
@@ -224,14 +227,6 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
         if (!(first.age_ma > second.age_ma)) {
             throw std::invalid_argument("basin ages must decrease");
         }
-        const auto material_x = lithotype_breakpoints(first, &second);
-        const ColumnEpochGrid epoch =
-            epoch_index == 0
-                ? first_epoch
-                : make_column_epoch_grid(
-                      make_column_epoch_geometry(first, second, settings.rdp_tolerance),
-                      settings.horizontal_step, settings.vertical_step, minimum_height,
-                      settings.axis_rdp_tolerance, material_x);
         const double duration = (first.age_ma - second.age_ma) * kSecondsPerMa;
         const double timestep = settings.timestep_ma * kSecondsPerMa;
         double elapsed = 0.0;
@@ -243,31 +238,8 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
             const double target = std::min(duration, elapsed + timestep);
             const double dt = target - elapsed;
             const double fraction = target / duration;
-            ColumnEpochGrid::Active active;
-            if (settings.pinchout == BasinForwardSettings::Pinchout::exact_zero) {
-                active = epoch.at_active(fraction);
-            } else {
-                active.grid = epoch.at(fraction);
-                active.full_indices.resize(active.grid.cells.size());
-                for (std::size_t i = 0; i < active.full_indices.size(); ++i) {
-                    active.full_indices[i] = i;
-                }
-            }
-            NonmatchingColumnGrid current_grid = std::move(active.grid);
-            Vector old_temperature(static_cast<Vector::Index>(current_grid.cells.size()));
-            std::vector<double> old_maturity(current_grid.cells.size() * easy_ro.reaction_count());
-            for (std::size_t cell = 0; cell < current_grid.cells.size(); ++cell) {
-                const std::size_t previous = active.full_indices[cell];
-                if (previous >= static_cast<std::size_t>(state.temperature.size())) {
-                    throw std::runtime_error("basin persistent cell index changed within epoch");
-                }
-                old_temperature[static_cast<Vector::Index>(cell)] =
-                    state.temperature[static_cast<Vector::Index>(previous)];
-                for (std::size_t reaction = 0; reaction < easy_ro.reaction_count(); ++reaction) {
-                    old_maturity[cell * easy_ro.reaction_count() + reaction] =
-                        state.maturity[previous * easy_ro.reaction_count() + reaction];
-                }
-            }
+            NonmatchingColumnGrid current_grid = epoch.at(fraction);
+            const Vector& old_temperature = state.temperature;
             Properties properties = make_properties(current_grid, first, second, input, fraction,
                                                     values(old_temperature));
             auto property_updater = [&properties](std::span<const double> temperature,
@@ -288,10 +260,6 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
                 current_grid, properties.conductivity, properties.production, properties.capacity,
                 boundary_data(first, second, fraction), property_updater, capacity_updater);
             system.set_flux_scheme(settings.scheme);
-            if (integrator.current_snapshot().solution.size() != old_temperature.size()) {
-                integrator.set_initial_solution(elapsed, old_temperature);
-                integrator.reset_linear_solver();
-            }
             integrator.set_timestep(dt);
             const TimeIntegrationResult step =
                 integrator.advance_to(system, target, settings.nonlinear, settings.linear);
@@ -310,7 +278,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
                     " residual=" + std::to_string(step.last_residual_norm));
             }
             const Vector new_temperature = integrator.current_snapshot().solution;
-            easy_ro.advance(values(old_temperature), values(new_temperature), dt, old_maturity);
+            easy_ro.advance(values(old_temperature), values(new_temperature), dt, state.maturity);
             Vector derivative(new_temperature.size());
             for (Vector::Index cell = 0; cell < derivative.size(); ++cell) {
                 derivative[cell] = (new_temperature[cell] - old_temperature[cell]) / dt;
@@ -344,39 +312,27 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
             result.linear_iterations += step.linear_iterations;
             state.grid = std::move(current_grid);
             state.temperature = new_temperature;
-            state.maturity = std::move(old_maturity);
             elapsed = target;
         }
         observe_state(state, easy_ro, BasinForwardSnapshot::Kind::before_event, second.age_ma,
                       observe);
         const bool last = epoch_index + 2 == configurations.size();
+        const int born = epoch.born_layer_id.value_or(-1);
         NonmatchingColumnGrid after_grid;
         if (last) {
-            const BasinGeometry after_geometry =
-                simplify_basin_geometry_rdp(make_basin_geometry(second), settings.rdp_tolerance);
-            const BasinGeometry axis_geometry =
+            const auto& geometry = geometries.back();
+            const auto knots =
                 settings.axis_rdp_tolerance
-                    ? simplify_basin_geometry_rdp(after_geometry, *settings.axis_rdp_tolerance)
-                    : after_geometry;
-            const ColumnEpochGeometry final_axis_geometry{.start = axis_geometry,
-                                                          .after_event = axis_geometry,
-                                                          .born_layer_id = std::nullopt};
-            const auto final_material_x = lithotype_breakpoints(second);
-            const LayeredMeshLayout layout{.x = make_column_epoch_axis(final_axis_geometry,
-                                                                       settings.horizontal_step,
-                                                                       final_material_x),
-                                           .cell_size = settings.vertical_step};
-            after_grid = make_nonmatching_column_grid(after_geometry, layout);
+                    ? simplify_basin_geometry_rdp(geometry, *settings.axis_rdp_tolerance).x
+                    : geometry.x;
+            after_grid = make_nonmatching_column_grid(
+                geometry,
+                make_column_axis(knots, settings.horizontal_step, lithotype_breakpoints(second)),
+                settings.vertical_step);
         } else {
-            after_grid = make_column_epoch_grid(
-                             make_column_epoch_geometry(second, configurations[epoch_index + 2],
-                                                        settings.rdp_tolerance),
-                             settings.horizontal_step, settings.vertical_step, minimum_height,
-                             settings.axis_rdp_tolerance,
-                             lithotype_breakpoints(second, &configurations[epoch_index + 2]))
-                             .at(0.0);
+            epoch = prepare_epoch(epoch_index + 1);
+            after_grid = epoch.at(0.0);
         }
-        const int born = epoch.geometry.born_layer_id.value_or(-1);
         state = transfer_state(state, std::move(after_grid), easy_ro, born);
         observe_state(state, easy_ro, BasinForwardSnapshot::Kind::after_event, second.age_ma,
                       observe);
@@ -391,7 +347,7 @@ BasinForwardResult BasinForwardSolver::solve(const std::filesystem::path& output
     std::size_t snapshot_number = 0;
     const BasinForwardResult result = solve([&](const BasinForwardSnapshot& snapshot) {
         std::ostringstream name;
-        name << "snapshot_" << std::setw(4) << std::setfill('0') << snapshot_number++ << ".cgrid";
+        name << "snapshot_" << std::setw(4) << std::setfill('0') << snapshot_number++ << ".cgrd";
         write_basin_binary(output / name.str(), snapshot);
         if (observe)
             observe(snapshot);

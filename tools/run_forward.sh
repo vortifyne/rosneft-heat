@@ -14,5 +14,5 @@ shift 2
 
 UV_CACHE_DIR=${UV_CACHE_DIR:-/tmp/rosneft-heat-uv-cache} \
     uv run --frozen --project "$repo_dir" python "$repo_dir/tools/prepare_forward_data.py" \
-    "$data_dir" "$output_dir/input" --basin-data "$repo_dir/tools/basin_data.py"
+    "$data_dir" "$output_dir/input"
 exec "$repo_dir/tools/run_basin_forward.sh" "$output_dir/input" "$output_dir" "$@"

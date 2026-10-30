@@ -16,16 +16,14 @@ std::vector<std::string> split_csv_line(const std::string& line) {
     std::istringstream stream(line);
     std::string field;
     while (std::getline(stream, field, ',')) {
-        if (!field.empty() && field.back() == '\r') {
-            field.pop_back();
-        }
         fields.push_back(field);
     }
     return fields;
 }
 
-std::vector<std::vector<std::string>> read_csv(const std::filesystem::path& path,
-                                               const std::string& expected_header) {
+template <typename Consume>
+void read_csv(const std::filesystem::path& path, const std::string& expected_header,
+              Consume consume) {
     std::ifstream input(path);
     if (!input) {
         throw std::runtime_error("Cannot open input file: " + path.string());
@@ -40,16 +38,21 @@ std::vector<std::vector<std::string>> read_csv(const std::filesystem::path& path
     if (line != expected_header) {
         throw std::runtime_error("Unexpected header in " + path.string());
     }
-    std::vector<std::vector<std::string>> rows;
+    std::size_t row = 1;
     while (std::getline(input, line)) {
+        ++row;
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
         }
         if (!line.empty()) {
-            rows.push_back(split_csv_line(line));
+            try {
+                consume(split_csv_line(line));
+            } catch (const std::exception& error) {
+                throw std::runtime_error(path.string() + ":" + std::to_string(row) + ": " +
+                                         error.what());
+            }
         }
     }
-    return rows;
 }
 
 BasinConfiguration& find_configuration(std::vector<BasinConfiguration>& configurations,
@@ -108,8 +111,7 @@ const BasinLayerProfile& BasinConfiguration::layer(const int id) const {
 
 BasinInput BasinInput::read(const std::filesystem::path& directory) {
     BasinInput result;
-    const auto configurations = read_csv(directory / "configurations.csv", "age_ma");
-    for (const auto& fields : configurations) {
+    read_csv(directory / "configurations.csv", "age_ma", [&](const auto& fields) {
         if (fields.size() != 1) {
             throw std::runtime_error("Invalid configuration row");
         }
@@ -117,37 +119,37 @@ BasinInput BasinInput::read(const std::filesystem::path& directory) {
                                           .layers = {},
                                           .surface_temperature = {},
                                           .basal_heat_flux = {}});
-    }
+    });
 
-    const auto layer_rows = read_csv(
-        directory / "layers.csv", "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity");
-    for (const auto& fields : layer_rows) {
-        if (fields.size() != 8) {
-            throw std::runtime_error("Invalid layer profile row");
-        }
-        auto& configuration = find_configuration(result.configurations_, std::stod(fields[0]));
-        const int layer_id = std::stoi(fields[1]);
-        auto found = std::find_if(configuration.layers.begin(), configuration.layers.end(),
-                                  [layer_id](const auto& layer) { return layer.id == layer_id; });
-        if (found == configuration.layers.end()) {
-            configuration.layers.push_back({.id = layer_id,
-                                            .name = fields[2],
-                                            .x = {},
-                                            .top = {},
-                                            .bottom = {},
-                                            .lithotype = {},
-                                            .porosity = {}});
-            found = std::prev(configuration.layers.end());
-        }
-        found->x.push_back(std::stod(fields[3]));
-        found->top.push_back(std::stod(fields[4]));
-        found->bottom.push_back(std::stod(fields[5]));
-        found->lithotype.push_back(std::stoi(fields[6]));
-        found->porosity.push_back(std::stod(fields[7]));
-    }
+    read_csv(
+        directory / "layers.csv", "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity",
+        [&](const auto& fields) {
+            if (fields.size() != 8) {
+                throw std::runtime_error("Invalid layer profile row");
+            }
+            auto& configuration = find_configuration(result.configurations_, std::stod(fields[0]));
+            const int layer_id = std::stoi(fields[1]);
+            auto found =
+                std::find_if(configuration.layers.begin(), configuration.layers.end(),
+                             [layer_id](const auto& layer) { return layer.id == layer_id; });
+            if (found == configuration.layers.end()) {
+                configuration.layers.push_back({.id = layer_id,
+                                                .name = fields[2],
+                                                .x = {},
+                                                .top = {},
+                                                .bottom = {},
+                                                .lithotype = {},
+                                                .porosity = {}});
+                found = std::prev(configuration.layers.end());
+            }
+            found->x.push_back(std::stod(fields[3]));
+            found->top.push_back(std::stod(fields[4]));
+            found->bottom.push_back(std::stod(fields[5]));
+            found->lithotype.push_back(std::stoi(fields[6]));
+            found->porosity.push_back(std::stod(fields[7]));
+        });
 
-    const auto boundary_rows = read_csv(directory / "boundaries.csv", "age_ma,kind,x,value_si");
-    for (const auto& fields : boundary_rows) {
+    read_csv(directory / "boundaries.csv", "age_ma,kind,x,value_si", [&](const auto& fields) {
         if (fields.size() != 4) {
             throw std::runtime_error("Invalid boundary profile row");
         }
@@ -162,43 +164,42 @@ BasinInput BasinInput::read(const std::filesystem::path& directory) {
         }
         profile->x.push_back(std::stod(fields[2]));
         profile->values.push_back(std::stod(fields[3]));
-    }
+    });
 
-    const auto lithotype_rows =
-        read_csv(directory / "lithotypes.csv",
-                 "code,name,solid_density,conductivity_20,specific_heat_20,heat_production");
-    for (const auto& fields : lithotype_rows) {
-        if (fields.size() != 6) {
-            throw std::runtime_error("Invalid lithotype row");
-        }
-        const int code = std::stoi(fields[0]);
-        result.lithotypes_.emplace(code, LithotypeThermophysicalProperties{
-                                             .code = code,
-                                             .solid_density = std::stod(fields[2]),
-                                             .conductivity_at_20_celsius = std::stod(fields[3]),
-                                             .specific_heat_at_20_celsius = std::stod(fields[4]),
-                                             .solid_heat_production = std::stod(fields[5]),
-                                         });
-    }
+    read_csv(directory / "lithotypes.csv",
+             "code,name,solid_density,conductivity_20,specific_heat_20,heat_production",
+             [&](const auto& fields) {
+                 if (fields.size() != 6) {
+                     throw std::runtime_error("Invalid lithotype row");
+                 }
+                 const int code = std::stoi(fields[0]);
+                 result.lithotypes_.emplace(code,
+                                            LithotypeThermophysicalProperties{
+                                                .code = code,
+                                                .solid_density = std::stod(fields[2]),
+                                                .conductivity_at_20_celsius = std::stod(fields[3]),
+                                                .specific_heat_at_20_celsius = std::stod(fields[4]),
+                                                .solid_heat_production = std::stod(fields[5]),
+                                            });
+             });
 
-    const auto kinetics = read_csv(directory / "kinetics.csv",
-                                   "preexponential,activation_energy,weight,gas_constant");
-    for (const auto& fields : kinetics) {
-        if (fields.size() != 4) {
-            throw std::runtime_error("Invalid kinetics row");
-        }
-        const double preexponential = std::stod(fields[0]);
-        const double gas_constant = std::stod(fields[3]);
-        if (result.easy_ro_.activation_energies.empty()) {
-            result.easy_ro_.preexponential = preexponential;
-            result.easy_ro_.gas_constant = gas_constant;
-        } else if (preexponential != result.easy_ro_.preexponential ||
-                   gas_constant != result.easy_ro_.gas_constant) {
-            throw std::runtime_error("Kinetics constants must be common to all reactions");
-        }
-        result.easy_ro_.activation_energies.push_back(std::stod(fields[1]));
-        result.easy_ro_.weights.push_back(std::stod(fields[2]));
-    }
+    read_csv(directory / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant",
+             [&](const auto& fields) {
+                 if (fields.size() != 4) {
+                     throw std::runtime_error("Invalid kinetics row");
+                 }
+                 const double preexponential = std::stod(fields[0]);
+                 const double gas_constant = std::stod(fields[3]);
+                 if (result.easy_ro_.activation_energies.empty()) {
+                     result.easy_ro_.preexponential = preexponential;
+                     result.easy_ro_.gas_constant = gas_constant;
+                 } else if (preexponential != result.easy_ro_.preexponential ||
+                            gas_constant != result.easy_ro_.gas_constant) {
+                     throw std::runtime_error("Kinetics constants must be common to all reactions");
+                 }
+                 result.easy_ro_.activation_energies.push_back(std::stod(fields[1]));
+                 result.easy_ro_.weights.push_back(std::stod(fields[2]));
+             });
     return result;
 }
 

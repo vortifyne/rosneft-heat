@@ -29,9 +29,9 @@ def main() -> None:
     parser.add_argument("--field", choices=("temperature", "reflectance", "layer"),
                         default="temperature")
     arguments = parser.parse_args()
-    paths = sorted(arguments.directory.glob("snapshot_*.cgrid"))
+    paths = sorted(arguments.directory.glob("snapshot_*.cgrd"))
     if not paths:
-        parser.error("No snapshot_*.cgrid files found")
+        parser.error("No snapshot_*.cgrd files found")
     snapshots = [read_snapshot(path) for path in paths]
     key = arguments.field
     if key == "layer":
