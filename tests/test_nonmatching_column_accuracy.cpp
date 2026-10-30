@@ -162,16 +162,16 @@ double material_interface_outflow(const NonmatchingColumnGrid& grid,
                                   const MultipointFluxScheme scheme, const int layer) {
     const auto values = std::span<const double>(temperature.native().data(),
                                                 static_cast<std::size_t>(temperature.size()));
-    const NonmatchingColumnFluxes fluxes =
-        NonmatchingColumnFlux(grid).compute(scheme, conductivity, values, boundary_data);
+    NonmatchingColumnFluxStencil stencil;
     double result = 0.0;
-    for (const NonmatchingColumnInternalFlux& flux : fluxes.vertical) {
-        const int left_layer = grid.cells[flux.left_cell].layer_id;
-        const int right_layer = grid.cells[flux.right_cell].layer_id;
+    for (const auto& face : grid.vertical_subfaces) {
+        const int left_layer = grid.cells[face.left_cell].layer_id;
+        const int right_layer = grid.cells[face.right_cell].layer_id;
         if (left_layer == right_layer) {
             continue;
         }
-        const double left_to_right = flux.expression.value(values);
+        compute_internal_flux(grid, face, scheme, conductivity, values, boundary_data, stencil);
+        const double left_to_right = evaluate_flux(stencil, values);
         if (left_layer == layer) {
             result += left_to_right;
         } else if (right_layer == layer) {
@@ -355,7 +355,7 @@ Metrics check_case(const VerificationCase& definition, double h, MultipointFluxS
               kNormalizedResidualTolerance);
     const auto rates = nonmatching_column_energy_rates(
         grid, {solution.temperature.native().data(), grid.cells.size()}, conductivity, source,
-        definition.boundary_data, scheme);
+        definition.boundary_data);
     const double balance =
         rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow - rates.heat_production;
     EXPECT_LT(std::abs(balance) / definition.characteristic_rate, 1.0e-9);

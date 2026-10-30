@@ -1,4 +1,4 @@
-#include "basin/discretization/nonmatching_column_transient_system.hpp"
+#include "basin/discretization/nonmatching_column_heat_system.hpp"
 #include "basin/physics/thermophysical_properties.hpp"
 #include "basin/postprocessing/energy_rates.hpp"
 #include "column_test_utils.hpp"
@@ -158,8 +158,8 @@ TEST(ThermophysicalProperties, SuppliesFieldsToColumnHeatSystem) {
     const NonmatchingColumnBoundaryData boundary_data{
         .surface_temperature = [](Point2D) { return 300.0; },
         .basal_inward_flux = [](Point2D) { return 0.06; }};
-    const NonmatchingColumnTransientSystem system(grid, conductivities, heat_productions,
-                                                  heat_capacities, boundary_data);
+    const NonmatchingColumnHeatSystem system(grid, conductivities, heat_productions, boundary_data,
+                                             heat_capacities);
     Vector temperature(static_cast<Vector::Index>(cell_count));
     temperature.set_constant(373.15);
     Vector temperature_derivative(temperature.size());

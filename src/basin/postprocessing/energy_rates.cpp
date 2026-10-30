@@ -6,21 +6,22 @@
 #include <cstddef>
 #include <stdexcept>
 
-NonmatchingColumnEnergyRates nonmatching_column_energy_rates(
-    const NonmatchingColumnGrid& grid, const std::span<const double> temperature,
-    const std::span<const double> thermal_conductivity,
-    const std::span<const double> heat_production,
-    const NonmatchingColumnBoundaryData& boundary_data, const MultipointFluxScheme scheme) {
+NonmatchingColumnEnergyRates
+nonmatching_column_energy_rates(const NonmatchingColumnGrid& grid,
+                                const std::span<const double> temperature,
+                                const std::span<const double> thermal_conductivity,
+                                const std::span<const double> heat_production,
+                                const NonmatchingColumnBoundaryData& boundary_data) {
     if (temperature.size() != grid.cells.size() ||
         thermal_conductivity.size() != grid.cells.size() ||
         heat_production.size() != grid.cells.size()) {
         throw std::invalid_argument("Energy-rate field sizes do not match the grid");
     }
     NonmatchingColumnEnergyRates result;
-    const NonmatchingColumnFluxes vertical = NonmatchingColumnFlux(grid).compute(
-        scheme, thermal_conductivity, temperature, boundary_data);
-    for (const NonmatchingColumnBoundaryFlux& flux : vertical.surface) {
-        result.surface_outflow += flux.expression.value(temperature);
+    NonmatchingColumnFluxStencil stencil;
+    for (const auto& face : grid.surface_vertical_faces) {
+        compute_surface_flux(grid, face, thermal_conductivity, boundary_data, stencil);
+        result.surface_outflow += evaluate_flux(stencil, temperature);
     }
     for (const std::size_t cell_index : grid.top_cells) {
         const NonmatchingColumnCell& cell = grid.cells[cell_index];

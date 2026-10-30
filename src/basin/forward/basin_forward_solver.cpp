@@ -1,7 +1,7 @@
 #include "basin/forward/basin_forward_solver.hpp"
 
 #include "basin/basin_snapshot.hpp"
-#include "basin/discretization/nonmatching_column_transient_system.hpp"
+#include "basin/discretization/nonmatching_column_heat_system.hpp"
 #include "basin/geometry/basin_geometry_rdp.hpp"
 #include "basin/mesh/column_epoch_grid.hpp"
 #include "basin/mesh/column_field_transfer.hpp"
@@ -60,41 +60,6 @@ struct State {
     Vector temperature;
     std::vector<double> maturity;
 };
-
-struct Properties {
-    std::vector<double> porosity;
-    std::vector<const LithotypeThermophysicalProperties*> lithotypes;
-    std::vector<double> conductivity;
-    std::vector<double> capacity;
-    std::vector<double> production;
-
-    void evaluate(std::span<const double> temperature) {
-        evaluate_thermophysical_property_fields(temperature, porosity, lithotypes, kFluid,
-                                                conductivity, capacity, production);
-    }
-};
-
-Properties make_properties(const NonmatchingColumnGrid& grid, const BasinConfiguration& first,
-                           const BasinConfiguration& second, const BasinInput& input,
-                           double fraction, std::span<const double> temperature) {
-    const std::size_t count = grid.cells.size();
-    Properties properties{.porosity = std::vector<double>(count),
-                          .lithotypes =
-                              std::vector<const LithotypeThermophysicalProperties*>(count),
-                          .conductivity = std::vector<double>(count),
-                          .capacity = std::vector<double>(count),
-                          .production = std::vector<double>(count)};
-    for (const auto& cell : grid.cells) {
-        const double x = cell.center().x;
-        const auto& before = first.layer(cell.layer_id);
-        const auto& after = second.layer(cell.layer_id);
-        properties.porosity[cell.index] =
-            std::lerp(before.porosity_at(x), after.porosity_at(x), fraction);
-        properties.lithotypes[cell.index] = &input.lithotype(before.lithotype_at(x));
-    }
-    properties.evaluate(temperature);
-    return properties;
-}
 
 NonmatchingColumnBoundaryData boundary_data(const BasinConfiguration& first,
                                             const BasinConfiguration& second, double fraction) {
@@ -218,6 +183,12 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
         }
         const double duration = (first.age_ma - second.age_ma) * kSecondsPerMa;
         const double timestep = settings.timestep_ma * kSecondsPerMa;
+        std::vector<const LithotypeThermophysicalProperties*> lithotypes(state.grid.cells.size());
+        for (const auto& cell : state.grid.cells) {
+            const auto& layer = first.layer(cell.layer_id);
+            lithotypes[cell.index] = &input.lithotype(layer.lithotype_at(cell.center().x));
+        }
+        std::vector<double> porosity(state.grid.cells.size());
         double elapsed = 0.0;
         integrator.set_initial_solution(elapsed, state.temperature);
         if (epoch_index > 0 && settings.pc_reuse == PreconditionerReuse::manual) {
@@ -229,25 +200,14 @@ BasinForwardResult BasinForwardSolver::solve(const BasinForwardObserver& observe
             const double fraction = target / duration;
             NonmatchingColumnGrid current_grid = epoch.at(fraction);
             const Vector& old_temperature = state.temperature;
-            Properties properties = make_properties(current_grid, first, second, input, fraction,
-                                                    values(old_temperature));
-            auto property_updater = [&properties](std::span<const double> temperature,
-                                                  std::span<double> conductivity,
-                                                  std::span<double> production) {
-                properties.evaluate(temperature);
-                std::copy(properties.conductivity.begin(), properties.conductivity.end(),
-                          conductivity.begin());
-                std::copy(properties.production.begin(), properties.production.end(),
-                          production.begin());
-            };
-            auto capacity_updater = [&properties](std::span<const double> temperature,
-                                                  std::span<double> capacity) {
-                properties.evaluate(temperature);
-                std::copy(properties.capacity.begin(), properties.capacity.end(), capacity.begin());
-            };
-            NonmatchingColumnTransientSystem system(
-                current_grid, properties.conductivity, properties.production, properties.capacity,
-                boundary_data(first, second, fraction), property_updater, capacity_updater);
+            for (const auto& cell : current_grid.cells) {
+                const double x = cell.center().x;
+                porosity[cell.index] =
+                    std::lerp(first.layer(cell.layer_id).porosity_at(x),
+                              second.layer(cell.layer_id).porosity_at(x), fraction);
+            }
+            NonmatchingColumnHeatSystem system(current_grid, porosity, lithotypes, kFluid,
+                                               boundary_data(first, second, fraction));
             system.set_flux_scheme(settings.scheme);
             integrator.set_timestep(dt);
             const TimeIntegrationResult step =

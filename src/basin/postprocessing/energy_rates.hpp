@@ -1,7 +1,5 @@
 #pragma once
 
-#include "basin/discretization/multipoint_flux_types.hpp"
-
 #include <span>
 
 struct NonmatchingColumnGrid;
@@ -18,5 +16,4 @@ struct NonmatchingColumnEnergyRates {
 [[nodiscard]] NonmatchingColumnEnergyRates nonmatching_column_energy_rates(
     const NonmatchingColumnGrid& grid, std::span<const double> temperature,
     std::span<const double> thermal_conductivity, std::span<const double> heat_production,
-    const NonmatchingColumnBoundaryData& boundary_data,
-    MultipointFluxScheme scheme = MultipointFluxScheme::linear);
+    const NonmatchingColumnBoundaryData& boundary_data);

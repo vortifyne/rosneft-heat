@@ -1,4 +1,4 @@
-#include "basin/discretization/nonmatching_column_transient_system.hpp"
+#include "basin/discretization/nonmatching_column_heat_system.hpp"
 #include "basin/geometry/basin_geometry.hpp"
 #include "numerics/time/time_integrator.hpp"
 #include "petsc_test_session.hpp"
@@ -51,7 +51,7 @@ double integrate_decay(double timestep) {
     const std::vector<double> conductivity{1.0};
     const std::vector<double> source{0.0};
     const std::vector<double> capacity{1.0};
-    NonmatchingColumnTransientSystem system(grid, conductivity, source, capacity, boundary(0.0));
+    NonmatchingColumnHeatSystem system(grid, conductivity, source, boundary(0.0), capacity);
     TimeIntegrator integrator;
     integrator.set_initial_solution(0.0, Vector{1.0});
     integrator.set_timestep(timestep);
@@ -69,8 +69,8 @@ double integrate_moving_quadratic(double timestep) {
         const std::vector<double> conductivity{1.0};
         const std::vector<double> source{2.0 * time};
         const std::vector<double> capacity{1.0};
-        NonmatchingColumnTransientSystem system(grid, conductivity, source, capacity,
-                                                boundary(time * time));
+        NonmatchingColumnHeatSystem system(grid, conductivity, source, boundary(time * time),
+                                           capacity);
         TimeIntegrator integrator;
         integrator.set_initial_solution(0.0, Vector{temperature});
         integrator.set_timestep(timestep);
@@ -90,17 +90,17 @@ Vector solve_temperature_dependent_case(double timestep, LinearSolverOptions lin
     const double vertical_step = 0.4;
     const NonmatchingColumnGrid grid =
         make_nonmatching_column_grid(geometry, layout, vertical_step);
-    const std::vector<double> conductivity(grid.cells.size(), 1.0);
-    const std::vector<double> source(grid.cells.size(), 0.0);
-    const std::vector<double> capacity(grid.cells.size(), 1.5);
-    NonmatchingColumnTransientSystem system(
-        grid, conductivity, source, capacity, boundary(280.0),
-        [](std::span<const double> temperature, std::span<double> updated_conductivity,
-           std::span<double>) {
-            for (std::size_t i = 0; i < temperature.size(); ++i) {
-                updated_conductivity[i] = 1.0 + 0.002 * (temperature[i] - 280.0);
-            }
-        });
+    const LithotypeThermophysicalProperties lithotype{.code = 1,
+                                                      .solid_density = 2500.0,
+                                                      .conductivity_at_20_celsius = 2.5,
+                                                      .specific_heat_at_20_celsius = 850.0,
+                                                      .solid_heat_production = 0.0};
+    const FluidThermophysicalProperties fluid{
+        .thermal_conductivity = 0.7, .density = 1040.0, .specific_heat = 4184.0};
+    const std::vector<double> porosity(grid.cells.size(), 0.2);
+    const std::vector<const LithotypeThermophysicalProperties*> lithotypes(grid.cells.size(),
+                                                                           &lithotype);
+    NonmatchingColumnHeatSystem system(grid, porosity, lithotypes, fluid, boundary(280.0));
     Vector initial(static_cast<Vector::Index>(grid.cells.size()));
     for (const NonmatchingColumnCell& cell : grid.cells) {
         initial[static_cast<Vector::Index>(cell.index)] =
@@ -108,7 +108,7 @@ Vector solve_temperature_dependent_case(double timestep, LinearSolverOptions lin
     }
     TimeIntegrator integrator;
     integrator.set_initial_solution(0.0, initial);
-    integrator.set_timestep(timestep);
+    integrator.set_timestep(timestep * 1.0e6);
     integrator.set_linear_solver(linear_solver);
     const NonlinearSolveRequest nonlinear{.nonlinear_method = NonlinearMethod::picard,
                                           .relative_tolerance = 1.0e-9,
@@ -116,14 +116,14 @@ Vector solve_temperature_dependent_case(double timestep, LinearSolverOptions lin
                                           .max_iterations = 100};
     const LinearSolveRequest linear{
         .relative_tolerance = 1.0e-10, .absolute_tolerance = 1.0e-12, .max_iterations = 300};
-    const TimeIntegrationResult result = integrator.advance_to(system, 1.0, nonlinear, linear);
+    const TimeIntegrationResult result = integrator.advance_to(system, 1.0e6, nonlinear, linear);
     EXPECT_TRUE(result.completed());
     return integrator.current_snapshot().solution;
 }
 
 } // namespace
 
-TEST(NonmatchingColumnTransientSystem, Bdf1ConvergesAtFirstOrderForDiscreteDecayMode) {
+TEST(NonmatchingColumnHeatSystem, Bdf1ConvergesAtFirstOrderForDiscreteDecayMode) {
     // One cell gives the exact semi-discrete equation dT/dt + 2T = 0.
     const double exact = std::exp(-2.0);
     const double coarse_error = std::abs(integrate_decay(0.1) - exact);
@@ -132,7 +132,7 @@ TEST(NonmatchingColumnTransientSystem, Bdf1ConvergesAtFirstOrderForDiscreteDecay
     EXPECT_LT(coarse_error / fine_error, 2.1);
 }
 
-TEST(NonmatchingColumnTransientSystem, MovingCellBdf1ConvergesAtFirstOrder) {
+TEST(NonmatchingColumnHeatSystem, MovingCellBdf1ConvergesAtFirstOrder) {
     // T=t^2, source=2t, surface T=t^2, basal flux=0 on a growing cell.
     const double coarse_error = std::abs(integrate_moving_quadratic(0.1) - 1.0);
     const double fine_error = std::abs(integrate_moving_quadratic(0.05) - 1.0);
@@ -140,37 +140,46 @@ TEST(NonmatchingColumnTransientSystem, MovingCellBdf1ConvergesAtFirstOrder) {
     EXPECT_LT(coarse_error / fine_error, 2.1);
 }
 
-TEST(NonmatchingColumnTransientSystem, AccumulationUsesCurrentMovingCellAndPicardCapacity) {
+TEST(NonmatchingColumnHeatSystem, AccumulationUsesCurrentMovingCellAndPicardCapacity) {
     const NonmatchingColumnGrid grid = single_cell_grid(2.0);
-    const std::vector<double> conductivity{1.0};
-    const std::vector<double> source{0.0};
-    const std::vector<double> capacity{1.0};
-    NonmatchingColumnTransientSystem system(
-        grid, conductivity, source, capacity, boundary(3.0), {},
-        [](std::span<const double> temperature, std::span<double> updated) {
-            updated[0] = 2.0 + temperature[0];
-        });
-    const Vector temperature{3.0};
-    const Vector derivative{0.4};
-    Vector spatial_residual;
-    Vector transient_residual;
-    const NonmatchingColumnHeatSystem spatial(grid, conductivity, source, boundary(3.0));
-    spatial.assemble_residual(temperature, spatial_residual);
-    system.assemble_residual(1.0, temperature, derivative, transient_residual);
-    EXPECT_NEAR(transient_residual[0] - spatial_residual[0], 2.0 * 5.0 * 0.4, 1.0e-12);
+    const LithotypeThermophysicalProperties lithotype{.code = 1,
+                                                      .solid_density = 2500.0,
+                                                      .conductivity_at_20_celsius = 2.5,
+                                                      .specific_heat_at_20_celsius = 850.0,
+                                                      .solid_heat_production = 0.0};
+    const FluidThermophysicalProperties fluid{
+        .thermal_conductivity = 0.7, .density = 1040.0, .specific_heat = 4184.0};
+    const std::vector<double> porosity{0.2};
+    const std::vector<const LithotypeThermophysicalProperties*> lithotypes{&lithotype};
+    NonmatchingColumnHeatSystem system(grid, porosity, lithotypes, fluid, boundary(300.0));
+    for (const double value : {323.15, 373.15}) {
+        const auto properties =
+            evaluate_thermophysical_properties(value, porosity[0], lithotype, fluid);
+        const std::vector<double> conductivity{properties.thermal_conductivity};
+        const std::vector<double> source{properties.heat_production};
+        const NonmatchingColumnHeatSystem spatial(grid, conductivity, source, boundary(300.0));
+        const Vector temperature{value};
+        const Vector derivative{0.4};
+        Vector spatial_residual;
+        Vector transient_residual;
+        spatial.assemble_residual(temperature, spatial_residual);
+        system.assemble_residual(1.0, temperature, derivative, transient_residual);
+        EXPECT_NEAR(transient_residual[0] - spatial_residual[0],
+                    2.0 * properties.volumetric_heat_capacity * 0.4, 1.0e-8);
 
-    SparseMatrix matrix;
-    SparseMatrix spatial_matrix;
-    spatial.assemble_matrix(temperature, spatial_matrix);
-    system.assemble_matrix(NonlinearMethod::picard, 1.0, temperature, derivative, 4.0, matrix);
-    EXPECT_NEAR(matrix.coefficient(0, 0) - spatial_matrix.coefficient(0, 0), 2.0 * 5.0 * 4.0,
-                1.0e-12);
+        SparseMatrix matrix;
+        SparseMatrix spatial_matrix;
+        spatial.assemble_matrix(temperature, spatial_matrix);
+        system.assemble_matrix(NonlinearMethod::picard, 1.0, temperature, derivative, 4.0, matrix);
+        EXPECT_NEAR(matrix.coefficient(0, 0) - spatial_matrix.coefficient(0, 0),
+                    2.0 * properties.volumetric_heat_capacity * 4.0, 1.0e-8);
 
-    system.assemble_residual(1.0, temperature, Vector{0.0}, transient_residual);
-    EXPECT_NEAR(transient_residual[0], spatial_residual[0], 1.0e-12);
+        system.assemble_residual(1.0, temperature, Vector{0.0}, transient_residual);
+        EXPECT_NEAR(transient_residual[0], spatial_residual[0], 1.0e-12);
+    }
 }
 
-TEST(NonmatchingColumnTransientSystem, AdvancesAffineFieldOnIndependentColumns) {
+TEST(NonmatchingColumnHeatSystem, AdvancesAffineFieldOnIndependentColumns) {
     const std::vector<double> x{0.0, 1.0, 2.0};
     const BasinGeometry source{
         .x = x, .boundaries = {{0.0, 0.4, 0.8}, {3.0, 3.0, 3.0}}, .layers = {{1, 0.0, 2.0}}};
@@ -196,12 +205,13 @@ TEST(NonmatchingColumnTransientSystem, AdvancesAffineFieldOnIndependentColumns) 
 
     for (const MultipointFluxScheme scheme :
          {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
-        NonmatchingColumnTransientSystem system(
-            grid, conductivity, source_rate, capacity,
+        NonmatchingColumnHeatSystem system(
+            grid, conductivity, source_rate,
             {.surface_temperature = [exact](Point2D point) { return exact(point, final_time); },
              .basal_inward_flux = [](Point2D) { return conductivity_value * z_gradient; },
              .left_inward_flux = [](Point2D) { return -conductivity_value * x_gradient; },
-             .right_inward_flux = [](Point2D) { return conductivity_value * x_gradient; }});
+             .right_inward_flux = [](Point2D) { return conductivity_value * x_gradient; }},
+            capacity);
         system.set_flux_scheme(scheme);
         TimeIntegrator integrator;
         integrator.set_initial_solution(0.0, initial);
@@ -222,7 +232,7 @@ TEST(NonmatchingColumnTransientSystem, AdvancesAffineFieldOnIndependentColumns) 
     }
 }
 
-TEST(NonmatchingColumnTransientSystem, TemperatureDependentCaseRefinesAndAgreesWithGamg) {
+TEST(NonmatchingColumnHeatSystem, TemperatureDependentCaseRefinesAndAgreesWithGamg) {
     ensure_petsc_test_session();
     const Vector coarse = solve_temperature_dependent_case(0.25, LinearSolverOptions{});
     const Vector medium = solve_temperature_dependent_case(0.125, LinearSolverOptions{});

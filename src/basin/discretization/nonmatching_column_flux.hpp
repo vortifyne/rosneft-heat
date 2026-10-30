@@ -3,9 +3,10 @@
 #include "basin/discretization/multipoint_flux_types.hpp"
 #include "basin/mesh/nonmatching_column_grid.hpp"
 
+#include <array>
+#include <cstddef>
 #include <functional>
 #include <span>
-#include <vector>
 
 struct NonmatchingColumnBoundaryData {
     std::function<double(Point2D)> surface_temperature;
@@ -14,48 +15,27 @@ struct NonmatchingColumnBoundaryData {
     std::function<double(Point2D)> right_inward_flux{};
 };
 
-struct NonmatchingColumnInternalFlux {
-    std::size_t left_cell = 0;
-    std::size_t right_cell = 0;
-    MultipointFluxExpression expression;
+// Each side uses the two adjacent cells and at most one vertical neighbour.
+// Their union therefore contains at most four cells, also for NMPFA remainders.
+struct NonmatchingColumnFluxStencil {
+    std::array<std::size_t, 4> cells{};
+    std::array<double, 4> coefficients{};
+    std::size_t size = 0;
+    double constant = 0.0;
 };
 
-struct NonmatchingColumnBoundaryFlux {
-    std::size_t cell = 0;
-    MultipointFluxExpression expression;
-};
+[[nodiscard]] double evaluate_flux(const NonmatchingColumnFluxStencil& stencil,
+                                   std::span<const double> temperature);
 
-struct NonmatchingColumnFluxes {
-    std::vector<NonmatchingColumnInternalFlux> vertical;
-    std::vector<NonmatchingColumnBoundaryFlux> surface;
-};
+void compute_internal_flux(const NonmatchingColumnGrid& grid,
+                           const NonmatchingVerticalSubface& face, MultipointFluxScheme scheme,
+                           std::span<const double> conductivity,
+                           std::span<const double> temperature,
+                           const NonmatchingColumnBoundaryData& boundary_data,
+                           NonmatchingColumnFluxStencil& stencil);
 
-class NonmatchingColumnFlux {
-public:
-    explicit NonmatchingColumnFlux(const NonmatchingColumnGrid& grid);
-
-    [[nodiscard]] NonmatchingColumnFluxes
-    compute(MultipointFluxScheme scheme, std::span<const double> conductivity,
-            std::span<const double> solution,
-            const NonmatchingColumnBoundaryData& boundary_data) const;
-
-private:
-    struct Sample;
-    struct OneSidedFlux;
-
-    [[nodiscard]] Sample target_sample(std::size_t cell, std::size_t neighbor, double interface_x,
-                                       std::span<const double> conductivity) const;
-    [[nodiscard]] Sample vertical_sample(std::size_t cell, bool upward,
-                                         std::span<const double> conductivity,
-                                         const NonmatchingColumnBoundaryData& boundary_data) const;
-    [[nodiscard]] OneSidedFlux
-    one_sided_flux(std::size_t cell, std::size_t neighbor, double interface_x,
-                   std::span<const double> conductivity,
-                   const NonmatchingColumnBoundaryData& boundary_data) const;
-    [[nodiscard]] MultipointFluxExpression
-    surface_boundary_flux(const NonmatchingVerticalBoundaryFace& face,
+void compute_surface_flux(const NonmatchingColumnGrid& grid,
+                          const NonmatchingVerticalBoundaryFace& face,
                           std::span<const double> conductivity,
-                          const NonmatchingColumnBoundaryData& boundary_data) const;
-
-    const NonmatchingColumnGrid* grid_ = nullptr;
-};
+                          const NonmatchingColumnBoundaryData& boundary_data,
+                          NonmatchingColumnFluxStencil& stencil);

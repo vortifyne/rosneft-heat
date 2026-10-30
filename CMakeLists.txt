@@ -73,10 +73,8 @@ add_library(basin_heat_forward STATIC
   src/basin/forward/basin_forward_solver.cpp
   src/basin/io/basin_forward_options.cpp
   src/basin/io/basin_forward_output.cpp
-  src/basin/discretization/multipoint_flux_expression.cpp
   src/basin/discretization/nonmatching_column_flux.cpp
   src/basin/discretization/nonmatching_column_heat_system.cpp
-  src/basin/discretization/nonmatching_column_transient_system.cpp
   src/basin/postprocessing/energy_rates.cpp
 )
 heat_configure_target(basin_heat_forward)

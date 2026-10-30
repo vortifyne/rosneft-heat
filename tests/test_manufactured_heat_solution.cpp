@@ -1,4 +1,4 @@
-#include "basin/discretization/nonmatching_column_transient_system.hpp"
+#include "basin/discretization/nonmatching_column_heat_system.hpp"
 #include "basin/mesh/column_field_transfer.hpp"
 #include "basin/postprocessing/energy_rates.hpp"
 #include "column_test_utils.hpp"
@@ -83,7 +83,7 @@ double steady_spatial_error(std::size_t nx, std::size_t nz, MultipointFluxScheme
     EXPECT_TRUE(result.converged()) << "residual=" << result.final_residual_norm;
     const auto rates =
         nonmatching_column_energy_rates(grid, {temperature.native().data(), grid.cells.size()},
-                                        coefficients, source, boundary_data, scheme);
+                                        coefficients, source, boundary_data);
     EXPECT_NEAR(rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow,
                 rates.heat_production, 1e-8);
     return area_weighted_error(grid, temperature, exact);
@@ -100,10 +100,11 @@ double transient_error(double timestep) {
     const std::vector<double> coefficients(grid.cells.size(), conductivity);
     const std::vector<double> capacities(grid.cells.size(), capacity);
     const std::vector<double> source(grid.cells.size(), 0.0);
-    NonmatchingColumnTransientSystem system(
-        grid, coefficients, source, capacities,
+    NonmatchingColumnHeatSystem system(
+        grid, coefficients, source,
         {.surface_temperature = [](Point2D) { return kBaseTemperature; },
-         .basal_inward_flux = [](Point2D) { return 0.0; }});
+         .basal_inward_flux = [](Point2D) { return 0.0; }},
+        capacities);
     Vector initial(static_cast<Vector::Index>(grid.cells.size()));
     for (const auto& cell : grid.cells) {
         initial[static_cast<Vector::Index>(cell.index)] =

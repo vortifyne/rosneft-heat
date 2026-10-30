@@ -174,7 +174,7 @@ TEST(NonmatchingColumnHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
         EXPECT_LT(residual.infinity_norm(), 2.0e-11);
         const auto rates =
             nonmatching_column_energy_rates(grid, {temperature.native().data(), grid.cells.size()},
-                                            conductivity, production, boundary_data, scheme);
+                                            conductivity, production, boundary_data);
         EXPECT_NEAR(rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow, 0.0,
                     2.0e-11);
     }
@@ -197,15 +197,14 @@ TEST(NonmatchingColumnFlux, ReproducesAffineFluxOnMergedSubfaces) {
         .surface_temperature =
             [](const Point2D point) { return 300.0 + x_gradient * point.x + z_gradient * point.z; },
         .basal_inward_flux = [](Point2D) { return 2.5 * z_gradient; }};
-    const NonmatchingColumnFlux flux(grid);
+    NonmatchingColumnFluxStencil stencil;
     for (const MultipointFluxScheme scheme :
          {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
-        const NonmatchingColumnFluxes values =
-            flux.compute(scheme, conductivity, temperature, boundary);
-        ASSERT_EQ(values.vertical.size(), grid.vertical_subfaces.size());
-        for (std::size_t i = 0; i < values.vertical.size(); ++i) {
-            const double expected = -2.5 * x_gradient * grid.vertical_subfaces[i].length();
-            EXPECT_NEAR(values.vertical[i].expression.value(temperature), expected, 2.0e-12);
+        for (const auto& face : grid.vertical_subfaces) {
+            compute_internal_flux(grid, face, scheme, conductivity, temperature, boundary, stencil);
+            ASSERT_LE(stencil.size, 4U);
+            const double expected = -2.5 * x_gradient * face.length();
+            EXPECT_NEAR(evaluate_flux(stencil, temperature), expected, 2.0e-12);
         }
     }
 }
@@ -244,13 +243,13 @@ TEST(NonmatchingColumnFlux, UsesHarmonicNormalFluxAcrossMaterialJump) {
     const NonmatchingColumnBoundaryData boundary{
         .surface_temperature = [](Point2D) { return 300.0; },
         .basal_inward_flux = [](Point2D) { return 0.0; }};
-    const NonmatchingColumnFlux flux(grid);
+    NonmatchingColumnFluxStencil stencil;
     for (const MultipointFluxScheme scheme :
          {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
-        const NonmatchingColumnFluxes values =
-            flux.compute(scheme, conductivity, temperature, boundary);
-        ASSERT_EQ(values.vertical.size(), 1U);
-        EXPECT_NEAR(values.vertical[0].expression.value(temperature), -flux_scale, 2.0e-11);
+        ASSERT_EQ(grid.vertical_subfaces.size(), 1U);
+        compute_internal_flux(grid, grid.vertical_subfaces.front(), scheme, conductivity,
+                              temperature, boundary, stencil);
+        EXPECT_NEAR(evaluate_flux(stencil, temperature), -flux_scale, 2.0e-11);
     }
 }
 
