@@ -2,5 +2,22 @@
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "heat-solver",
   "version-string": "0.1.0",
-  "dependencies": ["gtest", "eigen3", "suitesparse-umfpack", "benchmark"]
+  "dependencies": [
+    "eigen3",
+    "suitesparse-umfpack"
+  ],
+  "features": {
+    "tests": {
+      "description": "Automated checks",
+      "dependencies": [
+        "gtest"
+      ]
+    },
+    "benchmarks": {
+      "description": "Performance benchmarks",
+      "dependencies": [
+        "benchmark"
+      ]
+    }
+  }
 }

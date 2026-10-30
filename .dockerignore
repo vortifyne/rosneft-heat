@@ -1,6 +1,9 @@
 .git
 .github
 build/
+local/
+.venv/
+**/__pycache__/
 .vcpkg/
 vcpkg_installed/
 .vscode

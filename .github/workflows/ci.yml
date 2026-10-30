@@ -13,21 +13,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Build Docker environment
         run: docker build -t heat-env .
 
-      - name: Build C++ Project inside Docker
-        run: |
-          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} heat-env bash -c "
-            cmake --preset release && \
-            cmake --build --preset release
-          "
+      - name: Build release application inside Docker
+        run: make docker-release
 
-      - name: Run Tests inside Docker
-        run: |
-          docker run --rm -v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} heat-env bash -c "
-            ctest --test-dir build/release --output-on-failure
-          "
+      - name: Build and test inside Docker
+        run: make docker-test MODEL=ON

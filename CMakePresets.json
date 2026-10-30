@@ -2,7 +2,7 @@
   "version": 3,
   "cmakeMinimumRequired": {
     "major": 3,
-    "minor": 21,
+    "minor": 28,
     "patch": 0
   },
   "configurePresets": [
@@ -10,31 +10,78 @@
       "name": "base",
       "hidden": true,
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/build/${presetName}",
+      "binaryDir": "${sourceDir}/build/local/${presetName}",
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": {
           "type": "FILEPATH",
           "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-        }
+        },
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/local/${presetName}",
+        "BUILD_TESTING": "OFF",
+        "HEAT_BUILD_MODEL": "OFF",
+        "HEAT_BUILD_BENCHMARKS": "OFF"
       }
     },
     {
       "name": "debug",
       "inherits": "base",
-      "displayName": "Debug Build",
-      "description": "Сборка для отладки",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "docker-debug",
+      "inherits": "debug",
+      "binaryDir": "${sourceDir}/build/docker/debug",
+      "cacheVariables": {
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/docker/${presetName}"
       }
     },
     {
       "name": "release",
       "inherits": "base",
-      "displayName": "Release Build",
-      "description": "Финальная сборка",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "docker-release",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build/docker/release",
+      "cacheVariables": {
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/docker/${presetName}"
+      }
+    },
+    {
+      "name": "test",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "docker-test",
+      "inherits": "test",
+      "binaryDir": "${sourceDir}/build/docker/test",
+      "cacheVariables": {
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/docker/${presetName}"
+      }
+    },
+    {
+      "name": "bench",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "HEAT_BUILD_BENCHMARKS": "ON"
+      }
+    },
+    {
+      "name": "docker-bench",
+      "inherits": "bench",
+      "binaryDir": "${sourceDir}/build/docker/bench",
+      "cacheVariables": {
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed/docker/${presetName}"
       }
     }
   ],
@@ -44,8 +91,54 @@
       "configurePreset": "debug"
     },
     {
+      "name": "docker-debug",
+      "configurePreset": "docker-debug"
+    },
+    {
       "name": "release",
       "configurePreset": "release"
+    },
+    {
+      "name": "docker-release",
+      "configurePreset": "docker-release"
+    },
+    {
+      "name": "test",
+      "configurePreset": "test"
+    },
+    {
+      "name": "docker-test",
+      "configurePreset": "docker-test"
+    },
+    {
+      "name": "bench",
+      "configurePreset": "bench"
+    },
+    {
+      "name": "docker-bench",
+      "configurePreset": "docker-bench"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "test",
+      "configurePreset": "test",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "docker-test",
+      "configurePreset": "docker-test",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
     }
   ]
 }
