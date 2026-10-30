@@ -1,5 +1,6 @@
-#include "basin/basin_forward_options.hpp"
-#include "physics/easy_ro.hpp"
+#include "basin/forward/basin_forward_solver.hpp"
+#include "basin/io/basin_forward_options.hpp"
+#include "basin/physics/easy_ro.hpp"
 
 #include <algorithm>
 #include <benchmark/benchmark.h>

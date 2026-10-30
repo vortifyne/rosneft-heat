@@ -1,5 +1,6 @@
-#include "basin/basin_geometry_rdp.hpp"
-#include "basin/column_epoch_grid.hpp"
+#include "basin/basin_problem.hpp"
+#include "basin/geometry/basin_geometry_rdp.hpp"
+#include "basin/mesh/column_epoch_grid.hpp"
 
 #include <algorithm>
 #include <gtest/gtest.h>

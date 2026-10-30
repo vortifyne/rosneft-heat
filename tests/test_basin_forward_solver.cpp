@@ -1,4 +1,7 @@
-#include "basin/basin_forward_options.hpp"
+#include "basin/basin_snapshot.hpp"
+#include "basin/forward/basin_forward_solver.hpp"
+#include "basin/io/basin_forward_options.hpp"
+#include "basin/mesh/nonmatching_column_grid.hpp"
 
 #include <algorithm>
 #include <chrono>

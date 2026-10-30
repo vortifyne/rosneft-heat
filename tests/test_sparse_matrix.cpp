@@ -1,4 +1,4 @@
-#include "linear/sparse_matrix.hpp"
+#include "numerics/algebra/sparse_matrix.hpp"
 
 #include <gtest/gtest.h>
 #include <stdexcept>

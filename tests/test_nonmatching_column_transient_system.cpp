@@ -1,6 +1,7 @@
-#include "discretization/nonmatching_column_transient_system.hpp"
+#include "basin/discretization/nonmatching_column_transient_system.hpp"
+#include "basin/geometry/basin_geometry.hpp"
+#include "numerics/time/time_integrator.hpp"
 #include "petsc_test_session.hpp"
-#include "time/time_integrator.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>

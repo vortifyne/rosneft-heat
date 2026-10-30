@@ -1,6 +1,6 @@
-#include "discretization/semi_discrete_system.hpp"
+#include "numerics/time/semi_discrete_system.hpp"
+#include "numerics/time/time_integrator.hpp"
 #include "petsc_test_session.hpp"
-#include "time/time_integrator.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>

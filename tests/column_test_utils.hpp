@@ -1,6 +1,6 @@
 #pragma once
 
-#include "basin/nonmatching_column_grid.hpp"
+#include "basin/mesh/nonmatching_column_grid.hpp"
 
 #include <cstddef>
 #include <optional>

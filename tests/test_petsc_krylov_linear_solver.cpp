@@ -1,5 +1,5 @@
-#include "linear/petsc_krylov_linear_solver.hpp"
-#include "nonlinear/nonlinear_solver.hpp"
+#include "numerics/linear/petsc_krylov_linear_solver.hpp"
+#include "numerics/nonlinear/nonlinear_solver.hpp"
 #include "petsc_test_session.hpp"
 
 #include <gtest/gtest.h>

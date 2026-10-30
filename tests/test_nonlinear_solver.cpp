@@ -1,4 +1,4 @@
-#include "nonlinear/nonlinear_solver.hpp"
+#include "numerics/nonlinear/nonlinear_solver.hpp"
 
 #include <gtest/gtest.h>
 #include <limits>

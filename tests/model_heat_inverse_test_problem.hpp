@@ -1,6 +1,6 @@
 #pragma once
 
-#include "inverse/model_heat_inverse_solver.hpp"
+#include "model/inverse/model_heat_inverse_solver.hpp"
 
 #include <stdexcept>
 #include <utility>

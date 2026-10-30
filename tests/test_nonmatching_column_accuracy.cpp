@@ -1,6 +1,7 @@
-#include "basin/nonmatching_column_grid.hpp"
-#include "discretization/nonmatching_column_heat_system.hpp"
-#include "linear/umfpack_linear_solver.hpp"
+#include "basin/discretization/nonmatching_column_heat_system.hpp"
+#include "basin/geometry/basin_geometry.hpp"
+#include "basin/mesh/nonmatching_column_grid.hpp"
+#include "numerics/linear/umfpack_linear_solver.hpp"
 
 #include <algorithm>
 #include <cmath>

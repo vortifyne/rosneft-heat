@@ -1,6 +1,7 @@
-#include "basin/nonmatching_column_grid.hpp"
-#include "discretization/nonmatching_column_flux.hpp"
-#include "discretization/nonmatching_column_heat_system.hpp"
+#include "basin/discretization/nonmatching_column_flux.hpp"
+#include "basin/discretization/nonmatching_column_heat_system.hpp"
+#include "basin/geometry/basin_geometry.hpp"
+#include "basin/mesh/nonmatching_column_grid.hpp"
 
 #include <gtest/gtest.h>
 #include <map>

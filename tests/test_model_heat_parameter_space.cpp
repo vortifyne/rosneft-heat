@@ -1,4 +1,4 @@
-#include "inverse/model_heat_parameter_space.hpp"
+#include "model/inverse/model_heat_parameter_space.hpp"
 
 #include <gtest/gtest.h>
 #include <limits>

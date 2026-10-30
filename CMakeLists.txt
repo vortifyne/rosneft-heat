@@ -34,11 +34,11 @@ function(heat_configure_target target)
 endfunction()
 
 add_library(heat_numerics STATIC
-  src/linear/umfpack_linear_solver.cpp
-  src/linear/petsc_krylov_linear_solver.cpp
-  src/nonlinear/nonlinear_solver.cpp
-  src/time/bdf1.cpp
-  src/time/time_integrator.cpp
+  src/numerics/linear/umfpack_linear_solver.cpp
+  src/numerics/linear/petsc_krylov_linear_solver.cpp
+  src/numerics/nonlinear/nonlinear_solver.cpp
+  src/numerics/time/bdf1.cpp
+  src/numerics/time/time_integrator.cpp
 )
 heat_configure_target(heat_numerics)
 target_link_libraries(heat_numerics
@@ -46,57 +46,58 @@ target_link_libraries(heat_numerics
   PRIVATE SuiteSparse::UMFPACK_static PkgConfig::PETSc MPI::MPI_CXX
 )
 
-add_library(heat_opt STATIC EXCLUDE_FROM_ALL src/optimization/pounders_optimizer.cpp)
+add_library(heat_opt STATIC EXCLUDE_FROM_ALL src/numerics/optimization/pounders_optimizer.cpp)
 heat_configure_target(heat_opt)
 target_link_libraries(heat_opt PUBLIC Eigen3::Eigen PRIVATE PkgConfig::PETSc MPI::MPI_CXX)
 
 add_library(basin_physics STATIC
-  src/physics/easy_ro.cpp
-  src/physics/thermophysical_properties.cpp
+  src/basin/physics/easy_ro.cpp
+  src/basin/physics/thermophysical_properties.cpp
 )
 heat_configure_target(basin_physics)
 
 add_library(basin_data STATIC
-  src/basin/basin_input.cpp
-  src/basin/basin_geometry.cpp
-  src/basin/basin_geometry_rdp.cpp
-  src/basin/column_epoch_grid.cpp
-  src/basin/column_field_transfer.cpp
-  src/basin/nonmatching_column_grid.cpp
-  src/basin/basin_binary.cpp
+  src/basin/basin_problem.cpp
+  src/basin/io/basin_input.cpp
+  src/basin/geometry/basin_geometry.cpp
+  src/basin/geometry/basin_geometry_rdp.cpp
+  src/basin/mesh/column_epoch_grid.cpp
+  src/basin/mesh/column_field_transfer.cpp
+  src/basin/mesh/nonmatching_column_grid.cpp
+  src/basin/io/basin_binary.cpp
 )
 heat_configure_target(basin_data)
 target_link_libraries(basin_data PUBLIC basin_physics)
 
 add_library(basin_heat_forward STATIC
-  src/basin/basin_forward_solver.cpp
-  src/basin/basin_forward_options.cpp
-  src/discretization/multipoint_flux_expression.cpp
-  src/discretization/nonmatching_column_flux.cpp
-  src/discretization/nonmatching_column_heat_system.cpp
-  src/discretization/nonmatching_column_transient_system.cpp
+  src/basin/forward/basin_forward_solver.cpp
+  src/basin/io/basin_forward_options.cpp
+  src/basin/discretization/multipoint_flux_expression.cpp
+  src/basin/discretization/nonmatching_column_flux.cpp
+  src/basin/discretization/nonmatching_column_heat_system.cpp
+  src/basin/discretization/nonmatching_column_transient_system.cpp
 )
 heat_configure_target(basin_heat_forward)
 target_link_libraries(basin_heat_forward PUBLIC heat_numerics basin_data)
 
-add_executable(basin_forward_app src/basin/main.cpp)
+add_executable(basin_forward_app src/apps/basin_forward/main.cpp)
 set_target_properties(basin_forward_app PROPERTIES OUTPUT_NAME basin_forward_solver)
 heat_configure_target(basin_forward_app)
 target_link_libraries(basin_forward_app PRIVATE basin_heat_forward PkgConfig::PETSc MPI::MPI_CXX)
 
 if(HEAT_BUILD_MODEL)
   add_library(model_heat_forward STATIC
-    src/model/model_heat_system.cpp
-    src/model/model_heat_forward_solver.cpp
+    src/model/forward/model_heat_system.cpp
+    src/model/forward/model_heat_forward_solver.cpp
   )
   heat_configure_target(model_heat_forward)
   target_link_libraries(model_heat_forward PUBLIC heat_numerics)
 
   add_library(model_heat_inverse STATIC
-    src/inverse/model_heat_inverse_solver.cpp
-    src/inverse/model_heat_observation_data.cpp
-    src/inverse/model_heat_parameter_space.cpp
-    src/inverse/model_heat_residual_evaluator.cpp
+    src/model/inverse/model_heat_inverse_solver.cpp
+    src/model/inverse/model_heat_observation_data.cpp
+    src/model/inverse/model_heat_parameter_space.cpp
+    src/model/inverse/model_heat_residual_evaluator.cpp
   )
   heat_configure_target(model_heat_inverse)
   target_link_libraries(model_heat_inverse PUBLIC model_heat_forward heat_opt)

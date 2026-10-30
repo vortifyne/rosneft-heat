@@ -1,8 +1,8 @@
 #pragma once
 
-#include "basin/nonmatching_column_grid.hpp"
-
 #include <span>
+
+struct NonmatchingColumnGrid;
 
 struct BasinForwardSnapshot {
     enum class Kind {

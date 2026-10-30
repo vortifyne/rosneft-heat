@@ -1,4 +1,4 @@
-#include "inverse/model_heat_observation_data.hpp"
+#include "model/inverse/model_heat_observation_data.hpp"
 
 #include <gtest/gtest.h>
 #include <limits>

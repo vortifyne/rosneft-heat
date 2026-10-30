@@ -1,4 +1,4 @@
-#include "inverse/model_heat_residual_evaluator.hpp"
+#include "model/inverse/model_heat_residual_evaluator.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>

@@ -1,8 +1,8 @@
-#include "basin/column_field_transfer.hpp"
+#include "basin/discretization/nonmatching_column_transient_system.hpp"
+#include "basin/mesh/column_field_transfer.hpp"
 #include "column_test_utils.hpp"
-#include "discretization/nonmatching_column_transient_system.hpp"
-#include "nonlinear/nonlinear_solver.hpp"
-#include "time/time_integrator.hpp"
+#include "numerics/nonlinear/nonlinear_solver.hpp"
+#include "numerics/time/time_integrator.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>

@@ -1,4 +1,4 @@
-#include "linear/vector.hpp"
+#include "numerics/algebra/vector.hpp"
 
 #include <Eigen/Core>
 #include <gtest/gtest.h>

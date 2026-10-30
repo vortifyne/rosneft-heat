@@ -1,4 +1,4 @@
-#include "linear/umfpack_linear_solver.hpp"
+#include "numerics/linear/umfpack_linear_solver.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>
