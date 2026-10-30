@@ -8,16 +8,16 @@
 namespace {
 
 constexpr NonlinearSolveRequest kNewtonRequest{
-    .nonlinear_method = NonlinearMethod::newton,
-    .relative_tolerance = 1e-12,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 5,
+    .method = NonlinearMethod::newton,
+    .rtol = 1e-12,
+    .atol = 1e-12,
+    .maxiter = 5,
 };
 
 constexpr LinearSolveRequest kDirectLinearRequest{
-    .relative_tolerance = 1e-12,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 1,
+    .rtol = 1e-12,
+    .atol = 1e-12,
+    .maxiter = 1,
 };
 
 RegularGrid make_grid() {
@@ -121,7 +121,7 @@ TEST(ModelHeatResidualEvaluatorTest, RepeatsEveryEvaluationFromTheInitialState) 
 
 TEST(ModelHeatResidualEvaluatorTest, ReportsForwardFailureWithoutComputingResiduals) {
     ModelHeatForwardSettings settings = make_settings();
-    settings.nonlinear.max_iterations = 0;
+    settings.nonlinear.maxiter = 0;
     ModelHeatResidualEvaluator evaluator(make_forward_solver(settings), make_parameter_space(),
                                          make_observations());
 

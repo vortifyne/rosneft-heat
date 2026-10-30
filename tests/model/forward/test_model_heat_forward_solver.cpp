@@ -9,16 +9,16 @@
 namespace {
 
 constexpr NonlinearSolveRequest kNewtonRequest{
-    .nonlinear_method = NonlinearMethod::newton,
-    .relative_tolerance = 1e-12,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 5,
+    .method = NonlinearMethod::newton,
+    .rtol = 1e-12,
+    .atol = 1e-12,
+    .maxiter = 5,
 };
 
 constexpr LinearSolveRequest kDirectLinearRequest{
-    .relative_tolerance = 1e-12,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 1,
+    .rtol = 1e-12,
+    .atol = 1e-12,
+    .maxiter = 1,
 };
 
 ModelHeatProblem make_problem(std::vector<ObservationPoint> observation_points) {
@@ -126,7 +126,7 @@ TEST(ModelHeatForwardSolverTest, ReusesFixedProblemAndStartsEveryParameterRunFro
 TEST(ModelHeatForwardSolverTest, KeepsLastAcceptedStateWhenCalculationFails) {
     const RegularGrid grid(3, 3, 1500.0, 0.0, 1500.0);
     ModelHeatForwardSettings settings = make_settings();
-    settings.nonlinear.max_iterations = 0;
+    settings.nonlinear.maxiter = 0;
     ModelHeatForwardSolver solver(grid, make_problem({{.x = 750.0, .z = 750.0}}), settings);
 
     const ModelHeatForwardResult result =

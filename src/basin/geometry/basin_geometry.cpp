@@ -10,7 +10,7 @@
 #include <utility>
 
 double BasinGeometry::boundary_at(std::size_t contact, double coordinate) const {
-    return basin_detail::interpolate(x, boundaries[contact], coordinate);
+    return basin_detail::interpolate(x, z[contact], coordinate);
 }
 
 std::vector<double> BasinGeometry::mean_boundaries(double left, double right) const {
@@ -20,8 +20,8 @@ std::vector<double> BasinGeometry::mean_boundaries(double left, double right) co
             points.push_back(coordinate);
     }
     std::sort(points.begin(), points.end());
-    std::vector<double> result(boundaries.size(), 0.0);
-    for (std::size_t contact = 0; contact < boundaries.size(); ++contact) {
+    std::vector<double> result(z.size(), 0.0);
+    for (std::size_t contact = 0; contact < z.size(); ++contact) {
         for (std::size_t i = 1; i < points.size(); ++i) {
             result[contact] +=
                 0.5 * (boundary_at(contact, points[i - 1]) + boundary_at(contact, points[i])) *
@@ -32,9 +32,9 @@ std::vector<double> BasinGeometry::mean_boundaries(double left, double right) co
     return result;
 }
 
-BasinGeometry make_basin_geometry(const BasinConfiguration& configuration) {
+BasinGeometry make_basin_geometry(const BasinConfig& cfg) {
     std::set<int> identifiers;
-    for (const auto& layer : configuration.layers) {
+    for (const auto& layer : cfg.layers) {
         if (layer.x.size() < 2 || layer.top.size() != layer.x.size() ||
             layer.bottom.size() != layer.x.size() || !identifiers.insert(layer.id).second) {
             throw std::invalid_argument("Invalid basin geometry profile");
@@ -49,17 +49,17 @@ BasinGeometry make_basin_geometry(const BasinConfiguration& configuration) {
         }
     }
     BasinGeometry result;
-    if (configuration.layers.empty())
+    if (cfg.layers.empty())
         return result;
     auto& x = result.x;
-    for (const auto& layer : configuration.layers)
+    for (const auto& layer : cfg.layers)
         x.insert(x.end(), layer.x.begin(), layer.x.end());
     std::sort(x.begin(), x.end());
     x.erase(std::unique(x.begin(), x.end()), x.end());
-    std::vector<std::vector<double>> depths(configuration.layers.size() + 1);
+    std::vector<std::vector<double>> depths(cfg.layers.size() + 1);
     for (const double p : x) {
-        double cursor = configuration.layers.front().top_at(p);
-        for (const auto& layer : configuration.layers) {
+        double cursor = cfg.layers.front().top_at(p);
+        for (const auto& layer : cfg.layers) {
             if (p >= layer.x.front() && p <= layer.x.back() &&
                 layer.bottom_at(p) > layer.top_at(p)) {
                 cursor = layer.top_at(p);
@@ -67,8 +67,8 @@ BasinGeometry make_basin_geometry(const BasinConfiguration& configuration) {
             }
         }
         depths.front().push_back(cursor);
-        for (std::size_t i = 0; i < configuration.layers.size(); ++i) {
-            const auto& layer = configuration.layers[i];
+        for (std::size_t i = 0; i < cfg.layers.size(); ++i) {
+            const auto& layer = cfg.layers[i];
             if (p >= layer.x.front() && p <= layer.x.back() &&
                 layer.bottom_at(p) > layer.top_at(p)) {
                 if (std::abs(layer.top_at(p) - cursor) > 1e-7)
@@ -80,17 +80,17 @@ BasinGeometry make_basin_geometry(const BasinConfiguration& configuration) {
             depths[i + 1].push_back(cursor);
         }
     }
-    result.boundaries = std::move(depths);
-    for (std::size_t i = 0; i < configuration.layers.size(); ++i) {
-        const auto& layer = configuration.layers[i];
+    result.z = std::move(depths);
+    for (std::size_t i = 0; i < cfg.layers.size(); ++i) {
+        const auto& layer = cfg.layers[i];
         result.layers.push_back({layer.id, layer.x.front(), layer.x.back()});
     }
     return result;
 }
 
-std::vector<double> make_column_axis(std::span<const double> knots, double horizontal_step,
+std::vector<double> make_column_axis(std::span<const double> knots, double dx,
                                      std::span<const double> required_x) {
-    if (knots.size() < 2 || !std::isfinite(horizontal_step) || !(horizontal_step > 0.0)) {
+    if (knots.size() < 2 || !std::isfinite(dx) || !(dx > 0.0)) {
         throw std::invalid_argument("Column axis requires knots and a positive step");
     }
     std::vector<double> events(knots.begin(), knots.end());
@@ -104,8 +104,7 @@ std::vector<double> make_column_axis(std::span<const double> knots, double horiz
     events.erase(std::unique(events.begin(), events.end()), events.end());
     std::vector<double> axis;
     for (std::size_t i = 1; i < events.size(); ++i) {
-        const auto count =
-            static_cast<std::size_t>(std::ceil((events[i] - events[i - 1]) / horizontal_step));
+        const auto count = static_cast<std::size_t>(std::ceil((events[i] - events[i - 1]) / dx));
         axis.push_back(events[i - 1]);
         for (std::size_t j = 1; j < count; ++j)
             axis.push_back(std::lerp(events[i - 1], events[i],

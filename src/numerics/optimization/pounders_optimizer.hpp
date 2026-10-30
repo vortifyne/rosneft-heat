@@ -3,37 +3,37 @@
 #include "numerics/optimization/bounded_least_squares_problem.hpp"
 
 struct PoundersSolveRequest {
-    double gradient_absolute_tolerance;
-    double gradient_relative_tolerance;
-    double gradient_reduction_tolerance;
-    int max_iterations;
-    int max_function_evaluations;
+    double gatol;
+    double grtol;
+    double gttol;
+    int maxiter;
+    int maxfev;
 };
 
-enum class PoundersSolveStatus {
-    converged_gradient_absolute,
-    converged_gradient_relative,
-    converged_gradient_reduction,
-    converged_step,
-    converged_objective,
-    converged_user,
-    maximum_iterations,
-    maximum_function_evaluations,
-    nonfinite_objective,
-    line_search_failed,
-    trust_region_failed,
-    diverged_user,
+enum class PoundersStatus {
+    gatol,
+    grtol,
+    gttol,
+    step_tol,
+    min_objective,
+    user_converged,
+    maxiter,
+    maxfev,
+    nonfinite,
+    ls_failed,
+    tr_failed,
+    user_diverged,
     unknown,
 };
 
-[[nodiscard]] constexpr bool is_pounders_converged(PoundersSolveStatus status) noexcept {
+[[nodiscard]] constexpr bool is_pounders_converged(PoundersStatus status) noexcept {
     switch (status) {
-    case PoundersSolveStatus::converged_gradient_absolute:
-    case PoundersSolveStatus::converged_gradient_relative:
-    case PoundersSolveStatus::converged_gradient_reduction:
-    case PoundersSolveStatus::converged_step:
-    case PoundersSolveStatus::converged_objective:
-    case PoundersSolveStatus::converged_user:
+    case PoundersStatus::gatol:
+    case PoundersStatus::grtol:
+    case PoundersStatus::gttol:
+    case PoundersStatus::step_tol:
+    case PoundersStatus::min_objective:
+    case PoundersStatus::user_converged:
         return true;
     default:
         return false;
@@ -41,7 +41,7 @@ enum class PoundersSolveStatus {
 }
 
 struct [[nodiscard]] PoundersSolveResult {
-    PoundersSolveStatus status;
+    PoundersStatus status;
     Vector parameters;
     Vector residuals;
     double objective;
@@ -55,7 +55,6 @@ struct [[nodiscard]] PoundersSolveResult {
 
 class PoundersOptimizer {
 public:
-    PoundersSolveResult solve(const BoundedLeastSquaresProblem& problem,
-                              const Vector& initial_parameters,
+    PoundersSolveResult solve(const BoundedLeastSquaresProblem& problem, const Vector& x0,
                               const PoundersSolveRequest& request) const;
 };

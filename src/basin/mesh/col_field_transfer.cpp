@@ -1,6 +1,6 @@
-#include "basin/mesh/column_field_transfer.hpp"
+#include "basin/mesh/col_field_transfer.hpp"
 
-#include "basin/mesh/nonmatching_column_grid.hpp"
+#include "basin/mesh/col_grid.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -8,13 +8,13 @@
 
 namespace {
 
-struct ColumnSample {
+struct ColSample {
     double x = 0.0;
-    ColumnFieldStencil vertical;
+    ColFieldStencil vertical;
 };
 
-ColumnFieldStencil vertical_stencil(const NonmatchingColumnGrid& grid, std::size_t column, double z,
-                                    int layer_id, bool same_layer) {
+ColFieldStencil vertical_stencil(const ColGrid& grid, std::size_t column, double z, int layer_id,
+                                 bool same_layer) {
     std::vector<std::size_t> cells;
     for (const std::size_t index : grid.columns[column]) {
         if (!same_layer || grid.cells[index].layer_id == layer_id) {
@@ -50,9 +50,8 @@ ColumnFieldStencil vertical_stencil(const NonmatchingColumnGrid& grid, std::size
     return {{left, 1.0 - ratio}, {right, ratio}};
 }
 
-ColumnFieldStencil spatial_stencil(const NonmatchingColumnGrid& old_grid,
-                                   const NonmatchingColumnCell& target, bool same_layer) {
-    std::vector<ColumnSample> available;
+ColFieldStencil spatial_stencil(const ColGrid& old_grid, const ColCell& target, bool same_layer) {
+    std::vector<ColSample> available;
     const Point2D point = target.center();
     for (std::size_t column = 0; column < old_grid.columns.size(); ++column) {
         auto vertical = vertical_stencil(old_grid, column, point.z, target.layer_id, same_layer);
@@ -65,39 +64,39 @@ ColumnFieldStencil spatial_stencil(const NonmatchingColumnGrid& old_grid,
         return {};
     const auto upper =
         std::upper_bound(available.begin(), available.end(), point.x,
-                         [](double value, const ColumnSample& sample) { return value < sample.x; });
+                         [](double value, const ColSample& sample) { return value < sample.x; });
     if (available.size() == 1)
         return available.front().vertical;
     if (same_layer && upper == available.begin())
         return upper->vertical;
     if (same_layer && upper == available.end())
         return available.back().vertical;
-    const ColumnSample& right = upper == available.begin() ? available[1]
-                                : upper == available.end() ? available.back()
-                                                           : *upper;
-    const ColumnSample& left = upper == available.begin() ? available[0]
-                               : upper == available.end() ? available[available.size() - 2]
-                                                          : *(upper - 1);
+    const ColSample& right = upper == available.begin() ? available[1]
+                             : upper == available.end() ? available.back()
+                                                        : *upper;
+    const ColSample& left = upper == available.begin() ? available[0]
+                            : upper == available.end() ? available[available.size() - 2]
+                                                       : *(upper - 1);
     const double ratio = (point.x - left.x) / (right.x - left.x);
-    ColumnFieldStencil result;
+    ColFieldStencil result;
     for (const auto& donor : left.vertical) {
-        result.push_back({donor.source_cell, (1.0 - ratio) * donor.weight});
+        result.push_back({donor.cell, (1.0 - ratio) * donor.w});
     }
     for (const auto& donor : right.vertical) {
-        result.push_back({donor.source_cell, ratio * donor.weight});
+        result.push_back({donor.cell, ratio * donor.w});
     }
     return result;
 }
 
-std::vector<double> apply_stencils(std::span<const ColumnFieldStencil> stencils,
+std::vector<double> apply_stencils(std::span<const ColFieldStencil> stencils,
                                    std::span<const double> old_values) {
     std::vector<double> result(stencils.size(), 0.0);
     for (std::size_t cell = 0; cell < stencils.size(); ++cell) {
-        for (const ColumnFieldWeight donor : stencils[cell]) {
-            if (donor.source_cell >= old_values.size()) {
+        for (const ColFieldWeight donor : stencils[cell]) {
+            if (donor.cell >= old_values.size()) {
                 throw std::invalid_argument("Column transfer source size does not match");
             }
-            result[cell] += donor.weight * old_values[donor.source_cell];
+            result[cell] += donor.w * old_values[donor.cell];
         }
     }
     return result;
@@ -105,28 +104,27 @@ std::vector<double> apply_stencils(std::span<const ColumnFieldStencil> stencils,
 
 } // namespace
 
-ColumnFieldTransfer make_column_field_transfer(const NonmatchingColumnGrid& old_grid,
-                                               const NonmatchingColumnGrid& new_grid) {
-    ColumnFieldTransfer result;
-    result.temperature.reserve(new_grid.cells.size());
-    result.same_layer.reserve(new_grid.cells.size());
-    for (const NonmatchingColumnCell& cell : new_grid.cells) {
-        auto temperature = spatial_stencil(old_grid, cell, false);
-        if (temperature.empty()) {
+ColFieldTransfer make_col_field_transfer(const ColGrid& old_grid, const ColGrid& new_grid) {
+    ColFieldTransfer result;
+    result.T_stencils.reserve(new_grid.cells.size());
+    result.layer_stencils.reserve(new_grid.cells.size());
+    for (const ColCell& cell : new_grid.cells) {
+        auto T_stencils = spatial_stencil(old_grid, cell, false);
+        if (T_stencils.empty()) {
             throw std::runtime_error("Cannot interpolate temperature outside old grid");
         }
-        result.temperature.push_back(std::move(temperature));
-        result.same_layer.push_back(spatial_stencil(old_grid, cell, true));
+        result.T_stencils.push_back(std::move(T_stencils));
+        result.layer_stencils.push_back(spatial_stencil(old_grid, cell, true));
     }
     return result;
 }
 
 std::vector<double>
-ColumnFieldTransfer::interpolate_temperature(std::span<const double> old_values) const {
-    return apply_stencils(temperature, old_values);
+ColFieldTransfer::interpolate_temperature(std::span<const double> old_values) const {
+    return apply_stencils(T_stencils, old_values);
 }
 
 std::vector<double>
-ColumnFieldTransfer::interpolate_same_layer(std::span<const double> old_values) const {
-    return apply_stencils(same_layer, old_values);
+ColFieldTransfer::interpolate_same_layer(std::span<const double> old_values) const {
+    return apply_stencils(layer_stencils, old_values);
 }

@@ -53,14 +53,14 @@ TEST(ModelHeatInverseSolverTest, ReturnsBestPointAfterFunctionEvaluationLimit) {
     ModelHeatInverseSolver solver =
         make_inverse_solver(make_synthetic_observations(hidden_parameters));
     PoundersSolveRequest limited_request = kOptimizationRequest;
-    limited_request.max_function_evaluations = 3;
+    limited_request.maxfev = 3;
 
     const ModelHeatInverseResult result = solver.solve({
         .initial_parameters = {.surface_temperature = 6.0, .basal_heat_flux = 0.1},
         .optimization = limited_request,
     });
 
-    EXPECT_EQ(result.status, PoundersSolveStatus::maximum_function_evaluations);
+    EXPECT_EQ(result.status, PoundersStatus::maxfev);
     EXPECT_FALSE(result.converged());
     EXPECT_GE(result.optimization_function_evaluations, 3);
     EXPECT_EQ(result.forward_evaluations, result.optimization_function_evaluations + 1);
@@ -84,7 +84,7 @@ TEST(ModelHeatInverseSolverTest, ValidatesPhysicalInitialParameters) {
 TEST(ModelHeatInverseSolverTest, PropagatesForwardFailureUntilPenaltyPolicyIsImplemented) {
     ensure_petsc_test_session();
     ModelHeatForwardSettings failing_settings = make_settings();
-    failing_settings.nonlinear.max_iterations = 0;
+    failing_settings.nonlinear.maxiter = 0;
     ModelHeatInverseSolver solver = make_inverse_solver(
         ModelHeatObservationData(Vector{10.0, 10.0, 10.0}, Vector{0.1, 0.1, 0.1}),
         failing_settings);

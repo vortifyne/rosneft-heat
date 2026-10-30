@@ -7,16 +7,16 @@
 namespace {
 
 constexpr NonlinearSolveRequest kNewtonRequest{
-    .nonlinear_method = NonlinearMethod::newton,
-    .relative_tolerance = 1e-12,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 20,
+    .method = NonlinearMethod::newton,
+    .rtol = 1e-12,
+    .atol = 1e-12,
+    .maxiter = 20,
 };
 
 constexpr LinearSolveRequest kDirectLinearRequest{
-    .relative_tolerance = 1e-8,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 100,
+    .rtol = 1e-8,
+    .atol = 1e-12,
+    .maxiter = 100,
 };
 
 class ScalarNonlinearSystem final : public NonlinearSystem {
@@ -79,7 +79,7 @@ TEST(NonlinearSolverTest, ConvergesWithoutIterationWhenInitialResidualIsSmall) {
     Vector x{1.0};
     NonlinearSolver solver;
     NonlinearSolveRequest request = kNewtonRequest;
-    request.absolute_tolerance = 2.0;
+    request.atol = 2.0;
 
     const NonlinearSolveResult result = solver.solve(system, x, request, kDirectLinearRequest);
 
@@ -117,14 +117,14 @@ TEST(NonlinearSolverTest, UsesRequestedPicardMatrix) {
     Vector x{1.0};
     NonlinearSolver solver;
     NonlinearSolveRequest request = kNewtonRequest;
-    request.nonlinear_method = NonlinearMethod::picard;
-    request.relative_tolerance = 0.0;
-    request.absolute_tolerance = 0.0;
-    request.max_iterations = 1;
+    request.method = NonlinearMethod::picard;
+    request.rtol = 0.0;
+    request.atol = 0.0;
+    request.maxiter = 1;
 
     const NonlinearSolveResult result = solver.solve(system, x, request, kDirectLinearRequest);
 
-    EXPECT_EQ(result.status, NonlinearSolveStatus::max_iterations);
+    EXPECT_EQ(result.status, NonlinearSolveStatus::maxiter);
     EXPECT_EQ(system.picard_assemblies, 1);
     EXPECT_EQ(system.newton_assemblies, 0);
 }
@@ -134,14 +134,14 @@ TEST(NonlinearSolverTest, DetectsRelativeResidualConvergence) {
     Vector x{1.0};
     NonlinearSolver solver;
     NonlinearSolveRequest request = kNewtonRequest;
-    request.relative_tolerance = 0.3;
-    request.absolute_tolerance = 0.0;
+    request.rtol = 0.3;
+    request.atol = 0.0;
 
     const NonlinearSolveResult result = solver.solve(system, x, request, kDirectLinearRequest);
 
     EXPECT_EQ(result.status, NonlinearSolveStatus::converged_residual_relative);
     EXPECT_EQ(result.iterations, 1);
-    EXPECT_DOUBLE_EQ(result.final_residual_norm, 0.25);
+    EXPECT_DOUBLE_EQ(result.r_norm, 0.25);
 }
 
 TEST(NonlinearSolverTest, ReportsMaximumIterationsAndKeepsLastIterate) {
@@ -149,13 +149,13 @@ TEST(NonlinearSolverTest, ReportsMaximumIterationsAndKeepsLastIterate) {
     Vector x{0.0};
     NonlinearSolver solver;
     NonlinearSolveRequest request = kNewtonRequest;
-    request.relative_tolerance = 0.0;
-    request.absolute_tolerance = 0.0;
-    request.max_iterations = 2;
+    request.rtol = 0.0;
+    request.atol = 0.0;
+    request.maxiter = 2;
 
     const NonlinearSolveResult result = solver.solve(system, x, request, kDirectLinearRequest);
 
-    EXPECT_EQ(result.status, NonlinearSolveStatus::max_iterations);
+    EXPECT_EQ(result.status, NonlinearSolveStatus::maxiter);
     EXPECT_FALSE(result.converged());
     EXPECT_EQ(result.iterations, 2);
     EXPECT_DOUBLE_EQ(x[0], -2.0);

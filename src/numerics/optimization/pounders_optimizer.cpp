@@ -54,27 +54,24 @@ PetscInt to_petsc_size(Vector::Index size, const char* name) {
 }
 
 void validate_request(const PoundersSolveRequest& request) {
-    if (!std::isfinite(request.gradient_absolute_tolerance) ||
-        request.gradient_absolute_tolerance < 0.0) {
+    if (!std::isfinite(request.gatol) || request.gatol < 0.0) {
         throw std::invalid_argument("Absolute gradient tolerance must be finite and non-negative");
     }
-    if (!std::isfinite(request.gradient_relative_tolerance) ||
-        request.gradient_relative_tolerance < 0.0) {
+    if (!std::isfinite(request.grtol) || request.grtol < 0.0) {
         throw std::invalid_argument("Relative gradient tolerance must be finite and non-negative");
     }
-    if (!std::isfinite(request.gradient_reduction_tolerance) ||
-        request.gradient_reduction_tolerance < 0.0) {
+    if (!std::isfinite(request.gttol) || request.gttol < 0.0) {
         throw std::invalid_argument("Gradient reduction tolerance must be finite and non-negative");
     }
-    if (request.max_iterations <= 0) {
+    if (request.maxiter <= 0) {
         throw std::invalid_argument("Maximum iteration count must be positive");
     }
-    if (request.max_function_evaluations <= 0) {
+    if (request.maxfev <= 0) {
         throw std::invalid_argument("Maximum function evaluation count must be positive");
     }
 }
 
-void validate_problem(const BoundedLeastSquaresProblem& problem, const Vector& initial_parameters) {
+void validate_problem(const BoundedLeastSquaresProblem& problem, const Vector& x0) {
     if (!problem.residual_function) {
         throw std::invalid_argument("Least-squares residual function must be set");
     }
@@ -82,23 +79,22 @@ void validate_problem(const BoundedLeastSquaresProblem& problem, const Vector& i
         throw std::invalid_argument("Least-squares problem must have at least one parameter");
     }
     if (problem.lower_bounds.size() != problem.upper_bounds.size() ||
-        problem.lower_bounds.size() != initial_parameters.size()) {
+        problem.lower_bounds.size() != x0.size()) {
         throw std::invalid_argument("Parameter vectors and bound vectors must have the same size");
     }
     if (!problem.lower_bounds.all_finite() || !problem.upper_bounds.all_finite() ||
-        !initial_parameters.all_finite()) {
+        !x0.all_finite()) {
         throw std::invalid_argument("Parameters and bounds must be finite");
     }
     if (problem.residual_count <= 0) {
         throw std::invalid_argument("Least-squares problem must have at least one residual");
     }
 
-    for (Vector::Index index = 0; index < initial_parameters.size(); ++index) {
+    for (Vector::Index index = 0; index < x0.size(); ++index) {
         if (!(problem.lower_bounds[index] < problem.upper_bounds[index])) {
             throw std::invalid_argument("Parameter bounds must be strictly increasing");
         }
-        if (initial_parameters[index] < problem.lower_bounds[index] ||
-            initial_parameters[index] > problem.upper_bounds[index]) {
+        if (x0[index] < problem.lower_bounds[index] || x0[index] > problem.upper_bounds[index]) {
             throw std::invalid_argument("Initial parameters must lie within their bounds");
         }
     }
@@ -143,7 +139,7 @@ struct ResidualCallbackContext {
     std::exception_ptr exception;
 };
 
-PetscErrorCode evaluate_residual(Tao tao, Vec parameters, Vec residuals, void* raw_context) {
+PetscErrorCode evaluate_residual(Tao tao, Vec px, Vec pr, void* raw_context) {
     static_cast<void>(tao);
     auto* context = static_cast<ResidualCallbackContext*>(raw_context);
     if (context->exception != nullptr) {
@@ -151,16 +147,15 @@ PetscErrorCode evaluate_residual(Tao tao, Vec parameters, Vec residuals, void* r
     }
 
     try {
-        const Vector parameter_values =
-            copy_from_petsc(parameters, context->problem->lower_bounds.size());
-        const Vector residual_values = context->problem->residual_function(parameter_values);
-        if (residual_values.size() != context->problem->residual_count) {
+        const Vector x = copy_from_petsc(px, context->problem->lower_bounds.size());
+        const Vector r = context->problem->residual_function(x);
+        if (r.size() != context->problem->residual_count) {
             throw std::runtime_error("Residual function returned a vector with an invalid size");
         }
-        if (!residual_values.all_finite()) {
+        if (!r.all_finite()) {
             throw std::runtime_error("Residual function returned non-finite values");
         }
-        copy_to_petsc(residual_values, residuals);
+        copy_to_petsc(r, pr);
     } catch (...) {
         context->exception = std::current_exception();
         return PETSC_ERR_USER;
@@ -168,35 +163,35 @@ PetscErrorCode evaluate_residual(Tao tao, Vec parameters, Vec residuals, void* r
     return PETSC_SUCCESS;
 }
 
-PoundersSolveStatus to_status(TaoConvergedReason reason) {
+PoundersStatus to_status(TaoConvergedReason reason) {
     switch (reason) {
     case TAO_CONVERGED_GATOL:
-        return PoundersSolveStatus::converged_gradient_absolute;
+        return PoundersStatus::gatol;
     case TAO_CONVERGED_GRTOL:
-        return PoundersSolveStatus::converged_gradient_relative;
+        return PoundersStatus::grtol;
     case TAO_CONVERGED_GTTOL:
-        return PoundersSolveStatus::converged_gradient_reduction;
+        return PoundersStatus::gttol;
     case TAO_CONVERGED_STEPTOL:
-        return PoundersSolveStatus::converged_step;
+        return PoundersStatus::step_tol;
     case TAO_CONVERGED_MINF:
-        return PoundersSolveStatus::converged_objective;
+        return PoundersStatus::min_objective;
     case TAO_CONVERGED_USER:
-        return PoundersSolveStatus::converged_user;
+        return PoundersStatus::user_converged;
     case TAO_DIVERGED_MAXITS:
-        return PoundersSolveStatus::maximum_iterations;
+        return PoundersStatus::maxiter;
     case TAO_DIVERGED_MAXFCN:
-        return PoundersSolveStatus::maximum_function_evaluations;
+        return PoundersStatus::maxfev;
     case TAO_DIVERGED_NAN:
-        return PoundersSolveStatus::nonfinite_objective;
+        return PoundersStatus::nonfinite;
     case TAO_DIVERGED_LS_FAILURE:
-        return PoundersSolveStatus::line_search_failed;
+        return PoundersStatus::ls_failed;
     case TAO_DIVERGED_TR_REDUCTION:
-        return PoundersSolveStatus::trust_region_failed;
+        return PoundersStatus::tr_failed;
     case TAO_DIVERGED_USER:
-        return PoundersSolveStatus::diverged_user;
+        return PoundersStatus::user_diverged;
     case TAO_CONTINUE_ITERATING:
     default:
-        return PoundersSolveStatus::unknown;
+        return PoundersStatus::unknown;
     }
 }
 
@@ -211,55 +206,51 @@ int to_int(PetscInt value, const char* name) {
 } // namespace
 
 PoundersSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& problem,
-                                             const Vector& initial_parameters,
+                                             const Vector& x0,
                                              const PoundersSolveRequest& request) const {
-    validate_problem(problem, initial_parameters);
+    validate_problem(problem, x0);
     validate_request(request);
     ensure_petsc_is_active();
 
-    const PetscInt parameter_count = to_petsc_size(initial_parameters.size(), "Parameter count");
-    const PetscInt residual_count = to_petsc_size(problem.residual_count, "Residual count");
+    const PetscInt n = to_petsc_size(x0.size(), "Parameter count");
+    const PetscInt m = to_petsc_size(problem.residual_count, "Residual count");
 
-    VecHandle parameters;
-    VecHandle residuals;
-    VecHandle lower_bounds;
-    VecHandle upper_bounds;
-    check_petsc(VecCreateSeq(PETSC_COMM_SELF, parameter_count, parameters.out()),
+    VecHandle px;
+    VecHandle pr;
+    VecHandle lower;
+    VecHandle upper;
+    check_petsc(VecCreateSeq(PETSC_COMM_SELF, n, px.out()),
                 "Failed to create sequential POUNDERS parameter vector");
-    check_petsc(VecCreateSeq(PETSC_COMM_SELF, residual_count, residuals.out()),
+    check_petsc(VecCreateSeq(PETSC_COMM_SELF, m, pr.out()),
                 "Failed to create sequential POUNDERS residual vector");
-    check_petsc(VecCreateSeq(PETSC_COMM_SELF, parameter_count, lower_bounds.out()),
+    check_petsc(VecCreateSeq(PETSC_COMM_SELF, n, lower.out()),
                 "Failed to create sequential POUNDERS lower-bound vector");
-    check_petsc(VecCreateSeq(PETSC_COMM_SELF, parameter_count, upper_bounds.out()),
+    check_petsc(VecCreateSeq(PETSC_COMM_SELF, n, upper.out()),
                 "Failed to create sequential POUNDERS upper-bound vector");
-    copy_to_petsc(initial_parameters, parameters.get());
-    copy_to_petsc(problem.lower_bounds, lower_bounds.get());
-    copy_to_petsc(problem.upper_bounds, upper_bounds.get());
+    copy_to_petsc(x0, px.get());
+    copy_to_petsc(problem.lower_bounds, lower.get());
+    copy_to_petsc(problem.upper_bounds, upper.get());
 
-    ResidualCallbackContext callback_context{.problem = &problem, .exception = nullptr};
+    ResidualCallbackContext context{.problem = &problem, .exception = nullptr};
     TaoHandle tao;
     check_petsc(TaoCreate(PETSC_COMM_SELF, tao.out()), "Failed to create PETSc TAO solver");
     check_petsc(TaoSetType(tao.get(), TAOPOUNDERS), "Failed to select PETSc POUNDERS");
-    check_petsc(TaoSetSolution(tao.get(), parameters.get()),
-                "Failed to set POUNDERS initial parameters");
-    check_petsc(
-        TaoSetResidualRoutine(tao.get(), residuals.get(), evaluate_residual, &callback_context),
-        "Failed to set POUNDERS residual function");
-    check_petsc(TaoSetVariableBounds(tao.get(), lower_bounds.get(), upper_bounds.get()),
+    check_petsc(TaoSetSolution(tao.get(), px.get()), "Failed to set POUNDERS initial parameters");
+    check_petsc(TaoSetResidualRoutine(tao.get(), pr.get(), evaluate_residual, &context),
+                "Failed to set POUNDERS residual function");
+    check_petsc(TaoSetVariableBounds(tao.get(), lower.get(), upper.get()),
                 "Failed to set POUNDERS parameter bounds");
-    check_petsc(TaoSetTolerances(tao.get(), request.gradient_absolute_tolerance,
-                                 request.gradient_relative_tolerance,
-                                 request.gradient_reduction_tolerance),
+    check_petsc(TaoSetTolerances(tao.get(), request.gatol, request.grtol, request.gttol),
                 "Failed to set POUNDERS tolerances");
-    check_petsc(TaoSetMaximumIterations(tao.get(), request.max_iterations),
+    check_petsc(TaoSetMaximumIterations(tao.get(), request.maxiter),
                 "Failed to set POUNDERS iteration limit");
-    check_petsc(TaoSetMaximumFunctionEvaluations(tao.get(), request.max_function_evaluations),
+    check_petsc(TaoSetMaximumFunctionEvaluations(tao.get(), request.maxfev),
                 "Failed to set POUNDERS function evaluation limit");
     check_petsc(TaoSetFromOptions(tao.get()), "Failed to apply PETSc TAO options");
 
     const PetscErrorCode solve_error = TaoSolve(tao.get());
-    if (callback_context.exception != nullptr) {
-        std::rethrow_exception(callback_context.exception);
+    if (context.exception != nullptr) {
+        std::rethrow_exception(context.exception);
     }
     check_petsc(solve_error, "PETSc POUNDERS solve failed");
 
@@ -273,13 +264,13 @@ PoundersSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& p
     check_petsc(TaoGetCurrentFunctionEvaluations(tao.get(), &function_evaluations),
                 "Failed to get POUNDERS function evaluation count");
 
-    Vector solution = copy_from_petsc(parameters.get(), initial_parameters.size());
-    Vector final_residuals = copy_from_petsc(residuals.get(), problem.residual_count);
-    const double objective = final_residuals.squared_norm();
+    Vector x = copy_from_petsc(px.get(), x0.size());
+    Vector r_final = copy_from_petsc(pr.get(), problem.residual_count);
+    const double objective = r_final.squared_norm();
     return {
         .status = to_status(reason),
-        .parameters = std::move(solution),
-        .residuals = std::move(final_residuals),
+        .parameters = std::move(x),
+        .residuals = std::move(r_final),
         .objective = objective,
         .iterations = to_int(iterations, "POUNDERS iteration count"),
         .function_evaluations = to_int(function_evaluations, "POUNDERS function evaluation count"),

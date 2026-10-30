@@ -84,8 +84,8 @@ ModelHeatForwardResult ModelHeatForwardSolver::solve(const ModelHeatParameters& 
 
     ModelHeatForwardResult result{
         .integration = integration,
-        .final_state = {.time = snapshot.time, .temperature = snapshot.solution},
-        .calculated_temperature = interpolate_observations(snapshot.solution),
+        .final_state = {.time = snapshot.t, .temperature = snapshot.u},
+        .calculated_temperature = interpolate_observations(snapshot.u),
         .elapsed_time_seconds = 0.0,
     };
     const auto end_time = std::chrono::steady_clock::now();

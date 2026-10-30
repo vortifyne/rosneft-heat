@@ -9,10 +9,10 @@
 #include <stdexcept>
 
 BasinForwardResult BasinForwardSolver::solve(const std::filesystem::path& output,
-                                             const BasinForwardObserver& observe) const {
+                                             const BasinObserver& observe) const {
     std::filesystem::create_directories(output);
     std::size_t snapshot_number = 0;
-    const BasinForwardResult result = solve([&](const BasinForwardSnapshot& snapshot) {
+    const BasinForwardResult result = solve([&](const BasinSnapshot& snapshot) {
         std::ostringstream name;
         name << "snapshot_" << std::setw(4) << std::setfill('0') << snapshot_number++ << ".cgrd";
         write_basin_binary(output / name.str(), snapshot);

@@ -1,29 +1,12 @@
 #include "basin/physics/easy_ro.hpp"
 
 #include <cmath>
-#include <stdexcept>
 #include <utility>
 
-EasyRoModel::EasyRoModel(EasyRoParameters parameters) : parameters_(std::move(parameters)) {
-    if (!(parameters_.preexponential > 0.0) || !std::isfinite(parameters_.preexponential) ||
-        !(parameters_.gas_constant > 0.0) || !std::isfinite(parameters_.gas_constant) ||
-        parameters_.activation_energies.empty() ||
-        parameters_.activation_energies.size() != parameters_.weights.size()) {
-        throw std::invalid_argument("Invalid EASY%Ro parameters");
-    }
-    beta_.reserve(parameters_.activation_energies.size());
-    double weight_sum = 0.0;
-    for (std::size_t index = 0; index < parameters_.activation_energies.size(); ++index) {
-        const double energy = parameters_.activation_energies[index];
-        const double weight = parameters_.weights[index];
-        if (!(energy > 0.0) || !std::isfinite(energy) || weight < 0.0 || !std::isfinite(weight)) {
-            throw std::invalid_argument("Invalid EASY%Ro reaction parameter");
-        }
-        beta_.push_back(energy / parameters_.gas_constant);
-        weight_sum += weight;
-    }
-    if (!(weight_sum > 0.0)) {
-        throw std::invalid_argument("EASY%Ro weights must have a positive sum");
+EasyRoModel::EasyRoModel(EasyRoParameters params) : params_(std::move(params)) {
+    beta_.reserve(params_.E.size());
+    for (double E_i : params_.E) {
+        beta_.push_back(E_i / params_.Rg);
     }
 }
 
@@ -31,65 +14,42 @@ std::size_t EasyRoModel::reaction_count() const noexcept {
     return beta_.size();
 }
 
-std::vector<double> EasyRoModel::initial_state(const std::size_t cell_count) const {
+std::vector<double> EasyRoModel::initial_state(std::size_t cell_count) const {
     return std::vector<double>(cell_count * reaction_count(), 0.0);
 }
 
-void EasyRoModel::advance(const std::span<const double> old_temperature,
-                          const std::span<const double> new_temperature, const double timestep,
-                          const std::span<double> integrals) const {
-    if (old_temperature.size() != new_temperature.size() ||
-        integrals.size() != old_temperature.size() * reaction_count() || !(timestep > 0.0) ||
-        !std::isfinite(timestep)) {
-        throw std::invalid_argument("Invalid EASY%Ro state sizes or timestep");
-    }
+void EasyRoModel::advance(std::span<const double> T0, std::span<const double> T1, double dt,
+                          std::span<double> I) const {
     constexpr int substeps = 16;
     constexpr double gauss_offset = 0.5 / 1.7320508075688772935;
-    for (std::size_t cell = 0; cell < old_temperature.size(); ++cell) {
-        const double old_value = old_temperature[cell];
-        const double new_value = new_temperature[cell];
-        if (!(old_value > 0.0) || !(new_value > 0.0) || !std::isfinite(old_value) ||
-            !std::isfinite(new_value)) {
-            throw std::invalid_argument("EASY%Ro temperatures must be finite and positive");
-        }
-        for (std::size_t reaction = 0; reaction < reaction_count(); ++reaction) {
-            double increment = 0.0;
+    for (std::size_t P = 0; P < T0.size(); ++P) {
+        const double T_old = T0[P];
+        const double T_new = T1[P];
+        for (std::size_t i = 0; i < reaction_count(); ++i) {
+            double dI = 0.0;
             for (int substep = 0; substep < substeps; ++substep) {
                 const double center = (static_cast<double>(substep) + 0.5) / substeps;
                 const double offset = gauss_offset / substeps;
-                const double first = center - offset;
-                const double second = center + offset;
-                const double temperature_1 = ((1.0 - first) * old_value) + (first * new_value);
-                const double temperature_2 = ((1.0 - second) * old_value) + (second * new_value);
-                const double rate_1 =
-                    parameters_.preexponential * std::exp(-beta_[reaction] / temperature_1);
-                const double rate_2 =
-                    parameters_.preexponential * std::exp(-beta_[reaction] / temperature_2);
-                increment += 0.5 * timestep / substeps * (rate_1 + rate_2);
+                const double theta_a = center - offset;
+                const double theta_b = center + offset;
+                const double T_a = ((1.0 - theta_a) * T_old) + (theta_a * T_new);
+                const double T_b = ((1.0 - theta_b) * T_old) + (theta_b * T_new);
+                const double k_a = params_.A * std::exp(-beta_[i] / T_a);
+                const double k_b = params_.A * std::exp(-beta_[i] / T_b);
+                dI += 0.5 * dt / substeps * (k_a + k_b);
             }
-            double& value = integrals[(cell * reaction_count()) + reaction];
-            value += increment;
-            if (!std::isfinite(value) || value < 0.0) {
-                throw std::runtime_error("EASY%Ro integral became invalid");
-            }
+            I[(P * reaction_count()) + i] += dI;
         }
     }
 }
 
-void EasyRoModel::reflectance(const std::span<const double> integrals,
-                              const std::span<double> reflectance_percent) const {
-    if (integrals.size() != reflectance_percent.size() * reaction_count()) {
-        throw std::invalid_argument("Invalid EASY%Ro output size");
-    }
-    for (std::size_t cell = 0; cell < reflectance_percent.size(); ++cell) {
-        double transformed_fraction = 0.0;
-        for (std::size_t reaction = 0; reaction < reaction_count(); ++reaction) {
-            const double integral = integrals[(cell * reaction_count()) + reaction];
-            if (integral < 0.0 || !std::isfinite(integral)) {
-                throw std::invalid_argument("EASY%Ro integral must be finite and non-negative");
-            }
-            transformed_fraction += parameters_.weights[reaction] * (1.0 - std::exp(-integral));
+void EasyRoModel::reflectance(std::span<const double> I, std::span<double> Ro) const {
+    for (std::size_t P = 0; P < Ro.size(); ++P) {
+        double F = 0.0;
+        for (std::size_t i = 0; i < reaction_count(); ++i) {
+            const double I_i = I[(P * reaction_count()) + i];
+            F += params_.f[i] * (1.0 - std::exp(-I_i));
         }
-        reflectance_percent[cell] = std::exp(-1.6 + (3.7 * transformed_fraction));
+        Ro[P] = std::exp(-1.6 + (3.7 * F));
     }
 }

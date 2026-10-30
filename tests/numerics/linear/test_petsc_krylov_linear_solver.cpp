@@ -55,16 +55,14 @@ TEST(PetscKrylovLinearSolver, ExplicitResetRebuildsPreconditionerForChangedCoeff
             const Vector expected{2.0, -3.0};
             Vector solution;
             const auto result = solver.solve(matrix, matrix * expected, solution,
-                                             {.relative_tolerance = 1.0e-10,
-                                              .absolute_tolerance = 1.0e-12,
-                                              .max_iterations = 1});
+                                             {.rtol = 1.0e-10, .atol = 1.0e-12, .maxiter = 1});
             if (result.status == LinearSolveStatus::converged) {
                 EXPECT_LT((solution - expected).norm(), 1.0e-8);
             }
             return result.status;
         };
         ASSERT_EQ(solve_diagonal(2.0, 3.0), LinearSolveStatus::converged);
-        EXPECT_EQ(solve_diagonal(7.0, 11.0), LinearSolveStatus::max_iterations);
+        EXPECT_EQ(solve_diagonal(7.0, 11.0), LinearSolveStatus::maxiter);
         solver.reset();
         EXPECT_EQ(solve_diagonal(7.0, 11.0), LinearSolveStatus::converged);
     }

@@ -2,7 +2,7 @@
 
 #include "numerics/linear/linear_solver.hpp"
 #include "numerics/nonlinear/nonlinear_solver.hpp"
-#include "numerics/time/preconditioner_reuse.hpp"
+#include "numerics/time/pc_reuse.hpp"
 #include "numerics/time/time_history.hpp"
 
 #include <memory>
@@ -23,7 +23,7 @@ struct [[nodiscard]] TimeIntegrationResult {
     int rejected_steps;
     int nonlinear_iterations = 0;
     int linear_iterations = 0;
-    double last_residual_norm = 0.0;
+    double last_r_norm = 0.0;
     std::optional<NonlinearSolveStatus> last_nonlinear_status;
     std::optional<LinearSolveStatus> last_linear_status;
     SolverTimings timings;
@@ -43,10 +43,10 @@ public:
     TimeIntegrator(TimeIntegrator&&) noexcept;
     TimeIntegrator& operator=(TimeIntegrator&&) noexcept;
 
-    void set_initial_solution(double initial_time, const Vector& initial_solution);
+    void set_initial_solution(double t0, const Vector& u0);
     void set_timestep(double dt);
     void set_linear_solver(LinearSolverOptions options);
-    void set_preconditioner_reuse(PreconditionerReuse reuse) noexcept;
+    void set_preconditioner_reuse(PcReuse reuse) noexcept;
     void reset_linear_solver() noexcept;
 
     NonlinearSolver& nonlinear_solver() noexcept;
@@ -54,15 +54,14 @@ public:
 
     const TimeSnapshot& current_snapshot() const;
 
-    TimeIntegrationResult advance_to(const SemiDiscreteSystem& semi_discrete_system,
-                                     double final_time,
-                                     const NonlinearSolveRequest& nonlinear_request,
-                                     const LinearSolveRequest& linear_request);
+    TimeIntegrationResult advance_to(const SemiDiscreteSystem& system, double t_end,
+                                     const NonlinearSolveRequest& nonlinear,
+                                     const LinearSolveRequest& linear);
 
 private:
     double dt_ = 0.0;
-    PreconditionerReuse preconditioner_reuse_ = PreconditionerReuse::none;
-    TimeHistory time_history_;
-    std::unique_ptr<TimeScheme> time_scheme_;
+    PcReuse pc_reuse_ = PcReuse::none;
+    TimeHistory history_;
+    std::unique_ptr<TimeScheme> scheme_;
     NonlinearSolver nonlinear_solver_;
 };

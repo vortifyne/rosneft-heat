@@ -7,9 +7,8 @@
 
 namespace {
 
-std::vector<double> shifted_axis(std::span<const double> knots, double horizontal_step,
-                                 double phase) {
-    auto result = make_column_axis(knots, horizontal_step);
+std::vector<double> shifted_axis(std::span<const double> knots, double dx, double phase) {
+    auto result = make_column_axis(knots, dx);
     for (std::size_t interval = 1; interval < knots.size(); ++interval) {
         const double left = knots[interval - 1], right = knots[interval];
         const auto first = std::lower_bound(result.begin(), result.end(), left);
@@ -24,18 +23,18 @@ std::vector<double> shifted_axis(std::span<const double> knots, double horizonta
 
 } // namespace
 
-TEST(NonmatchingColumnGrid, MergeCreatesSubfacesWithoutCreatingCells) {
+TEST(ColGrid, MergeCreatesSubfacesWithoutCreatingCells) {
     const BasinGeometry source = make_test_layered_geometry();
     const std::vector<double> layout = {0.0, 1.0, 2.0};
-    const double vertical_step = 0.55;
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
+    const double dz = 0.55;
+    const ColGrid grid = make_col_grid(source, layout, dz);
 
     ASSERT_EQ(grid.columns.size(), 2U);
     const std::size_t cells_before_merge = grid.columns[0].size() + grid.columns[1].size();
     EXPECT_EQ(grid.cells.size(), cells_before_merge);
     EXPECT_GT(grid.vertical_subfaces.size(), 1U);
     double interface_length = 0.0;
-    for (const NonmatchingVerticalSubface& face : grid.vertical_subfaces) {
+    for (const VerticalSubface& face : grid.vertical_subfaces) {
         EXPECT_GT(face.length(), 0.0);
         interface_length += face.length();
     }
@@ -46,21 +45,20 @@ TEST(NonmatchingColumnGrid, MergeCreatesSubfacesWithoutCreatingCells) {
     EXPECT_NEAR(interface_length, common_bottom - common_top, 1.0e-14);
 }
 
-TEST(NonmatchingColumnGrid, AxisRetainsContourSamples) {
+TEST(ColGrid, AxisRetainsContourSamples) {
     const BasinGeometry source = make_test_layered_geometry();
     const auto layout = make_column_axis(source.x, 0.75);
     EXPECT_EQ(layout, (std::vector<double>{0.0, 0.5, 1.0, 1.5, 2.0}));
 }
 
-TEST(NonmatchingColumnGrid, PreservesLayerAreasAndCoversEveryColumnInterfaceAcrossLayouts) {
+TEST(ColGrid, PreservesLayerAreasAndCoversEveryColumnInterfaceAcrossLayouts) {
     const BasinGeometry source = make_test_layered_geometry();
     for (const double dx : {1.0, 0.75, 0.35}) {
         for (const double dz : {0.55, 0.23}) {
             for (const double phase : {-0.25, 0.0, 0.45}) {
                 SCOPED_TRACE(testing::Message()
                              << "dx=" << dx << " dz=" << dz << " phase=" << phase);
-                const auto grid =
-                    make_nonmatching_column_grid(source, shifted_axis(source.x, dx, phase), dz);
+                const auto grid = make_col_grid(source, shifted_axis(source.x, dx, phase), dz);
                 std::map<int, double> area;
                 std::vector<double> coverage(grid.columns.size() - 1, 0.0);
                 for (const auto& cell : grid.cells) {
@@ -90,14 +88,14 @@ TEST(NonmatchingColumnGrid, PreservesLayerAreasAndCoversEveryColumnInterfaceAcro
     }
 }
 
-TEST(NonmatchingColumnGrid, RepresentsVerticalOuterBoundarySteps) {
+TEST(ColGrid, RepresentsVerticalOuterBoundarySteps) {
     const std::vector<double> x{0.0, 1.0, 2.0};
     const BasinGeometry source{.x = x,
-                               .boundaries = {{0.0, 0.4, 0.8}, {1.0, 1.4, 1.8}, {2.0, 2.4, 2.8}},
+                               .z = {{0.0, 0.4, 0.8}, {1.0, 1.4, 1.8}, {2.0, 2.4, 2.8}},
                                .layers = {{1, 0.0, 2.0}, {2, 0.0, 2.0}}};
     const std::vector<double> layout = {0.0, 1.0, 2.0};
-    const double vertical_step = 0.55;
-    const NonmatchingColumnGrid grid = make_nonmatching_column_grid(source, layout, vertical_step);
+    const double dz = 0.55;
+    const ColGrid grid = make_col_grid(source, layout, dz);
 
     ASSERT_EQ(grid.surface_vertical_faces.size(), 1U);
     EXPECT_NEAR(grid.surface_vertical_faces.front().length(), 0.4, 1.0e-14);

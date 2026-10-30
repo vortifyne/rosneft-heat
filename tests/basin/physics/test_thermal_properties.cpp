@@ -1,4 +1,4 @@
-#include "basin/physics/thermophysical_properties.hpp"
+#include "basin/physics/thermal_properties.hpp"
 
 #include <algorithm>
 #include <array>
@@ -7,24 +7,24 @@
 
 namespace {
 
-constexpr FluidThermophysicalProperties kFluid{
-    .thermal_conductivity = 0.7,
-    .density = 1040.0,
-    .specific_heat = 4184.0,
+constexpr FluidProperties kFluid{
+    .lambda = 0.7,
+    .rho = 1040.0,
+    .c = 4184.0,
 };
 
 struct ReferenceCase {
     int code;
-    double solid_density;
-    double conductivity_at_20_celsius;
-    double specific_heat_at_20_celsius;
-    double solid_heat_production;
-    double temperature;
-    double porosity;
-    double solid_conductivity;
-    double solid_specific_heat;
+    double rho_s;
+    double lambda20;
+    double c20;
+    double A_s;
+    double T;
+    double phi;
+    double lambda_s;
+    double c_s;
     double effective_conductivity;
-    double volumetric_heat_capacity;
+    double rho_c;
     double effective_heat_production;
 };
 
@@ -82,58 +82,51 @@ void expect_near_reference(const double actual, const double expected) {
     EXPECT_NEAR(actual, expected, tolerance);
 }
 
-LithotypeThermophysicalProperties lithotype_from(const ReferenceCase& reference) {
+LithotypeProperties lithotype_from(const ReferenceCase& reference) {
     return {
         .code = reference.code,
-        .solid_density = reference.solid_density,
-        .conductivity_at_20_celsius = reference.conductivity_at_20_celsius,
-        .specific_heat_at_20_celsius = reference.specific_heat_at_20_celsius,
-        .solid_heat_production = reference.solid_heat_production,
+        .rho_s = reference.rho_s,
+        .lambda20 = reference.lambda20,
+        .c20 = reference.c20,
+        .A_s = reference.A_s,
     };
 }
 
 } // namespace
 
-TEST(ThermophysicalProperties, MatchesOrganizerPythonFunctionsForAllLithotypes) {
+TEST(ThermalProperties, MatchesOrganizerPythonFunctionsForAllLithotypes) {
     for (const ReferenceCase& reference : kReferenceCases) {
-        const LithotypeThermophysicalProperties lithotype = lithotype_from(reference);
-        expect_near_reference(sekiguchi_thermal_conductivity(reference.temperature,
-                                                             lithotype.conductivity_at_20_celsius),
-                              reference.solid_conductivity);
-        expect_near_reference(
-            waples_specific_heat(reference.temperature, lithotype.specific_heat_at_20_celsius),
-            reference.solid_specific_heat);
+        const LithotypeProperties lithotype = lithotype_from(reference);
+        expect_near_reference(sekiguchi_conductivity(reference.T, lithotype.lambda20),
+                              reference.lambda_s);
+        expect_near_reference(waples_heat_capacity(reference.T, lithotype.c20), reference.c_s);
 
-        const EffectiveThermophysicalProperties effective = evaluate_thermophysical_properties(
-            reference.temperature, reference.porosity, lithotype, kFluid);
-        expect_near_reference(effective.thermal_conductivity, reference.effective_conductivity);
-        expect_near_reference(effective.volumetric_heat_capacity,
-                              reference.volumetric_heat_capacity);
-        expect_near_reference(effective.heat_production, reference.effective_heat_production);
+        const ThermalProperties effective =
+            thermal_properties(reference.T, reference.phi, lithotype, kFluid);
+        expect_near_reference(effective.lambda, reference.effective_conductivity);
+        expect_near_reference(effective.rho_c, reference.rho_c);
+        expect_near_reference(effective.A, reference.effective_heat_production);
     }
 }
 
-TEST(ThermophysicalProperties, EvaluatesPreallocatedCellFields) {
+TEST(ThermalProperties, EvaluatesPreallocatedCellFields) {
     const std::array lithotypes = {lithotype_from(kReferenceCases[0]),
                                    lithotype_from(kReferenceCases[4]),
                                    lithotype_from(kReferenceCases[8])};
-    const std::array<const LithotypeThermophysicalProperties*, 3> cell_lithotypes = {
+    const std::array<const LithotypeProperties*, 3> cell_lithotypes = {
         &lithotypes[0], &lithotypes[1], &lithotypes[2]};
-    const std::array temperatures = {kReferenceCases[0].temperature, kReferenceCases[4].temperature,
-                                     kReferenceCases[8].temperature};
-    const std::array porosities = {kReferenceCases[0].porosity, kReferenceCases[4].porosity,
-                                   kReferenceCases[8].porosity};
-    std::array<double, 3> conductivities{};
-    std::array<double, 3> heat_capacities{};
-    std::array<double, 3> heat_productions{};
+    const std::array T = {kReferenceCases[0].T, kReferenceCases[4].T, kReferenceCases[8].T};
+    const std::array phi = {kReferenceCases[0].phi, kReferenceCases[4].phi, kReferenceCases[8].phi};
+    std::array<double, 3> lambda{};
+    std::array<double, 3> rho_c{};
+    std::array<double, 3> A{};
 
-    evaluate_thermophysical_property_fields(temperatures, porosities, cell_lithotypes, kFluid,
-                                            conductivities, heat_capacities, heat_productions);
+    update_thermal_fields(T, phi, cell_lithotypes, kFluid, lambda, rho_c, A);
 
     const std::array references = {kReferenceCases[0], kReferenceCases[4], kReferenceCases[8]};
     for (std::size_t index = 0; index < references.size(); ++index) {
-        expect_near_reference(conductivities[index], references[index].effective_conductivity);
-        expect_near_reference(heat_capacities[index], references[index].volumetric_heat_capacity);
-        expect_near_reference(heat_productions[index], references[index].effective_heat_production);
+        expect_near_reference(lambda[index], references[index].effective_conductivity);
+        expect_near_reference(rho_c[index], references[index].rho_c);
+        expect_near_reference(A[index], references[index].effective_heat_production);
     }
 }

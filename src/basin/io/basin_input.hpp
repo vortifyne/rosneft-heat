@@ -2,7 +2,7 @@
 
 #include "basin/basin_problem.hpp"
 #include "basin/physics/easy_ro.hpp"
-#include "basin/physics/thermophysical_properties.hpp"
+#include "basin/physics/thermal_properties.hpp"
 
 #include <filesystem>
 #include <span>
@@ -13,12 +13,12 @@ class BasinInput {
 public:
     static BasinInput read(const std::filesystem::path& directory);
 
-    [[nodiscard]] const LithotypeThermophysicalProperties& lithotype(int code) const;
-    [[nodiscard]] std::span<const BasinConfiguration> configurations() const noexcept;
+    [[nodiscard]] const LithotypeProperties& lithotype(int code) const;
+    [[nodiscard]] std::span<const BasinConfig> configs() const noexcept;
     [[nodiscard]] const EasyRoParameters& easy_ro() const noexcept;
 
 private:
-    std::vector<BasinConfiguration> configurations_;
-    std::unordered_map<int, LithotypeThermophysicalProperties> lithotypes_;
+    std::vector<BasinConfig> configs_;
+    std::unordered_map<int, LithotypeProperties> lithotypes_;
     EasyRoParameters easy_ro_{};
 };

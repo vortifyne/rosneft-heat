@@ -20,8 +20,8 @@ inline double interpolate(const std::span<const double> x, const std::span<const
     const auto upper = std::upper_bound(x.begin(), x.end(), coordinate);
     const std::size_t right = static_cast<std::size_t>(upper - x.begin());
     const std::size_t left = right - 1;
-    const double fraction = (coordinate - x[left]) / (x[right] - x[left]);
-    return ((1.0 - fraction) * values[left]) + (fraction * values[right]);
+    const double theta = (coordinate - x[left]) / (x[right] - x[left]);
+    return ((1.0 - theta) * values[left]) + (theta * values[right]);
 }
 
 } // namespace basin_detail

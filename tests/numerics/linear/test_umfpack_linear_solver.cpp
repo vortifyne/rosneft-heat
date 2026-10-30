@@ -8,9 +8,9 @@
 namespace {
 
 constexpr LinearSolveRequest kUnusedDirectSolveRequest{
-    .relative_tolerance = 1e-8,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 100,
+    .rtol = 1e-8,
+    .atol = 1e-12,
+    .maxiter = 100,
 };
 
 SparseMatrix make_test_matrix(SparseStorageOrder storage_order = SparseStorageOrder::csc) {
@@ -34,7 +34,7 @@ TEST(UmfpackLinearSolverTest, SolvesCscSystemAndReportsResidual) {
 
     EXPECT_EQ(result.status, LinearSolveStatus::converged);
     EXPECT_EQ(result.iterations, 1);
-    EXPECT_LE(result.final_residual_norm, 1e-12);
+    EXPECT_LE(result.r_norm, 1e-12);
     ASSERT_EQ(solution.size(), 3);
     EXPECT_NEAR(solution[0], 5.0, 1e-12);
     EXPECT_NEAR(solution[1], 5.0, 1e-12);
@@ -52,7 +52,7 @@ TEST(UmfpackLinearSolverTest, RejectsCsrWithoutImplicitConversion) {
 
     EXPECT_EQ(result.status, LinearSolveStatus::invalid_input);
     EXPECT_EQ(result.iterations, 0);
-    EXPECT_TRUE(std::isinf(result.final_residual_norm));
+    EXPECT_TRUE(std::isinf(result.r_norm));
     ASSERT_EQ(solution.size(), 1);
     EXPECT_DOUBLE_EQ(solution[0], 7.0);
 }
@@ -129,7 +129,7 @@ TEST(UmfpackLinearSolverTest, ReportsFactorizationFailureForSingularMatrix) {
 
     EXPECT_EQ(result.status, LinearSolveStatus::factorization_failed);
     EXPECT_EQ(result.iterations, 0);
-    EXPECT_TRUE(std::isinf(result.final_residual_norm));
+    EXPECT_TRUE(std::isinf(result.r_norm));
 }
 
 } // namespace

@@ -18,10 +18,9 @@ using PcName = std::pair<std::string_view, Preconditioner>;
 constexpr std::array kPreconditioners{
     PcName{"ilu", Preconditioner::ilu}, PcName{"ilu2", Preconditioner::ilu2},
     PcName{"gamg", Preconditioner::gamg}, PcName{"boomeramg", Preconditioner::boomeramg}};
-using ReuseName = std::pair<std::string_view, PreconditionerReuse>;
-constexpr std::array kReuse{ReuseName{"none", PreconditionerReuse::none},
-                            ReuseName{"step", PreconditionerReuse::step},
-                            ReuseName{"epoch", PreconditionerReuse::manual}};
+using ReuseName = std::pair<std::string_view, PcReuse>;
+constexpr std::array kReuse{ReuseName{"none", PcReuse::none}, ReuseName{"step", PcReuse::step},
+                            ReuseName{"epoch", PcReuse::manual}};
 
 template <typename T, std::size_t N>
 T parse(std::string_view value, const std::array<std::pair<std::string_view, T>, N>& names) {
@@ -64,17 +63,17 @@ int iterations(std::string_view value) {
 void set_basin_forward_option(BasinForwardSettings& settings, std::string_view option,
                               std::string_view value) {
     if (option == "--dx")
-        settings.horizontal_step = number(value);
+        settings.dx = number(value);
     else if (option == "--dz")
-        settings.vertical_step = number(value);
+        settings.dz = number(value);
     else if (option == "--dt-ma")
-        settings.timestep_ma = number(value);
+        settings.dt_ma = number(value);
     else if (option == "--rdp-tol")
-        settings.rdp_tolerance = number(value);
+        settings.rdp_tol = number(value);
     else if (option == "--axis-rdp-tol")
-        settings.axis_rdp_tolerance = number(value);
+        settings.axis_rdp_tol = number(value);
     else if (option == "--min-height")
-        settings.minimum_cell_height = number(value);
+        settings.dz_min = number(value);
     else if (option == "--linear-method")
         settings.linear_solver.method = parse(value, kMethods);
     else if (option == "--pc")
@@ -82,17 +81,17 @@ void set_basin_forward_option(BasinForwardSettings& settings, std::string_view o
     else if (option == "--pc-reuse")
         settings.pc_reuse = parse(value, kReuse);
     else if (option == "--linear-rtol")
-        settings.linear.relative_tolerance = number(value);
+        settings.linear.rtol = number(value);
     else if (option == "--linear-atol")
-        settings.linear.absolute_tolerance = number(value);
+        settings.linear.atol = number(value);
     else if (option == "--linear-maxiter")
-        settings.linear.max_iterations = iterations(value);
+        settings.linear.maxiter = iterations(value);
     else if (option == "--nonlinear-rtol")
-        settings.nonlinear.relative_tolerance = number(value);
+        settings.nonlinear.rtol = number(value);
     else if (option == "--nonlinear-atol")
-        settings.nonlinear.absolute_tolerance = number(value);
+        settings.nonlinear.atol = number(value);
     else if (option == "--nonlinear-maxiter")
-        settings.nonlinear.max_iterations = iterations(value);
+        settings.nonlinear.maxiter = iterations(value);
     else if (option == "--scheme") {
         if (value == "linear")
             settings.scheme = MultipointFluxScheme::linear;
@@ -105,26 +104,26 @@ void set_basin_forward_option(BasinForwardSettings& settings, std::string_view o
 }
 
 void write_basin_forward_settings(std::ostream& output, const BasinForwardSettings& settings) {
-    output << std::setprecision(17) << "dx=" << settings.horizontal_step << '\n'
-           << "dz=" << settings.vertical_step << '\n'
-           << "dt_ma=" << settings.timestep_ma << '\n'
-           << "rdp_tol=" << settings.rdp_tolerance << '\n'
+    output << std::setprecision(17) << "dx=" << settings.dx << '\n'
+           << "dz=" << settings.dz << '\n'
+           << "dt_ma=" << settings.dt_ma << '\n'
+           << "rdp_tol=" << settings.rdp_tol << '\n'
            << "axis_rdp_tol=";
-    if (settings.axis_rdp_tolerance)
-        output << *settings.axis_rdp_tolerance;
+    if (settings.axis_rdp_tol)
+        output << *settings.axis_rdp_tol;
     else
         output << "none";
     output << '\n'
-           << "min_height=" << settings.minimum_cell_height << '\n'
+           << "min_height=" << settings.dz_min << '\n'
            << "scheme=" << (settings.scheme == MultipointFluxScheme::linear ? "linear" : "nmpfa")
            << '\n'
            << "linear_method=" << name(settings.linear_solver.method, kMethods) << '\n'
            << "pc=" << name(settings.linear_solver.preconditioner, kPreconditioners) << '\n'
            << "pc_reuse=" << name(settings.pc_reuse, kReuse) << '\n'
-           << "linear_rtol=" << settings.linear.relative_tolerance << '\n'
-           << "linear_atol=" << settings.linear.absolute_tolerance << '\n'
-           << "linear_maxiter=" << settings.linear.max_iterations << '\n'
-           << "nonlinear_rtol=" << settings.nonlinear.relative_tolerance << '\n'
-           << "nonlinear_atol=" << settings.nonlinear.absolute_tolerance << '\n'
-           << "nonlinear_maxiter=" << settings.nonlinear.max_iterations << '\n';
+           << "linear_rtol=" << settings.linear.rtol << '\n'
+           << "linear_atol=" << settings.linear.atol << '\n'
+           << "linear_maxiter=" << settings.linear.maxiter << '\n'
+           << "nonlinear_rtol=" << settings.nonlinear.rtol << '\n'
+           << "nonlinear_atol=" << settings.nonlinear.atol << '\n'
+           << "nonlinear_maxiter=" << settings.nonlinear.maxiter << '\n';
 }

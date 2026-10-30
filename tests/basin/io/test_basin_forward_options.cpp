@@ -18,13 +18,13 @@ TEST(BasinForwardOptions, KeepsIndependentChoicesAndSerializesToleranceGroups) {
     set_basin_forward_option(settings, "--nonlinear-maxiter", "30");
     EXPECT_EQ(settings.linear_solver.method, LinearMethod::bicgstab);
     EXPECT_EQ(settings.linear_solver.preconditioner, Preconditioner::ilu2);
-    EXPECT_EQ(settings.pc_reuse, PreconditionerReuse::manual);
-    EXPECT_EQ(settings.linear.max_iterations, 42);
-    EXPECT_DOUBLE_EQ(settings.linear.relative_tolerance, 1e-9);
-    EXPECT_DOUBLE_EQ(settings.linear.absolute_tolerance, 1e-14);
-    EXPECT_EQ(settings.nonlinear.max_iterations, 30);
-    EXPECT_DOUBLE_EQ(settings.nonlinear.relative_tolerance, 1e-7);
-    EXPECT_DOUBLE_EQ(settings.nonlinear.absolute_tolerance, 1e-10);
+    EXPECT_EQ(settings.pc_reuse, PcReuse::manual);
+    EXPECT_EQ(settings.linear.maxiter, 42);
+    EXPECT_DOUBLE_EQ(settings.linear.rtol, 1e-9);
+    EXPECT_DOUBLE_EQ(settings.linear.atol, 1e-14);
+    EXPECT_EQ(settings.nonlinear.maxiter, 30);
+    EXPECT_DOUBLE_EQ(settings.nonlinear.rtol, 1e-7);
+    EXPECT_DOUBLE_EQ(settings.nonlinear.atol, 1e-10);
     std::ostringstream description;
     write_basin_forward_settings(description, settings);
     EXPECT_NE(description.str().find("linear_method=bicgstab\npc=ilu2\npc_reuse=epoch\n"),

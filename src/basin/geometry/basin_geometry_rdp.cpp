@@ -41,7 +41,7 @@ std::size_t index_of(const std::vector<double>& x, double coordinate) {
 } // namespace
 
 BasinGeometry simplify_basin_geometry_rdp(const BasinGeometry& source, double tolerance) {
-    if (!std::isfinite(tolerance) || tolerance < 0.0 || source.boundaries.empty()) {
+    if (!std::isfinite(tolerance) || tolerance < 0.0 || source.z.empty()) {
         throw std::invalid_argument("Invalid RDP geometry or tolerance");
     }
     if (tolerance == 0.0)
@@ -55,8 +55,8 @@ BasinGeometry simplify_basin_geometry_rdp(const BasinGeometry& source, double to
         const std::size_t left = index_of(x, layer.x_min);
         const std::size_t right = index_of(x, layer.x_max);
         mandatory[left] = mandatory[right] = true;
-        const auto& top = source.boundaries[layer_index];
-        const auto& bottom = source.boundaries[layer_index + 1];
+        const auto& top = source.z[layer_index];
+        const auto& bottom = source.z[layer_index + 1];
         std::size_t peak = left;
         for (std::size_t i = left; i <= right; ++i) {
             if (bottom[i] - top[i] > bottom[peak] - top[peak])
@@ -75,7 +75,7 @@ BasinGeometry simplify_basin_geometry_rdp(const BasinGeometry& source, double to
         if (mandatory[i])
             pins.push_back(i);
     }
-    for (const auto& boundary : source.boundaries) {
+    for (const auto& boundary : source.z) {
         for (std::size_t i = 1; i < pins.size(); ++i) {
             retain_rdp(x, boundary, pins[i - 1], pins[i], tolerance, retained);
         }
@@ -98,8 +98,8 @@ BasinGeometry simplify_basin_geometry_rdp(const BasinGeometry& source, double to
                     const auto& layer = source.layers[layer_index];
                     if (x[i] < layer.x_min || x[i] > layer.x_max)
                         continue;
-                    const auto& top = source.boundaries[layer_index];
-                    const auto& bottom = source.boundaries[layer_index + 1];
+                    const auto& top = source.z[layer_index];
+                    const auto& bottom = source.z[layer_index + 1];
                     const double actual = bottom[i] - top[i];
                     const double prepared =
                         std::lerp(bottom[left] - top[left], bottom[right] - top[right], alpha);
@@ -115,15 +115,14 @@ BasinGeometry simplify_basin_geometry_rdp(const BasinGeometry& source, double to
         if (!changed)
             break;
     }
-    BasinGeometry result{.x = {},
-                         .boundaries = std::vector<std::vector<double>>(source.boundaries.size()),
-                         .layers = source.layers};
+    BasinGeometry result{
+        .x = {}, .z = std::vector<std::vector<double>>(source.z.size()), .layers = source.layers};
     for (std::size_t i = 0; i < count; ++i) {
         if (!retained[i])
             continue;
         result.x.push_back(x[i]);
-        for (std::size_t boundary = 0; boundary < source.boundaries.size(); ++boundary) {
-            result.boundaries[boundary].push_back(source.boundaries[boundary][i]);
+        for (std::size_t boundary = 0; boundary < source.z.size(); ++boundary) {
+            result.z[boundary].push_back(source.z[boundary][i]);
         }
     }
     return result;

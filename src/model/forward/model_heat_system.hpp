@@ -16,7 +16,7 @@ public:
                            Vector& residual) const override;
 
     void assemble_matrix(NonlinearMethod method, double time, const Vector& solution,
-                         const Vector& solution_derivative, double derivative_shift,
+                         const Vector& solution_derivative, double alpha,
                          SparseMatrix& matrix) const override;
 
 private:

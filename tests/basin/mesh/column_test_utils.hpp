@@ -1,7 +1,7 @@
 #pragma once
 
 #include "basin/geometry/basin_geometry.hpp"
-#include "basin/mesh/nonmatching_column_grid.hpp"
+#include "basin/mesh/col_grid.hpp"
 
 #include <cmath>
 #include <cstddef>
@@ -9,9 +9,8 @@
 #include <span>
 #include <vector>
 
-inline NonmatchingColumnGrid make_test_column_grid(std::size_t nx, std::size_t nz, double width,
-                                                   double depth) {
-    NonmatchingColumnGrid grid;
+inline ColGrid make_test_column_grid(std::size_t nx, std::size_t nz, double width, double depth) {
+    ColGrid grid;
     grid.columns.resize(nx);
     for (std::size_t column = 0; column <= nx; ++column) {
         grid.x.push_back(width * static_cast<double>(column) / static_cast<double>(nx));
@@ -33,19 +32,19 @@ inline NonmatchingColumnGrid make_test_column_grid(std::size_t nx, std::size_t n
             grid.columns[column].push_back(index);
         }
     }
-    rebuild_nonmatching_column_faces(grid);
+    rebuild_col_faces(grid);
     return grid;
 }
 
 inline BasinGeometry make_test_layered_geometry() {
     const std::vector<double> x{0.0, 1.0, 2.0};
     return {.x = x,
-            .boundaries = {{0.0, 0.4, 0.0}, {0.8, 1.2, 1.0}, {2.0, 2.4, 2.2}},
+            .z = {{0.0, 0.4, 0.0}, {0.8, 1.2, 1.0}, {2.0, 2.4, 2.2}},
             .layers = {{1, 0.0, 2.0}, {2, 0.0, 2.0}}};
 }
 
-inline double area_weighted_error(const NonmatchingColumnGrid& grid,
-                                  std::span<const double> solution, const auto& exact) {
+inline double area_weighted_error(const ColGrid& grid, std::span<const double> solution,
+                                  const auto& exact) {
     double squared_error = 0.0;
     for (const auto& cell : grid.cells) {
         const Point2D point = cell.center();

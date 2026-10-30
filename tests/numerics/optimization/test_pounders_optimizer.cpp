@@ -9,11 +9,11 @@
 namespace {
 
 constexpr PoundersSolveRequest kSolveRequest{
-    .gradient_absolute_tolerance = 1e-8,
-    .gradient_relative_tolerance = 1e-8,
-    .gradient_reduction_tolerance = 1e-8,
-    .max_iterations = 100,
-    .max_function_evaluations = 500,
+    .gatol = 1e-8,
+    .grtol = 1e-8,
+    .gttol = 1e-8,
+    .maxiter = 100,
+    .maxfev = 500,
 };
 
 void expect_vector_near(const Vector& actual, const Vector& expected, double tolerance = 1e-5) {
@@ -88,7 +88,7 @@ TEST(PoundersOptimizerTest, SupportsNonUnitBounds) {
 TEST(PoundersOptimizerTest, ReportsFunctionEvaluationLimit) {
     ensure_petsc_test_session();
     PoundersSolveRequest limited_request = kSolveRequest;
-    limited_request.max_function_evaluations = 3;
+    limited_request.maxfev = 3;
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = Vector{-5.0, -5.0},
         .upper_bounds = Vector{5.0, 5.0},
@@ -102,7 +102,7 @@ TEST(PoundersOptimizerTest, ReportsFunctionEvaluationLimit) {
     const PoundersSolveResult result =
         PoundersOptimizer{}.solve(problem, Vector{0.0, 0.0}, limited_request);
 
-    EXPECT_EQ(result.status, PoundersSolveStatus::maximum_function_evaluations);
+    EXPECT_EQ(result.status, PoundersStatus::maxfev);
     EXPECT_FALSE(result.converged());
     EXPECT_EQ(result.parameters.size(), 2);
     EXPECT_EQ(result.residuals.size(), 2);
@@ -157,17 +157,17 @@ TEST(PoundersOptimizerTest, ValidatesProblemAndRequest) {
                  std::invalid_argument);
 
     PoundersSolveRequest invalid_request = kSolveRequest;
-    invalid_request.gradient_absolute_tolerance = std::numeric_limits<double>::quiet_NaN();
+    invalid_request.gatol = std::numeric_limits<double>::quiet_NaN();
     EXPECT_THROW(
         static_cast<void>(PoundersOptimizer{}.solve(valid_problem, Vector{0.0}, invalid_request)),
         std::invalid_argument);
     invalid_request = kSolveRequest;
-    invalid_request.max_iterations = 0;
+    invalid_request.maxiter = 0;
     EXPECT_THROW(
         static_cast<void>(PoundersOptimizer{}.solve(valid_problem, Vector{0.0}, invalid_request)),
         std::invalid_argument);
     invalid_request = kSolveRequest;
-    invalid_request.max_function_evaluations = 0;
+    invalid_request.maxfev = 0;
     EXPECT_THROW(
         static_cast<void>(PoundersOptimizer{}.solve(valid_problem, Vector{0.0}, invalid_request)),
         std::invalid_argument);

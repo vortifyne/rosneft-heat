@@ -14,7 +14,7 @@ LinearSolveResult failure(LinearSolveStatus status, int iterations = 0) {
     return {
         .status = status,
         .iterations = iterations,
-        .final_residual_norm = std::numeric_limits<double>::infinity(),
+        .r_norm = std::numeric_limits<double>::infinity(),
     };
 }
 
@@ -67,6 +67,6 @@ LinearSolveResult UmfpackLinearSolver::solve(const SparseMatrix& A, const Vector
     return {
         .status = LinearSolveStatus::converged,
         .iterations = kDirectSolveIterations,
-        .final_residual_norm = residual_norm,
+        .r_norm = residual_norm,
     };
 }

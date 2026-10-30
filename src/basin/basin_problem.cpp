@@ -18,8 +18,8 @@ double BasinLayerProfile::bottom_at(const double coordinate) const {
     return basin_detail::interpolate(x, bottom, coordinate);
 }
 
-double BasinLayerProfile::porosity_at(const double coordinate) const {
-    return basin_detail::interpolate(x, porosity, coordinate);
+double BasinLayerProfile::phi_at(const double coordinate) const {
+    return basin_detail::interpolate(x, phi, coordinate);
 }
 
 int BasinLayerProfile::lithotype_at(const double coordinate) const {
@@ -38,7 +38,7 @@ int BasinLayerProfile::lithotype_at(const double coordinate) const {
     return coordinate - x[left] <= x[right] - coordinate ? lithotype[left] : lithotype[right];
 }
 
-const BasinLayerProfile& BasinConfiguration::layer(const int id) const {
+const BasinLayerProfile& BasinConfig::layer(const int id) const {
     const auto found = std::find_if(layers.begin(), layers.end(),
                                     [id](const auto& value) { return value.id == id; });
     if (found == layers.end()) {

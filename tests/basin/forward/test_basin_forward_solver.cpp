@@ -1,6 +1,6 @@
 #include "basin/basin_snapshot.hpp"
 #include "basin/forward/basin_forward_solver.hpp"
-#include "basin/mesh/nonmatching_column_grid.hpp"
+#include "basin/mesh/col_grid.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -47,29 +47,26 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
     const BasinInput input = BasinInput::read(directory);
     bool saw_final = false;
     bool saw_initial_axis = false;
-    const BasinForwardSolver solver(input, {.horizontal_step = 10.0,
-                                            .vertical_step = 1.0,
-                                            .minimum_cell_height = 1.0e-4,
-                                            .timestep_ma = 0.5,
-                                            .axis_rdp_tolerance = 5.0});
-    const BasinForwardResult result = solver.solve([&](const BasinForwardSnapshot& snapshot) {
-        if (snapshot.kind == BasinForwardSnapshot::Kind::initial) {
+    const BasinForwardSolver solver(
+        input, {.dx = 10.0, .dz = 1.0, .dz_min = 1.0e-4, .dt_ma = 0.5, .axis_rdp_tol = 5.0});
+    const BasinForwardResult result = solver.solve([&](const BasinSnapshot& snapshot) {
+        if (snapshot.kind == BasinSnapshot::Kind::initial) {
             saw_initial_axis = true;
             EXPECT_EQ(snapshot.grid.x, (std::vector<double>{0.0, 0.5, 1.0, 2.0}));
         }
-        if (snapshot.kind != BasinForwardSnapshot::Kind::after_event)
+        if (snapshot.kind != BasinSnapshot::Kind::after_event)
             return;
         saw_final = true;
         EXPECT_EQ(snapshot.grid.x, (std::vector<double>{0.0, 1.0, 2.0}));
-        ASSERT_EQ(snapshot.maturity_integrals.size(), snapshot.grid.cells.size());
+        ASSERT_EQ(snapshot.I.size(), snapshot.grid.cells.size());
         for (const auto& cell : snapshot.grid.cells) {
-            EXPECT_NEAR(snapshot.temperature[cell.index], 300.0, 1.0e-8);
+            EXPECT_NEAR(snapshot.T[cell.index], 300.0, 1.0e-8);
             if (cell.layer_id == 1) {
-                EXPECT_DOUBLE_EQ(snapshot.maturity_integrals[cell.index], 0.0);
-                EXPECT_NEAR(snapshot.reflectance_percent[cell.index], std::exp(-1.6), 1.0e-12);
+                EXPECT_DOUBLE_EQ(snapshot.I[cell.index], 0.0);
+                EXPECT_NEAR(snapshot.Ro[cell.index], std::exp(-1.6), 1.0e-12);
             } else {
-                EXPECT_GT(snapshot.maturity_integrals[cell.index], 0.0);
-                EXPECT_GT(snapshot.reflectance_percent[cell.index], std::exp(-1.6));
+                EXPECT_GT(snapshot.I[cell.index], 0.0);
+                EXPECT_GT(snapshot.Ro[cell.index], std::exp(-1.6));
             }
         }
     });
@@ -77,10 +74,10 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
     EXPECT_TRUE(saw_initial_axis);
     EXPECT_EQ(result.timesteps, 2);
     const auto output_directory = directory / "output";
-    const auto repeated = solver.solve(output_directory, [&](const BasinForwardSnapshot& snapshot) {
-        if (snapshot.kind == BasinForwardSnapshot::Kind::initial) {
-            for (const double maturity : snapshot.maturity_integrals) {
-                EXPECT_DOUBLE_EQ(maturity, 0.0);
+    const auto repeated = solver.solve(output_directory, [&](const BasinSnapshot& snapshot) {
+        if (snapshot.kind == BasinSnapshot::Kind::initial) {
+            for (const double I : snapshot.I) {
+                EXPECT_DOUBLE_EQ(I, 0.0);
             }
         }
     });

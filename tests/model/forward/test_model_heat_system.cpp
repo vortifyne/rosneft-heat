@@ -56,9 +56,8 @@ double realistically_scaled_steady_profile_error(int cell_count) {
     UmfpackLinearSolver solver;
     Vector temperature;
 
-    const LinearSolveResult solve_result = solver.solve(
-        matrix, -residual, temperature,
-        {.relative_tolerance = 1e-12, .absolute_tolerance = 1e-12, .max_iterations = 1});
+    const LinearSolveResult solve_result =
+        solver.solve(matrix, -residual, temperature, {.rtol = 1e-12, .atol = 1e-12, .maxiter = 1});
     if (solve_result.status != LinearSolveStatus::converged) {
         throw std::runtime_error("Failed to solve the steady heat profile");
     }

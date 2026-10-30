@@ -55,12 +55,11 @@ void read_csv(const std::filesystem::path& path, const std::string& expected_hea
     }
 }
 
-BasinConfiguration& find_configuration(std::vector<BasinConfiguration>& configurations,
-                                       const double age) {
-    const auto found =
-        std::find_if(configurations.begin(), configurations.end(),
-                     [age](const auto& c) { return std::abs(c.age_ma - age) < 1.0e-10; });
-    if (found == configurations.end()) {
+BasinConfig& find_configuration(std::vector<BasinConfig>& configs, const double age) {
+    const auto found = std::find_if(configs.begin(), configs.end(), [age](const auto& c) {
+        return std::abs(c.age_ma - age) < 1.0e-10;
+    });
+    if (found == configs.end()) {
         throw std::runtime_error("Input row refers to an unknown configuration");
     }
     return *found;
@@ -74,50 +73,48 @@ BasinInput BasinInput::read(const std::filesystem::path& directory) {
         if (fields.size() != 1) {
             throw std::runtime_error("Invalid configuration row");
         }
-        result.configurations_.push_back({.age_ma = std::stod(fields[0]),
-                                          .layers = {},
-                                          .surface_temperature = {},
-                                          .basal_heat_flux = {}});
+        result.configs_.push_back(
+            {.age_ma = std::stod(fields[0]), .layers = {}, .T_surf = {}, .q_basal = {}});
     });
 
-    read_csv(
-        directory / "layers.csv", "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity",
-        [&](const auto& fields) {
-            if (fields.size() != 8) {
-                throw std::runtime_error("Invalid layer profile row");
-            }
-            auto& configuration = find_configuration(result.configurations_, std::stod(fields[0]));
-            const int layer_id = std::stoi(fields[1]);
-            auto found =
-                std::find_if(configuration.layers.begin(), configuration.layers.end(),
-                             [layer_id](const auto& layer) { return layer.id == layer_id; });
-            if (found == configuration.layers.end()) {
-                configuration.layers.push_back({.id = layer_id,
-                                                .name = fields[2],
-                                                .x = {},
-                                                .top = {},
-                                                .bottom = {},
-                                                .lithotype = {},
-                                                .porosity = {}});
-                found = std::prev(configuration.layers.end());
-            }
-            found->x.push_back(std::stod(fields[3]));
-            found->top.push_back(std::stod(fields[4]));
-            found->bottom.push_back(std::stod(fields[5]));
-            found->lithotype.push_back(std::stoi(fields[6]));
-            found->porosity.push_back(std::stod(fields[7]));
-        });
+    read_csv(directory / "layers.csv",
+             "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity",
+             [&](const auto& fields) {
+                 if (fields.size() != 8) {
+                     throw std::runtime_error("Invalid layer profile row");
+                 }
+                 auto& cfg = find_configuration(result.configs_, std::stod(fields[0]));
+                 const int layer_id = std::stoi(fields[1]);
+                 auto found =
+                     std::find_if(cfg.layers.begin(), cfg.layers.end(),
+                                  [layer_id](const auto& layer) { return layer.id == layer_id; });
+                 if (found == cfg.layers.end()) {
+                     cfg.layers.push_back({.id = layer_id,
+                                           .name = fields[2],
+                                           .x = {},
+                                           .top = {},
+                                           .bottom = {},
+                                           .lithotype = {},
+                                           .phi = {}});
+                     found = std::prev(cfg.layers.end());
+                 }
+                 found->x.push_back(std::stod(fields[3]));
+                 found->top.push_back(std::stod(fields[4]));
+                 found->bottom.push_back(std::stod(fields[5]));
+                 found->lithotype.push_back(std::stoi(fields[6]));
+                 found->phi.push_back(std::stod(fields[7]));
+             });
 
     read_csv(directory / "boundaries.csv", "age_ma,kind,x,value_si", [&](const auto& fields) {
         if (fields.size() != 4) {
             throw std::runtime_error("Invalid boundary profile row");
         }
-        auto& configuration = find_configuration(result.configurations_, std::stod(fields[0]));
+        auto& cfg = find_configuration(result.configs_, std::stod(fields[0]));
         ScalarProfile* profile = nullptr;
         if (fields[1] == "surface_temperature") {
-            profile = &configuration.surface_temperature;
+            profile = &cfg.T_surf;
         } else if (fields[1] == "basal_heat_flux") {
-            profile = &configuration.basal_heat_flux;
+            profile = &cfg.q_basal;
         } else {
             throw std::runtime_error("Unknown boundary profile kind");
         }
@@ -132,14 +129,13 @@ BasinInput BasinInput::read(const std::filesystem::path& directory) {
                      throw std::runtime_error("Invalid lithotype row");
                  }
                  const int code = std::stoi(fields[0]);
-                 result.lithotypes_.emplace(code,
-                                            LithotypeThermophysicalProperties{
-                                                .code = code,
-                                                .solid_density = std::stod(fields[2]),
-                                                .conductivity_at_20_celsius = std::stod(fields[3]),
-                                                .specific_heat_at_20_celsius = std::stod(fields[4]),
-                                                .solid_heat_production = std::stod(fields[5]),
-                                            });
+                 result.lithotypes_.emplace(code, LithotypeProperties{
+                                                      .code = code,
+                                                      .rho_s = std::stod(fields[2]),
+                                                      .lambda20 = std::stod(fields[3]),
+                                                      .c20 = std::stod(fields[4]),
+                                                      .A_s = std::stod(fields[5]),
+                                                  });
              });
 
     read_csv(directory / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant",
@@ -147,27 +143,26 @@ BasinInput BasinInput::read(const std::filesystem::path& directory) {
                  if (fields.size() != 4) {
                      throw std::runtime_error("Invalid kinetics row");
                  }
-                 const double preexponential = std::stod(fields[0]);
-                 const double gas_constant = std::stod(fields[3]);
-                 if (result.easy_ro_.activation_energies.empty()) {
-                     result.easy_ro_.preexponential = preexponential;
-                     result.easy_ro_.gas_constant = gas_constant;
-                 } else if (preexponential != result.easy_ro_.preexponential ||
-                            gas_constant != result.easy_ro_.gas_constant) {
+                 const double A = std::stod(fields[0]);
+                 const double Rg = std::stod(fields[3]);
+                 if (result.easy_ro_.E.empty()) {
+                     result.easy_ro_.A = A;
+                     result.easy_ro_.Rg = Rg;
+                 } else if (A != result.easy_ro_.A || Rg != result.easy_ro_.Rg) {
                      throw std::runtime_error("Kinetics constants must be common to all reactions");
                  }
-                 result.easy_ro_.activation_energies.push_back(std::stod(fields[1]));
-                 result.easy_ro_.weights.push_back(std::stod(fields[2]));
+                 result.easy_ro_.E.push_back(std::stod(fields[1]));
+                 result.easy_ro_.f.push_back(std::stod(fields[2]));
              });
     return result;
 }
 
-const LithotypeThermophysicalProperties& BasinInput::lithotype(const int code) const {
+const LithotypeProperties& BasinInput::lithotype(const int code) const {
     return lithotypes_.at(code);
 }
 
-std::span<const BasinConfiguration> BasinInput::configurations() const noexcept {
-    return configurations_;
+std::span<const BasinConfig> BasinInput::configs() const noexcept {
+    return configs_;
 }
 
 const EasyRoParameters& BasinInput::easy_ro() const noexcept {

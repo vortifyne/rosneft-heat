@@ -114,11 +114,11 @@ void ModelHeatSystem::assemble_residual(double time, const Vector& solution,
 }
 
 void ModelHeatSystem::assemble_matrix(NonlinearMethod method, double time, const Vector& solution,
-                                      const Vector& solution_derivative, double derivative_shift,
+                                      const Vector& solution_derivative, double alpha,
                                       SparseMatrix& matrix) const {
     static_cast<void>(method);
     check_finite(time, "Assembly time must be finite");
-    check_finite(derivative_shift, "Derivative shift must be finite");
+    check_finite(alpha, "Derivative shift must be finite");
     check_vector_sizes(solution, solution_derivative);
 
     // Differentiating the BDF residual gives
@@ -132,7 +132,7 @@ void ModelHeatSystem::assemble_matrix(NonlinearMethod method, double time, const
         thermal_conductivity_ * grid_.dx * grid_.inv_dz * grid_.inv_cell_area;
 
     std::vector<double> diagonal(static_cast<std::size_t>(size()),
-                                 volumetric_heat_capacity_ * derivative_shift);
+                                 volumetric_heat_capacity_ * alpha);
     std::vector<MatrixTriplet> triplets;
     const auto nx = static_cast<std::size_t>(grid_.nx);
     const auto nz = static_cast<std::size_t>(grid_.nz);

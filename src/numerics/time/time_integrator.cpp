@@ -10,21 +10,21 @@
 #include <stdexcept>
 #include <utility>
 
-TimeIntegrator::TimeIntegrator() : time_scheme_(std::make_unique<BDF1>()) {
-    time_history_.set_capacity(time_scheme_->required_snapshot_count());
+TimeIntegrator::TimeIntegrator() : scheme_(std::make_unique<BDF1>()) {
+    history_.set_capacity(scheme_->required_snapshot_count());
 }
 
 TimeIntegrator::~TimeIntegrator() = default;
 TimeIntegrator::TimeIntegrator(TimeIntegrator&&) noexcept = default;
 TimeIntegrator& TimeIntegrator::operator=(TimeIntegrator&&) noexcept = default;
 
-void TimeIntegrator::set_initial_solution(double initial_time, const Vector& initial_solution) {
-    if (!std::isfinite(initial_time)) {
+void TimeIntegrator::set_initial_solution(double t0, const Vector& u0) {
+    if (!std::isfinite(t0)) {
         throw std::invalid_argument("Initial time must be finite");
     }
 
-    time_history_.clear();
-    time_history_.accept({.time = initial_time, .solution = initial_solution});
+    history_.clear();
+    history_.accept({.t = t0, .u = u0});
 }
 
 void TimeIntegrator::set_timestep(double dt) {
@@ -37,15 +37,14 @@ void TimeIntegrator::set_timestep(double dt) {
 
 void TimeIntegrator::set_linear_solver(LinearSolverOptions options) {
     nonlinear_solver_.set_linear_solver(options);
-    nonlinear_solver_.linear_solver().set_preconditioner_reuse(preconditioner_reuse_ !=
-                                                               PreconditionerReuse::none);
+    nonlinear_solver_.linear_solver().set_preconditioner_reuse(pc_reuse_ != PcReuse::none);
 }
 
-void TimeIntegrator::set_preconditioner_reuse(PreconditionerReuse reuse) noexcept {
-    if (reuse != preconditioner_reuse_)
+void TimeIntegrator::set_preconditioner_reuse(PcReuse reuse) noexcept {
+    if (reuse != pc_reuse_)
         reset_linear_solver();
-    preconditioner_reuse_ = reuse;
-    nonlinear_solver_.linear_solver().set_preconditioner_reuse(reuse != PreconditionerReuse::none);
+    pc_reuse_ = reuse;
+    nonlinear_solver_.linear_solver().set_preconditioner_reuse(reuse != PcReuse::none);
 }
 
 void TimeIntegrator::reset_linear_solver() noexcept {
@@ -61,24 +60,23 @@ const NonlinearSolver& TimeIntegrator::nonlinear_solver() const noexcept {
 }
 
 const TimeSnapshot& TimeIntegrator::current_snapshot() const {
-    if (time_history_.empty()) {
+    if (history_.empty()) {
         throw std::logic_error("Time integrator has no initial solution");
     }
 
-    return time_history_.current();
+    return history_.current();
 }
 
-TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_discrete_system,
-                                                 double final_time,
-                                                 const NonlinearSolveRequest& nonlinear_request,
-                                                 const LinearSolveRequest& linear_request) {
-    if (time_history_.empty()) {
+TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& system, double t_end,
+                                                 const NonlinearSolveRequest& nonlinear,
+                                                 const LinearSolveRequest& linear) {
+    if (history_.empty()) {
         throw std::logic_error("Time integrator has no initial solution");
     }
     if (!(dt_ > 0.0) || !std::isfinite(dt_)) {
         throw std::logic_error("Time integrator has no valid time step");
     }
-    if (!std::isfinite(final_time) || final_time < time_history_.current().time) {
+    if (!std::isfinite(t_end) || t_end < history_.current().t) {
         throw std::invalid_argument("Final time must be finite and not less than the current time");
     }
 
@@ -86,45 +84,43 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
     int rejected_steps = 0;
     int nonlinear_iterations = 0;
     int linear_iterations = 0;
-    double last_residual_norm = 0.0;
+    double last_r_norm = 0.0;
     std::optional<NonlinearSolveStatus> last_nonlinear_status;
     std::optional<LinearSolveStatus> last_linear_status;
     SolverTimings timings;
 
-    while (time_history_.current().time < final_time) {
-        const double current_time = time_history_.current().time;
-        const double remaining_time = final_time - current_time;
-        const double step_tolerance =
-            8.0 * std::numeric_limits<double>::epsilon() * std::max(dt_, remaining_time);
-        const bool reaches_final_time = remaining_time <= dt_ + step_tolerance;
-        const double step_end_time =
-            reaches_final_time ? final_time : current_time + std::min(dt_, remaining_time);
+    while (history_.current().t < t_end) {
+        const double t = history_.current().t;
+        const double remaining = t_end - t;
+        const double t_tol =
+            8.0 * std::numeric_limits<double>::epsilon() * std::max(dt_, remaining);
+        const bool last_step = remaining <= dt_ + t_tol;
+        const double t_next = last_step ? t_end : t + std::min(dt_, remaining);
 
-        if (!(step_end_time > current_time)) {
+        if (!(t_next > t)) {
             return {
                 .status = TimeIntegrationStatus::time_step_too_small,
                 .accepted_steps = accepted_steps,
                 .rejected_steps = rejected_steps,
                 .nonlinear_iterations = nonlinear_iterations,
                 .linear_iterations = linear_iterations,
-                .last_residual_norm = last_residual_norm,
+                .last_r_norm = last_r_norm,
                 .last_nonlinear_status = last_nonlinear_status,
                 .last_linear_status = last_linear_status,
                 .timings = timings,
             };
         }
 
-        if (preconditioner_reuse_ == PreconditionerReuse::step)
+        if (pc_reuse_ == PcReuse::step)
             reset_linear_solver();
-        Vector solution = time_history_.current().solution;
-        auto nonlinear_system =
-            time_scheme_->make_nonlinear_system(semi_discrete_system, time_history_, step_end_time);
+        Vector u = history_.current().u;
+        auto nonlinear_system = scheme_->make_nonlinear_system(system, history_, t_next);
         const NonlinearSolveResult nonlinear_result =
-            nonlinear_solver_.solve(*nonlinear_system, solution, nonlinear_request, linear_request);
+            nonlinear_solver_.solve(*nonlinear_system, u, nonlinear, linear);
         nonlinear_iterations += nonlinear_result.iterations;
         linear_iterations += nonlinear_result.linear_iterations;
         timings += nonlinear_result.timings;
-        last_residual_norm = nonlinear_result.final_residual_norm;
+        last_r_norm = nonlinear_result.r_norm;
         last_nonlinear_status = nonlinear_result.status;
         if (nonlinear_result.last_linear_status.has_value()) {
             last_linear_status = nonlinear_result.last_linear_status;
@@ -137,7 +133,7 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
                 .rejected_steps = rejected_steps,
                 .nonlinear_iterations = nonlinear_iterations,
                 .linear_iterations = linear_iterations,
-                .last_residual_norm = last_residual_norm,
+                .last_r_norm = last_r_norm,
                 .last_nonlinear_status = last_nonlinear_status,
                 .last_linear_status = last_linear_status,
                 .timings = timings,
@@ -145,7 +141,7 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
         }
 
         nonlinear_system.reset();
-        time_history_.accept({.time = step_end_time, .solution = std::move(solution)});
+        history_.accept({.t = t_next, .u = std::move(u)});
         ++accepted_steps;
     }
 
@@ -155,7 +151,7 @@ TimeIntegrationResult TimeIntegrator::advance_to(const SemiDiscreteSystem& semi_
         .rejected_steps = rejected_steps,
         .nonlinear_iterations = nonlinear_iterations,
         .linear_iterations = linear_iterations,
-        .last_residual_norm = last_residual_norm,
+        .last_r_norm = last_r_norm,
         .last_nonlinear_status = last_nonlinear_status,
         .last_linear_status = last_linear_status,
         .timings = timings,

@@ -20,30 +20,27 @@ namespace {
 
 void easy_ro_advance(benchmark::State& state) {
     constexpr std::size_t reactions = 20;
-    std::vector<double> energies(reactions), weights(reactions, 1.0 / reactions);
+    std::vector<double> energies(reactions), f(reactions, 1.0 / reactions);
     for (std::size_t i = 0; i < reactions; ++i) {
         energies[i] = (34.0 + 2.0 * static_cast<double>(i)) * 4186.8;
     }
-    const EasyRoModel model({.preexponential = 1e13,
-                             .gas_constant = 8.314,
-                             .activation_energies = energies,
-                             .weights = weights});
+    const EasyRoModel model({.A = 1e13, .Rg = 8.314, .E = energies, .f = f});
     const auto cells = static_cast<std::size_t>(state.range(0));
-    std::vector<double> old_temperature(cells), new_temperature(cells);
+    std::vector<double> T0(cells), T1(cells);
     for (std::size_t i = 0; i < cells; ++i) {
-        old_temperature[i] = 300.0 + static_cast<double>(i % 200);
-        new_temperature[i] = old_temperature[i] + 10.0;
+        T0[i] = 300.0 + static_cast<double>(i % 200);
+        T1[i] = T0[i] + 10.0;
     }
-    auto integrals = model.initial_state(cells);
+    auto I = model.initial_state(cells);
     for (auto _ : state) {
         state.PauseTiming();
-        std::fill(integrals.begin(), integrals.end(), 0.0);
+        std::fill(I.begin(), I.end(), 0.0);
         state.ResumeTiming();
-        model.advance(old_temperature, new_temperature, 1e12, integrals);
-        benchmark::DoNotOptimize(integrals.data());
+        model.advance(T0, T1, 1e12, I);
+        benchmark::DoNotOptimize(I.data());
         benchmark::ClobberMemory();
     }
-    if (!std::all_of(integrals.begin(), integrals.end(),
+    if (!std::all_of(I.begin(), I.end(),
                      [](double value) { return std::isfinite(value) && value >= 0.0; }))
         state.SkipWithError("Nonfinite maturity integrals");
     state.SetItemsProcessed(state.iterations() * static_cast<benchmark::IterationCount>(cells));

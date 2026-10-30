@@ -4,14 +4,14 @@
 #include "numerics/algebra/vector.hpp"
 
 struct LinearSolveRequest {
-    double relative_tolerance = 1.0e-8;
-    double absolute_tolerance = 1.0e-50;
-    int max_iterations = 1000;
+    double rtol = 1.0e-8;
+    double atol = 1.0e-50;
+    int maxiter = 1000;
 };
 
 enum class LinearSolveStatus {
     converged,
-    max_iterations,
+    maxiter,
     invalid_input,
     factorization_failed,
     solve_failed,
@@ -22,7 +22,7 @@ struct [[nodiscard]] LinearSolveResult {
     LinearSolveStatus status;
     int iterations;
     // Original residual for UMFPACK; left-preconditioned residual for PETSc Krylov solvers.
-    double final_residual_norm;
+    double r_norm;
 };
 
 enum class LinearSolverType {

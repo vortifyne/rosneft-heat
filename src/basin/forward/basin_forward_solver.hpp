@@ -6,7 +6,7 @@
 #include <filesystem>
 #include <functional>
 
-struct BasinForwardSnapshot;
+struct BasinSnapshot;
 
 struct BasinForwardResult {
     int timesteps = 0;
@@ -14,15 +14,15 @@ struct BasinForwardResult {
     int linear_iterations = 0;
 };
 
-using BasinForwardObserver = std::function<void(const BasinForwardSnapshot&)>;
+using BasinObserver = std::function<void(const BasinSnapshot&)>;
 
 class BasinForwardSolver {
 public:
     BasinForwardSolver(BasinInput input, BasinForwardSettings settings = {});
 
-    [[nodiscard]] BasinForwardResult solve(const BasinForwardObserver& observe = {}) const;
+    [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe = {}) const;
     [[nodiscard]] BasinForwardResult solve(const std::filesystem::path& output_directory,
-                                           const BasinForwardObserver& observe = {}) const;
+                                           const BasinObserver& observe = {}) const;
 
 private:
     BasinInput input_;

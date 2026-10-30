@@ -11,39 +11,38 @@
 namespace {
 
 constexpr NonlinearSolveRequest kNewtonRequest{
-    .nonlinear_method = NonlinearMethod::newton,
-    .relative_tolerance = 1e-12,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 10,
+    .method = NonlinearMethod::newton,
+    .rtol = 1e-12,
+    .atol = 1e-12,
+    .maxiter = 10,
 };
 
 constexpr LinearSolveRequest kDirectLinearRequest{
-    .relative_tolerance = 1e-8,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 100,
+    .rtol = 1e-8,
+    .atol = 1e-12,
+    .maxiter = 100,
 };
 
 class DecaySystem final : public SemiDiscreteSystem {
 public:
     explicit DecaySystem(double rate) : rate_(rate) {}
 
-    void assemble_residual(double time, const Vector& solution, const Vector& solution_derivative,
-                           Vector& residual) const override {
-        evaluated_times_.push_back(time);
-        residual = solution_derivative + rate_ * solution;
+    void assemble_residual(double t, const Vector& u, const Vector& du_dt,
+                           Vector& r) const override {
+        evaluated_times_.push_back(t);
+        r = du_dt + rate_ * u;
     }
 
-    void assemble_matrix(NonlinearMethod method, double time, const Vector& solution,
-                         const Vector& solution_derivative, double derivative_shift,
-                         SparseMatrix& matrix) const override {
+    void assemble_matrix(NonlinearMethod method, double t, const Vector& u, const Vector& du_dt,
+                         double alpha, SparseMatrix& A) const override {
         static_cast<void>(method);
-        static_cast<void>(time);
-        static_cast<void>(solution);
-        static_cast<void>(solution_derivative);
+        static_cast<void>(t);
+        static_cast<void>(u);
+        static_cast<void>(du_dt);
         const std::vector<MatrixTriplet> triplets = {
-            {0, 0, derivative_shift + rate_},
+            {0, 0, alpha + rate_},
         };
-        matrix.set_from_triplets(triplets);
+        A.set_from_triplets(triplets);
     }
 
     const std::vector<double>& evaluated_times() const {
@@ -57,23 +56,22 @@ private:
 
 class FailingSystem final : public SemiDiscreteSystem {
 public:
-    void assemble_residual(double time, const Vector& solution, const Vector& solution_derivative,
-                           Vector& residual) const override {
-        static_cast<void>(time);
-        static_cast<void>(solution);
-        static_cast<void>(solution_derivative);
-        residual = Vector{1.0};
+    void assemble_residual(double t, const Vector& u, const Vector& du_dt,
+                           Vector& r) const override {
+        static_cast<void>(t);
+        static_cast<void>(u);
+        static_cast<void>(du_dt);
+        r = Vector{1.0};
     }
 
-    void assemble_matrix(NonlinearMethod method, double time, const Vector& solution,
-                         const Vector& solution_derivative, double derivative_shift,
-                         SparseMatrix& matrix) const override {
+    void assemble_matrix(NonlinearMethod method, double t, const Vector& u, const Vector& du_dt,
+                         double alpha, SparseMatrix& A) const override {
         static_cast<void>(method);
-        static_cast<void>(time);
-        static_cast<void>(solution);
-        static_cast<void>(solution_derivative);
-        static_cast<void>(derivative_shift);
-        matrix.set_zero();
+        static_cast<void>(t);
+        static_cast<void>(u);
+        static_cast<void>(du_dt);
+        static_cast<void>(alpha);
+        A.set_zero();
     }
 };
 
@@ -95,9 +93,9 @@ TEST(TimeIntegratorTest, AdvancesWithFixedStepsAndMatchesFinalTimeExactly) {
     EXPECT_EQ(*result.last_nonlinear_status, NonlinearSolveStatus::converged_residual_absolute);
     ASSERT_TRUE(result.last_linear_status.has_value());
     EXPECT_EQ(*result.last_linear_status, LinearSolveStatus::converged);
-    EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 1.0);
-    ASSERT_EQ(integrator.current_snapshot().solution.size(), 1);
-    EXPECT_NEAR(integrator.current_snapshot().solution[0], 1.0 / (1.4 * 1.4 * 1.2), 1e-12);
+    EXPECT_DOUBLE_EQ(integrator.current_snapshot().t, 1.0);
+    ASSERT_EQ(integrator.current_snapshot().u.size(), 1);
+    EXPECT_NEAR(integrator.current_snapshot().u[0], 1.0 / (1.4 * 1.4 * 1.2), 1e-12);
     ASSERT_FALSE(system.evaluated_times().empty());
     EXPECT_DOUBLE_EQ(system.evaluated_times().back(), 1.0);
 }
@@ -118,7 +116,7 @@ TEST(TimeIntegratorTest, ReturnsImmediatelyWhenAlreadyAtFinalTime) {
     EXPECT_FALSE(result.last_nonlinear_status.has_value());
     EXPECT_FALSE(result.last_linear_status.has_value());
     EXPECT_TRUE(system.evaluated_times().empty());
-    EXPECT_DOUBLE_EQ(integrator.current_snapshot().solution[0], 3.0);
+    EXPECT_DOUBLE_EQ(integrator.current_snapshot().u[0], 3.0);
 }
 
 TEST(TimeIntegratorTest, CanUseSuccessiveAdvanceTargetsAsExactEventTimes) {
@@ -130,14 +128,14 @@ TEST(TimeIntegratorTest, CanUseSuccessiveAdvanceTargetsAsExactEventTimes) {
     const TimeIntegrationResult event_result =
         integrator.advance_to(system, 0.3, kNewtonRequest, kDirectLinearRequest);
     ASSERT_TRUE(event_result.completed());
-    EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 0.3);
+    EXPECT_DOUBLE_EQ(integrator.current_snapshot().t, 0.3);
 
     const TimeIntegrationResult final_result =
         integrator.advance_to(system, 0.8, kNewtonRequest, kDirectLinearRequest);
 
     EXPECT_TRUE(final_result.completed());
     EXPECT_EQ(final_result.accepted_steps, 2);
-    EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 0.8);
+    EXPECT_DOUBLE_EQ(integrator.current_snapshot().t, 0.8);
 }
 
 TEST(TimeIntegratorTest, DoesNotCreateRoundoffSizedFinalStep) {
@@ -152,7 +150,7 @@ TEST(TimeIntegratorTest, DoesNotCreateRoundoffSizedFinalStep) {
     EXPECT_TRUE(result.completed());
     EXPECT_EQ(result.accepted_steps, 8);
     EXPECT_EQ(result.rejected_steps, 0);
-    EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 0.2);
+    EXPECT_DOUBLE_EQ(integrator.current_snapshot().t, 0.2);
 }
 
 TEST(TimeIntegratorTest, StopsAtFirstNonlinearFailureAndKeepsAcceptedState) {
@@ -174,8 +172,8 @@ TEST(TimeIntegratorTest, StopsAtFirstNonlinearFailureAndKeepsAcceptedState) {
     EXPECT_EQ(*result.last_nonlinear_status, NonlinearSolveStatus::linear_solve_failed);
     ASSERT_TRUE(result.last_linear_status.has_value());
     EXPECT_EQ(*result.last_linear_status, LinearSolveStatus::factorization_failed);
-    EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 0.0);
-    EXPECT_DOUBLE_EQ(integrator.current_snapshot().solution[0], 2.0);
+    EXPECT_DOUBLE_EQ(integrator.current_snapshot().t, 0.0);
+    EXPECT_DOUBLE_EQ(integrator.current_snapshot().u[0], 2.0);
 }
 
 TEST(TimeIntegratorTest, ReplacesInitialStateAndExposesCurrentSnapshot) {
@@ -186,8 +184,8 @@ TEST(TimeIntegratorTest, ReplacesInitialStateAndExposesCurrentSnapshot) {
     integrator.set_initial_solution(3.0, Vector{4.0});
     integrator.reset_linear_solver();
 
-    EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 3.0);
-    EXPECT_DOUBLE_EQ(integrator.current_snapshot().solution[0], 4.0);
+    EXPECT_DOUBLE_EQ(integrator.current_snapshot().t, 3.0);
+    EXPECT_DOUBLE_EQ(integrator.current_snapshot().u[0], 4.0);
     EXPECT_EQ(&integrator.nonlinear_solver(), nonlinear_solver);
     EXPECT_EQ(&integrator.nonlinear_solver().linear_solver(), linear_solver);
 }
@@ -217,14 +215,14 @@ TEST(TimeIntegratorTest, RejectsInvalidConfigurationAndTimeDirection) {
 
 TEST(TimeIntegratorTest, ReportsWhenTimeStepCannotAdvanceFloatingPointTime) {
     TimeIntegrator integrator;
-    const double current_time = 1e20;
-    integrator.set_initial_solution(current_time, Vector{1.0});
+    const double t = 1e20;
+    integrator.set_initial_solution(t, Vector{1.0});
     integrator.set_timestep(1.0);
     const DecaySystem system(1.0);
 
-    const TimeIntegrationResult result = integrator.advance_to(
-        system, std::nextafter(current_time, std::numeric_limits<double>::infinity()),
-        kNewtonRequest, kDirectLinearRequest);
+    const TimeIntegrationResult result =
+        integrator.advance_to(system, std::nextafter(t, std::numeric_limits<double>::infinity()),
+                              kNewtonRequest, kDirectLinearRequest);
 
     EXPECT_EQ(result.status, TimeIntegrationStatus::time_step_too_small);
     EXPECT_EQ(result.accepted_steps, 0);
@@ -236,44 +234,41 @@ namespace {
 
 class ChangingDiagonalSystem final : public SemiDiscreteSystem {
 public:
-    void assemble_residual(double time, const Vector& solution, const Vector& derivative,
-                           Vector& residual) const override {
-        residual = Vector{derivative[0] + (1.0 + time) * solution[0],
-                          derivative[1] + (2.0 + 3.0 * time) * solution[1]};
+    void assemble_residual(double t, const Vector& u, const Vector& derivative,
+                           Vector& r) const override {
+        r = Vector{derivative[0] + (1.0 + t) * u[0], derivative[1] + (2.0 + 3.0 * t) * u[1]};
     }
-    void assemble_matrix(NonlinearMethod, double time, const Vector&, const Vector&, double shift,
-                         SparseMatrix& matrix) const override {
-        const std::vector<MatrixTriplet> entries{{0, 0, shift + 1.0 + time},
-                                                 {1, 1, shift + 2.0 + 3.0 * time}};
-        matrix.set_from_triplets(entries);
+    void assemble_matrix(NonlinearMethod, double t, const Vector&, const Vector&, double shift,
+                         SparseMatrix& A) const override {
+        const std::vector<MatrixTriplet> entries{{0, 0, shift + 1.0 + t},
+                                                 {1, 1, shift + 2.0 + 3.0 * t}};
+        A.set_from_triplets(entries);
     }
 };
 
 TEST(TimeIntegratorTest, ResetsStepPreconditionerButRetainsManuallyManagedPreconditioner) {
     ensure_petsc_test_session();
     ChangingDiagonalSystem system;
-    for (const auto reuse :
-         {PreconditionerReuse::none, PreconditionerReuse::step, PreconditionerReuse::manual}) {
+    for (const auto reuse : {PcReuse::none, PcReuse::step, PcReuse::manual}) {
         TimeIntegrator integrator;
         integrator.set_initial_solution(0.0, Vector{1.0, 1.0});
         integrator.set_timestep(1.0);
         integrator.set_linear_solver({.method = LinearMethod::gmres});
         integrator.set_preconditioner_reuse(reuse);
-        const LinearSolveRequest linear{
-            .relative_tolerance = 1e-10, .absolute_tolerance = 1e-12, .max_iterations = 1};
+        const LinearSolveRequest linear{.rtol = 1e-10, .atol = 1e-12, .maxiter = 1};
         const auto result = integrator.advance_to(system, 2.0, kNewtonRequest, linear);
-        if (reuse == PreconditionerReuse::manual) {
+        if (reuse == PcReuse::manual) {
             EXPECT_EQ(result.status, TimeIntegrationStatus::nonlinear_solve_failed);
             EXPECT_EQ(result.accepted_steps, 1);
-            EXPECT_DOUBLE_EQ(integrator.current_snapshot().time, 1.0);
+            EXPECT_DOUBLE_EQ(integrator.current_snapshot().t, 1.0);
             integrator.reset_linear_solver();
             EXPECT_TRUE(integrator.advance_to(system, 2.0, kNewtonRequest, linear).completed());
         } else {
             EXPECT_TRUE(result.completed());
             EXPECT_EQ(result.accepted_steps, 2);
         }
-        EXPECT_NEAR(integrator.current_snapshot().solution[0], 1.0 / 12.0, 1e-12);
-        EXPECT_NEAR(integrator.current_snapshot().solution[1], 1.0 / 54.0, 1e-12);
+        EXPECT_NEAR(integrator.current_snapshot().u[0], 1.0 / 12.0, 1e-12);
+        EXPECT_NEAR(integrator.current_snapshot().u[1], 1.0 / 54.0, 1e-12);
     }
 }
 

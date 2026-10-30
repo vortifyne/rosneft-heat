@@ -9,7 +9,7 @@ struct ModelHeatInverseSolveRequest {
 };
 
 struct [[nodiscard]] ModelHeatInverseResult {
-    PoundersSolveStatus status;
+    PoundersStatus status;
 
     ModelHeatParameters parameters;
     Vector normalized_parameters;

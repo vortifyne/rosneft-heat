@@ -8,24 +8,24 @@
 namespace model_heat_inverse_test {
 
 inline constexpr NonlinearSolveRequest kNewtonRequest{
-    .nonlinear_method = NonlinearMethod::newton,
-    .relative_tolerance = 1e-12,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 5,
+    .method = NonlinearMethod::newton,
+    .rtol = 1e-12,
+    .atol = 1e-12,
+    .maxiter = 5,
 };
 
 inline constexpr LinearSolveRequest kDirectLinearRequest{
-    .relative_tolerance = 1e-12,
-    .absolute_tolerance = 1e-12,
-    .max_iterations = 1,
+    .rtol = 1e-12,
+    .atol = 1e-12,
+    .maxiter = 1,
 };
 
 inline constexpr PoundersSolveRequest kOptimizationRequest{
-    .gradient_absolute_tolerance = 1e-8,
-    .gradient_relative_tolerance = 1e-8,
-    .gradient_reduction_tolerance = 1e-8,
-    .max_iterations = 100,
-    .max_function_evaluations = 500,
+    .gatol = 1e-8,
+    .grtol = 1e-8,
+    .gttol = 1e-8,
+    .maxiter = 100,
+    .maxfev = 500,
 };
 
 inline RegularGrid make_grid() {

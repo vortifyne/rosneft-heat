@@ -52,7 +52,7 @@ target_link_libraries(heat_opt PUBLIC Eigen3::Eigen PRIVATE PkgConfig::PETSc MPI
 
 add_library(basin_physics STATIC
   src/basin/physics/easy_ro.cpp
-  src/basin/physics/thermophysical_properties.cpp
+  src/basin/physics/thermal_properties.cpp
 )
 heat_configure_target(basin_physics)
 
@@ -61,9 +61,9 @@ add_library(basin_data STATIC
   src/basin/io/basin_input.cpp
   src/basin/geometry/basin_geometry.cpp
   src/basin/geometry/basin_geometry_rdp.cpp
-  src/basin/mesh/column_epoch_grid.cpp
-  src/basin/mesh/column_field_transfer.cpp
-  src/basin/mesh/nonmatching_column_grid.cpp
+  src/basin/mesh/col_epoch_grid.cpp
+  src/basin/mesh/col_field_transfer.cpp
+  src/basin/mesh/col_grid.cpp
   src/basin/io/basin_binary.cpp
 )
 heat_configure_target(basin_data)
@@ -73,8 +73,8 @@ add_library(basin_heat_forward STATIC
   src/basin/forward/basin_forward_solver.cpp
   src/basin/io/basin_forward_options.cpp
   src/basin/io/basin_forward_output.cpp
-  src/basin/discretization/nonmatching_column_flux.cpp
-  src/basin/discretization/nonmatching_column_heat_system.cpp
+  src/basin/discretization/col_flux.cpp
+  src/basin/discretization/col_heat_system.cpp
   src/basin/postprocessing/energy_rates.cpp
 )
 heat_configure_target(basin_heat_forward)
@@ -127,15 +127,15 @@ if(BUILD_TESTING)
 
   add_executable(basin_heat_tests
     tests/basin/geometry/test_basin_geometry.cpp
-    tests/basin/mesh/test_column_epoch_grid.cpp
-    tests/basin/mesh/test_column_field_transfer.cpp
-    tests/basin/mesh/test_nonmatching_column_grid.cpp
-    tests/basin/discretization/test_nonmatching_column_flux.cpp
-    tests/basin/discretization/test_nonmatching_column_heat_system.cpp
-    tests/basin/discretization/test_nonmatching_column_accuracy.cpp
-    tests/basin/discretization/test_nonmatching_column_time.cpp
+    tests/basin/mesh/test_col_epoch_grid.cpp
+    tests/basin/mesh/test_col_field_transfer.cpp
+    tests/basin/mesh/test_col_grid.cpp
+    tests/basin/discretization/test_col_flux.cpp
+    tests/basin/discretization/test_col_heat_system.cpp
+    tests/basin/discretization/test_col_accuracy.cpp
+    tests/basin/discretization/test_col_time.cpp
     tests/basin/physics/test_easy_ro.cpp
-    tests/basin/physics/test_thermophysical_properties.cpp
+    tests/basin/physics/test_thermal_properties.cpp
     tests/basin/io/test_basin_forward_options.cpp
     tests/basin/forward/test_basin_forward_solver.cpp
   )

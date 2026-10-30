@@ -15,25 +15,24 @@ void expect_vector_equal(const Vector& actual, const Vector& expected) {
 
 class RecordingSemiDiscreteSystem final : public SemiDiscreteSystem {
 public:
-    void assemble_residual(double time, const Vector& solution, const Vector& solution_derivative,
-                           Vector& residual) const override {
+    void assemble_residual(double t, const Vector& u, const Vector& du_dt,
+                           Vector& r) const override {
         residual_calls++;
-        last_time = time;
-        last_solution = solution;
-        last_solution_derivative = solution_derivative;
-        residual = solution_derivative;
+        last_time = t;
+        last_solution = u;
+        last_solution_derivative = du_dt;
+        r = du_dt;
     }
 
-    void assemble_matrix(NonlinearMethod method, double time, const Vector& solution,
-                         const Vector& solution_derivative, double derivative_shift,
-                         SparseMatrix& matrix) const override {
+    void assemble_matrix(NonlinearMethod method, double t, const Vector& u, const Vector& du_dt,
+                         double alpha, SparseMatrix& A) const override {
         matrix_calls++;
         last_method = method;
-        last_time = time;
-        last_solution = solution;
-        last_solution_derivative = solution_derivative;
-        last_derivative_shift = derivative_shift;
-        matrix.set_zero();
+        last_time = t;
+        last_solution = u;
+        last_solution_derivative = du_dt;
+        last_derivative_shift = alpha;
+        A.set_zero();
     }
 
     mutable int residual_calls = 0;
@@ -47,108 +46,103 @@ public:
 
 TimeHistory make_history() {
     TimeHistory history;
-    history.accept({.time = 2.0, .solution = Vector{1.0, 4.0}});
+    history.accept({.t = 2.0, .u = Vector{1.0, 4.0}});
     return history;
 }
 
 TEST(BDF1Test, AssemblesResidualAtNewTimeWithBdf1Derivative) {
     const BDF1 scheme;
     const TimeHistory history = make_history();
-    RecordingSemiDiscreteSystem semi_discrete_system;
-    auto nonlinear_system = scheme.make_nonlinear_system(semi_discrete_system, history, 2.5);
-    const Vector solution{2.0, 7.0};
-    Vector residual;
+    RecordingSemiDiscreteSystem system;
+    auto nonlinear_system = scheme.make_nonlinear_system(system, history, 2.5);
+    const Vector u{2.0, 7.0};
+    Vector r;
 
-    nonlinear_system->assemble_residual(solution, residual);
+    nonlinear_system->assemble_residual(u, r);
 
-    EXPECT_EQ(semi_discrete_system.residual_calls, 1);
-    EXPECT_DOUBLE_EQ(semi_discrete_system.last_time, 2.5);
-    expect_vector_equal(semi_discrete_system.last_solution, solution);
-    expect_vector_equal(semi_discrete_system.last_solution_derivative, Vector{2.0, 6.0});
-    expect_vector_equal(residual, Vector{2.0, 6.0});
+    EXPECT_EQ(system.residual_calls, 1);
+    EXPECT_DOUBLE_EQ(system.last_time, 2.5);
+    expect_vector_equal(system.last_solution, u);
+    expect_vector_equal(system.last_solution_derivative, Vector{2.0, 6.0});
+    expect_vector_equal(r, Vector{2.0, 6.0});
 }
 
 TEST(BDF1Test, AssemblesPicardMatrixWithBdf1DerivativeShift) {
     const BDF1 scheme;
     const TimeHistory history = make_history();
-    RecordingSemiDiscreteSystem semi_discrete_system;
-    auto nonlinear_system = scheme.make_nonlinear_system(semi_discrete_system, history, 2.5);
-    const Vector solution{2.0, 7.0};
-    SparseMatrix matrix(2, 2, SparseStorageOrder::csc);
+    RecordingSemiDiscreteSystem system;
+    auto nonlinear_system = scheme.make_nonlinear_system(system, history, 2.5);
+    const Vector u{2.0, 7.0};
+    SparseMatrix A(2, 2, SparseStorageOrder::csc);
 
-    nonlinear_system->assemble_matrix(NonlinearMethod::picard, solution, matrix);
+    nonlinear_system->assemble_matrix(NonlinearMethod::picard, u, A);
 
-    EXPECT_EQ(semi_discrete_system.matrix_calls, 1);
-    EXPECT_EQ(semi_discrete_system.last_method, NonlinearMethod::picard);
-    EXPECT_DOUBLE_EQ(semi_discrete_system.last_time, 2.5);
-    EXPECT_DOUBLE_EQ(semi_discrete_system.last_derivative_shift, 2.0);
-    expect_vector_equal(semi_discrete_system.last_solution, solution);
-    expect_vector_equal(semi_discrete_system.last_solution_derivative, Vector{2.0, 6.0});
+    EXPECT_EQ(system.matrix_calls, 1);
+    EXPECT_EQ(system.last_method, NonlinearMethod::picard);
+    EXPECT_DOUBLE_EQ(system.last_time, 2.5);
+    EXPECT_DOUBLE_EQ(system.last_derivative_shift, 2.0);
+    expect_vector_equal(system.last_solution, u);
+    expect_vector_equal(system.last_solution_derivative, Vector{2.0, 6.0});
 }
 
 TEST(BDF1Test, AssemblesNewtonMatrixWithBdf1DerivativeShift) {
     const BDF1 scheme;
     const TimeHistory history = make_history();
-    RecordingSemiDiscreteSystem semi_discrete_system;
-    auto nonlinear_system = scheme.make_nonlinear_system(semi_discrete_system, history, 2.25);
-    const Vector solution{2.0, 7.0};
-    SparseMatrix matrix(2, 2, SparseStorageOrder::csc);
+    RecordingSemiDiscreteSystem system;
+    auto nonlinear_system = scheme.make_nonlinear_system(system, history, 2.25);
+    const Vector u{2.0, 7.0};
+    SparseMatrix A(2, 2, SparseStorageOrder::csc);
 
-    nonlinear_system->assemble_matrix(NonlinearMethod::newton, solution, matrix);
+    nonlinear_system->assemble_matrix(NonlinearMethod::newton, u, A);
 
-    EXPECT_EQ(semi_discrete_system.matrix_calls, 1);
-    EXPECT_EQ(semi_discrete_system.last_method, NonlinearMethod::newton);
-    EXPECT_DOUBLE_EQ(semi_discrete_system.last_time, 2.25);
-    EXPECT_DOUBLE_EQ(semi_discrete_system.last_derivative_shift, 4.0);
-    expect_vector_equal(semi_discrete_system.last_solution_derivative, Vector{4.0, 12.0});
+    EXPECT_EQ(system.matrix_calls, 1);
+    EXPECT_EQ(system.last_method, NonlinearMethod::newton);
+    EXPECT_DOUBLE_EQ(system.last_time, 2.25);
+    EXPECT_DOUBLE_EQ(system.last_derivative_shift, 4.0);
+    expect_vector_equal(system.last_solution_derivative, Vector{4.0, 12.0});
 }
 
 TEST(BDF1Test, RejectsInvalidTimeSteps) {
     const BDF1 scheme;
     const TimeHistory history = make_history();
-    const RecordingSemiDiscreteSystem semi_discrete_system;
+    const RecordingSemiDiscreteSystem system;
 
-    EXPECT_THROW(scheme.make_nonlinear_system(semi_discrete_system, history, 2.0),
-                 std::invalid_argument);
-    EXPECT_THROW(scheme.make_nonlinear_system(semi_discrete_system, history, 1.0),
-                 std::invalid_argument);
-    EXPECT_THROW(scheme.make_nonlinear_system(semi_discrete_system, history,
-                                              std::numeric_limits<double>::quiet_NaN()),
-                 std::invalid_argument);
-    EXPECT_THROW(scheme.make_nonlinear_system(semi_discrete_system, history,
-                                              std::numeric_limits<double>::infinity()),
-                 std::invalid_argument);
+    EXPECT_THROW(scheme.make_nonlinear_system(system, history, 2.0), std::invalid_argument);
+    EXPECT_THROW(scheme.make_nonlinear_system(system, history, 1.0), std::invalid_argument);
+    EXPECT_THROW(
+        scheme.make_nonlinear_system(system, history, std::numeric_limits<double>::quiet_NaN()),
+        std::invalid_argument);
+    EXPECT_THROW(
+        scheme.make_nonlinear_system(system, history, std::numeric_limits<double>::infinity()),
+        std::invalid_argument);
 }
 
 TEST(BDF1Test, RejectsEmptyHistory) {
     const BDF1 scheme;
     const TimeHistory history;
-    const RecordingSemiDiscreteSystem semi_discrete_system;
+    const RecordingSemiDiscreteSystem system;
 
-    EXPECT_THROW(scheme.make_nonlinear_system(semi_discrete_system, history, 1.0),
-                 std::logic_error);
+    EXPECT_THROW(scheme.make_nonlinear_system(system, history, 1.0), std::logic_error);
 }
 
 TEST(BDF1Test, RejectsNonfinitePreviousTime) {
     const BDF1 scheme;
-    const RecordingSemiDiscreteSystem semi_discrete_system;
+    const RecordingSemiDiscreteSystem system;
     TimeHistory nonfinite_history;
-    nonfinite_history.accept(
-        {.time = std::numeric_limits<double>::infinity(), .solution = Vector{1.0}});
+    nonfinite_history.accept({.t = std::numeric_limits<double>::infinity(), .u = Vector{1.0}});
 
-    EXPECT_THROW(scheme.make_nonlinear_system(semi_discrete_system, nonfinite_history, 1.0),
-                 std::logic_error);
+    EXPECT_THROW(scheme.make_nonlinear_system(system, nonfinite_history, 1.0), std::logic_error);
 }
 
 TEST(BDF1Test, RejectsSolutionWithDifferentSizeFromHistory) {
     const BDF1 scheme;
     const TimeHistory history = make_history();
-    RecordingSemiDiscreteSystem semi_discrete_system;
-    auto nonlinear_system = scheme.make_nonlinear_system(semi_discrete_system, history, 2.5);
-    const Vector solution{2.0};
-    Vector residual;
+    RecordingSemiDiscreteSystem system;
+    auto nonlinear_system = scheme.make_nonlinear_system(system, history, 2.5);
+    const Vector u{2.0};
+    Vector r;
 
-    EXPECT_THROW(nonlinear_system->assemble_residual(solution, residual), std::invalid_argument);
+    EXPECT_THROW(nonlinear_system->assemble_residual(u, r), std::invalid_argument);
 }
 
 } // namespace

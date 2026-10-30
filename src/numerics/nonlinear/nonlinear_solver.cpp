@@ -9,52 +9,49 @@
 #include <stdexcept>
 #include <utility>
 
-NonlinearSolver::NonlinearSolver() : linear_solver_(make_linear_solver(linear_solver_options_)) {}
+NonlinearSolver::NonlinearSolver() : linear_solver_(make_linear_solver(linear_options_)) {}
 
 void NonlinearSolver::set_linear_solver(LinearSolverOptions options) {
-    if (options == linear_solver_options_)
+    if (options == linear_options_)
         return;
     auto linear_solver = make_linear_solver(options);
     linear_solver_ = std::move(linear_solver);
-    linear_solver_options_ = options;
+    linear_options_ = options;
 }
 
-NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_system, Vector& x,
-                                            const NonlinearSolveRequest& nonlinear_request,
+NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& system, Vector& x,
+                                            const NonlinearSolveRequest& request,
                                             const LinearSolveRequest& linear_request) {
-    if (nonlinear_request.max_iterations < 0 ||
-        !std::isfinite(nonlinear_request.relative_tolerance) ||
-        nonlinear_request.relative_tolerance < 0.0 || nonlinear_request.relative_tolerance >= 1.0 ||
-        !std::isfinite(nonlinear_request.absolute_tolerance) ||
-        nonlinear_request.absolute_tolerance < 0.0) {
+    if (request.maxiter < 0 || !std::isfinite(request.rtol) || request.rtol < 0.0 ||
+        request.rtol >= 1.0 || !std::isfinite(request.atol) || request.atol < 0.0) {
         throw std::invalid_argument("Invalid nonlinear solver iteration settings");
     }
     SolverTimings timings;
     const auto elapsed_seconds = [](const auto start) {
         return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     };
-    Vector residual;
-    auto operation_start = std::chrono::steady_clock::now();
-    nonlinear_system.assemble_residual(x, residual);
-    timings.assembly_seconds += elapsed_seconds(operation_start);
+    Vector r;
+    auto start = std::chrono::steady_clock::now();
+    system.assemble_residual(x, r);
+    timings.assembly_seconds += elapsed_seconds(start);
 
-    if (!residual.all_finite()) {
+    if (!r.all_finite()) {
         return {
             .status = NonlinearSolveStatus::nonfinite_residual,
             .iterations = 0,
-            .final_residual_norm = std::numeric_limits<double>::infinity(),
+            .r_norm = std::numeric_limits<double>::infinity(),
             .linear_iterations = 0,
             .last_linear_status = std::nullopt,
             .timings = timings,
         };
     }
 
-    const double initial_residual_norm = residual.norm();
-    if (initial_residual_norm <= nonlinear_request.absolute_tolerance) {
+    const double r0_norm = r.norm();
+    if (r0_norm <= request.atol) {
         return {
             .status = NonlinearSolveStatus::converged_residual_absolute,
             .iterations = 0,
-            .final_residual_norm = initial_residual_norm,
+            .r_norm = r0_norm,
             .linear_iterations = 0,
             .last_linear_status = std::nullopt,
             .timings = timings,
@@ -63,18 +60,17 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
 
     int linear_iterations = 0;
     std::optional<LinearSolveStatus> last_linear_status;
-    for (int iteration = 0; iteration < nonlinear_request.max_iterations; ++iteration) {
-        SparseMatrix matrix(x.size(), x.size(), linear_solver_->required_storage_order());
-        operation_start = std::chrono::steady_clock::now();
-        nonlinear_system.assemble_matrix(nonlinear_request.nonlinear_method, x, matrix);
-        timings.assembly_seconds += elapsed_seconds(operation_start);
+    for (int iteration = 0; iteration < request.maxiter; ++iteration) {
+        SparseMatrix A(x.size(), x.size(), linear_solver_->required_storage_order());
+        start = std::chrono::steady_clock::now();
+        system.assemble_matrix(request.method, x, A);
+        timings.assembly_seconds += elapsed_seconds(start);
 
-        const Vector b = -residual;
-        Vector delta_x;
-        operation_start = std::chrono::steady_clock::now();
-        const LinearSolveResult linear_result =
-            linear_solver_->solve(matrix, b, delta_x, linear_request);
-        timings.linear_solve_seconds += elapsed_seconds(operation_start);
+        const Vector b = -r;
+        Vector dx;
+        start = std::chrono::steady_clock::now();
+        const LinearSolveResult linear_result = linear_solver_->solve(A, b, dx, linear_request);
+        timings.linear_solve_seconds += elapsed_seconds(start);
         linear_iterations += linear_result.iterations;
         last_linear_status = linear_result.status;
 
@@ -82,52 +78,52 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
             return {
                 .status = NonlinearSolveStatus::linear_solve_failed,
                 .iterations = iteration,
-                .final_residual_norm = residual.norm(),
+                .r_norm = r.norm(),
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
                 .timings = timings,
             };
         }
 
-        Vector x_candidate = x + delta_x;
-        Vector candidate_residual;
-        operation_start = std::chrono::steady_clock::now();
-        nonlinear_system.assemble_residual(x_candidate, candidate_residual);
-        timings.assembly_seconds += elapsed_seconds(operation_start);
+        Vector x_new = x + dx;
+        Vector r_new;
+        start = std::chrono::steady_clock::now();
+        system.assemble_residual(x_new, r_new);
+        timings.assembly_seconds += elapsed_seconds(start);
 
-        if (!candidate_residual.all_finite()) {
+        if (!r_new.all_finite()) {
             return {
                 .status = NonlinearSolveStatus::nonfinite_residual,
                 .iterations = iteration + 1,
-                .final_residual_norm = std::numeric_limits<double>::infinity(),
+                .r_norm = std::numeric_limits<double>::infinity(),
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
                 .timings = timings,
             };
         }
 
-        const double residual_norm = candidate_residual.norm();
-        const int completed_iterations = iteration + 1;
+        const double r_norm = r_new.norm();
+        const int niter = iteration + 1;
 
-        x = std::move(x_candidate);
-        residual = std::move(candidate_residual);
+        x = std::move(x_new);
+        r = std::move(r_new);
 
-        if (residual_norm <= nonlinear_request.absolute_tolerance) {
+        if (r_norm <= request.atol) {
             return {
                 .status = NonlinearSolveStatus::converged_residual_absolute,
-                .iterations = completed_iterations,
-                .final_residual_norm = residual_norm,
+                .iterations = niter,
+                .r_norm = r_norm,
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
                 .timings = timings,
             };
         }
 
-        if (residual_norm <= nonlinear_request.relative_tolerance * initial_residual_norm) {
+        if (r_norm <= request.rtol * r0_norm) {
             return {
                 .status = NonlinearSolveStatus::converged_residual_relative,
-                .iterations = completed_iterations,
-                .final_residual_norm = residual_norm,
+                .iterations = niter,
+                .r_norm = r_norm,
                 .linear_iterations = linear_iterations,
                 .last_linear_status = last_linear_status,
                 .timings = timings,
@@ -136,9 +132,9 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& nonlinear_sys
     }
 
     return {
-        .status = NonlinearSolveStatus::max_iterations,
-        .iterations = nonlinear_request.max_iterations,
-        .final_residual_norm = residual.norm(),
+        .status = NonlinearSolveStatus::maxiter,
+        .iterations = request.maxiter,
+        .r_norm = r.norm(),
         .linear_iterations = linear_iterations,
         .last_linear_status = last_linear_status,
         .timings = timings,

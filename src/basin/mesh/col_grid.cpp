@@ -1,4 +1,4 @@
-#include "basin/mesh/nonmatching_column_grid.hpp"
+#include "basin/mesh/col_grid.hpp"
 
 #include "basin/geometry/basin_geometry.hpp"
 
@@ -7,50 +7,50 @@
 #include <stdexcept>
 #include <utility>
 
-double NonmatchingColumnCell::width() const noexcept {
+double ColCell::width() const noexcept {
     return x_right - x_left;
 }
 
-double NonmatchingColumnCell::height() const noexcept {
+double ColCell::height() const noexcept {
     return z_bottom - z_top;
 }
 
-double NonmatchingColumnCell::area() const noexcept {
+double ColCell::area() const noexcept {
     return width() * height();
 }
 
-Point2D NonmatchingColumnCell::center() const noexcept {
+Point2D ColCell::center() const noexcept {
     return {.x = 0.5 * (x_left + x_right), .z = 0.5 * (z_top + z_bottom)};
 }
 
-double NonmatchingVerticalSubface::length() const noexcept {
+double VerticalSubface::length() const noexcept {
     return z_bottom - z_top;
 }
 
-double NonmatchingVerticalBoundaryFace::length() const noexcept {
+double VerticalBoundaryFace::length() const noexcept {
     return z_bottom - z_top;
 }
 
-double NonmatchingVerticalBoundaryFace::center_z() const noexcept {
+double VerticalBoundaryFace::center_z() const noexcept {
     return 0.5 * (z_top + z_bottom);
 }
 
-double NonmatchingColumnGrid::area() const noexcept {
+double ColGrid::area() const noexcept {
     double result = 0.0;
-    for (const NonmatchingColumnCell& cell : cells) {
+    for (const ColCell& cell : cells) {
         result += cell.area();
     }
     return result;
 }
 
-void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& result) {
+void rebuild_col_faces(ColGrid& result) {
     result.horizontal_faces.clear();
     result.vertical_subfaces.clear();
     result.surface_vertical_faces.clear();
     result.basal_vertical_faces.clear();
     result.top_cells.resize(result.columns.size());
     result.bottom_cells.resize(result.columns.size());
-    for (NonmatchingColumnCell& cell : result.cells) {
+    for (ColCell& cell : result.cells) {
         cell.upward.reset();
         cell.downward.reset();
     }
@@ -70,8 +70,8 @@ void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& result) {
                                                result.cells[column_cells.front()].z_top);
         const double tolerance = 1.0e-10 * scale;
         for (std::size_t row = 1; row < column_cells.size(); ++row) {
-            NonmatchingColumnCell& upper = result.cells[column_cells[row - 1]];
-            NonmatchingColumnCell& lower = result.cells[column_cells[row]];
+            ColCell& upper = result.cells[column_cells[row - 1]];
+            ColCell& lower = result.cells[column_cells[row]];
             if (std::abs(upper.z_bottom - lower.z_top) > tolerance) {
                 throw std::runtime_error("Nonmatching column has a vertical gap or overlap");
             }
@@ -107,7 +107,7 @@ void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& result) {
                                  const double z_bottom, const double x, const double outward_x,
                                  auto& output) {
                 for (const std::size_t cell_index : column) {
-                    const NonmatchingColumnCell& cell = result.cells[cell_index];
+                    const ColCell& cell = result.cells[cell_index];
                     const double top = std::max(z_top, cell.z_top);
                     const double bottom = std::min(z_bottom, cell.z_bottom);
                     if (bottom - top > tolerance) {
@@ -134,8 +134,8 @@ void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& result) {
         std::size_t left_row = 0;
         std::size_t right_row = 0;
         while (left_row < left_cells.size() && right_row < right_cells.size()) {
-            const NonmatchingColumnCell& left_cell = result.cells[left_cells[left_row]];
-            const NonmatchingColumnCell& right_cell = result.cells[right_cells[right_row]];
+            const ColCell& left_cell = result.cells[left_cells[left_row]];
+            const ColCell& right_cell = result.cells[right_cells[right_row]];
             const double top = std::max(left_cell.z_top, right_cell.z_top);
             const double bottom = std::min(left_cell.z_bottom, right_cell.z_bottom);
             if (bottom - top > tolerance) {
@@ -154,18 +154,17 @@ void rebuild_nonmatching_column_faces(NonmatchingColumnGrid& result) {
     }
 }
 
-void basin_detail::append_column_cells(NonmatchingColumnGrid& grid, std::size_t column,
+void basin_detail::append_column_cells(ColGrid& grid, std::size_t column,
                                        std::span<const int> layer_ids,
                                        std::span<const double> boundaries,
-                                       std::span<const std::size_t> rows,
-                                       double minimum_cell_height) {
+                                       std::span<const std::size_t> rows, double dz_min) {
     std::vector<double> thickness(rows.size(), 0.0);
     double required = 0.0, available = 0.0;
     for (std::size_t layer = 0; layer < rows.size(); ++layer) {
         if (rows[layer] == 0)
             continue;
         thickness[layer] = std::max(0.0, boundaries[layer + 1] - boundaries[layer]);
-        const double floor = static_cast<double>(rows[layer]) * minimum_cell_height;
+        const double floor = static_cast<double>(rows[layer]) * dz_min;
         required += std::max(0.0, floor - thickness[layer]);
         available += std::max(0.0, thickness[layer] - floor);
     }
@@ -175,7 +174,7 @@ void basin_detail::append_column_cells(NonmatchingColumnGrid& grid, std::size_t 
         for (std::size_t layer = 0; layer < rows.size(); ++layer) {
             if (rows[layer] == 0)
                 continue;
-            const double floor = static_cast<double>(rows[layer]) * minimum_cell_height;
+            const double floor = static_cast<double>(rows[layer]) * dz_min;
             if (thickness[layer] < floor)
                 thickness[layer] = floor;
             else if (available > 0.0)
@@ -206,11 +205,10 @@ void basin_detail::append_column_cells(NonmatchingColumnGrid& grid, std::size_t 
     }
 }
 
-NonmatchingColumnGrid make_nonmatching_column_grid(const BasinGeometry& geometry,
-                                                   std::vector<double> x, double vertical_step) {
-    if (x.size() < 2 || !std::isfinite(vertical_step) || !(vertical_step > 0.0))
+ColGrid make_col_grid(const BasinGeometry& geometry, std::vector<double> x, double dz) {
+    if (x.size() < 2 || !std::isfinite(dz) || !(dz > 0.0))
         throw std::invalid_argument("Nonmatching columns require an axis and a positive step");
-    NonmatchingColumnGrid result;
+    ColGrid result;
     result.x = std::move(x);
     result.columns.resize(result.x.size() - 1);
     std::vector<int> layer_ids;
@@ -232,13 +230,13 @@ NonmatchingColumnGrid make_nonmatching_column_grid(const BasinGeometry& geometry
             if (thickness < -tolerance)
                 throw std::runtime_error("Area-preserving column has a negative layer thickness");
             if (thickness > tolerance)
-                rows[layer] = std::max<std::size_t>(
-                    1, static_cast<std::size_t>(std::ceil(thickness / vertical_step)));
+                rows[layer] =
+                    std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(thickness / dz)));
         }
         basin_detail::append_column_cells(result, column, layer_ids, boundaries, rows, 0.0);
         if (result.columns[column].empty())
             throw std::runtime_error("Nonmatching column contains no material");
     }
-    rebuild_nonmatching_column_faces(result);
+    rebuild_col_faces(result);
     return result;
 }

@@ -18,7 +18,7 @@ public:
         return SparseStorageOrder::csr;
     }
 
-    // final_residual_norm is the PETSc preconditioned residual norm.
+    // r_norm is the PETSc preconditioned residual norm.
     LinearSolveResult solve(const SparseMatrix& A, const Vector& b, Vector& x,
                             const LinearSolveRequest& request) override;
 

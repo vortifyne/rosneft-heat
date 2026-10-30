@@ -38,7 +38,7 @@ void check(PetscErrorCode error) {
 
 LinearSolveResult failure(LinearSolveStatus status, int iterations = 0,
                           double norm = std::numeric_limits<double>::infinity()) {
-    return {.status = status, .iterations = iterations, .final_residual_norm = norm};
+    return {.status = status, .iterations = iterations, .r_norm = norm};
 }
 
 } // namespace
@@ -79,10 +79,9 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
     }
     if (A.storage_order() != SparseStorageOrder::csr || !A.is_compressed() || A.rows() <= 0 ||
         A.rows() != A.cols() || A.rows() != b.size() || !b.all_finite() ||
-        A.rows() > std::numeric_limits<PetscInt>::max() ||
-        !std::isfinite(request.relative_tolerance) || request.relative_tolerance < 0.0 ||
-        request.relative_tolerance >= 1.0 || !std::isfinite(request.absolute_tolerance) ||
-        request.absolute_tolerance < 0.0 || request.max_iterations <= 0) {
+        A.rows() > std::numeric_limits<PetscInt>::max() || !std::isfinite(request.rtol) ||
+        request.rtol < 0.0 || request.rtol >= 1.0 || !std::isfinite(request.atol) ||
+        request.atol < 0.0 || request.maxiter <= 0) {
         return failure(LinearSolveStatus::invalid_input);
     }
     const auto& matrix = A.native_csr();
@@ -152,8 +151,7 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
             break;
         }
     }
-    check(KSPSetTolerances(ksp, request.relative_tolerance, request.absolute_tolerance,
-                           PETSC_DEFAULT, request.max_iterations));
+    check(KSPSetTolerances(ksp, request.rtol, request.atol, PETSC_DEFAULT, request.maxiter));
     check(KSPSetErrorIfNotConverged(ksp, PETSC_FALSE));
     check(KSPSolve(ksp, rhs.get(), solution.get()));
     KSPConvergedReason reason;
@@ -163,7 +161,7 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
     check(KSPGetIterationNumber(ksp, &iterations));
     check(KSPGetResidualNorm(ksp, &norm));
     if (reason <= 0) {
-        const auto status = reason == KSP_DIVERGED_ITS ? LinearSolveStatus::max_iterations
+        const auto status = reason == KSP_DIVERGED_ITS ? LinearSolveStatus::maxiter
                             : reason == KSP_DIVERGED_PC_FAILED
                                 ? LinearSolveStatus::factorization_failed
                                 : LinearSolveStatus::solve_failed;
@@ -181,5 +179,5 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
     x = std::move(candidate);
     return {.status = LinearSolveStatus::converged,
             .iterations = static_cast<int>(iterations),
-            .final_residual_norm = norm};
+            .r_norm = norm};
 }

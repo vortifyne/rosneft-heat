@@ -8,10 +8,10 @@ class SemiDiscreteSystem {
 public:
     virtual ~SemiDiscreteSystem() = default;
 
-    virtual void assemble_residual(double time, const Vector& solution,
-                                   const Vector& solution_derivative, Vector& residual) const = 0;
+    virtual void assemble_residual(double t, const Vector& u, const Vector& du_dt,
+                                   Vector& r) const = 0;
 
-    virtual void assemble_matrix(NonlinearMethod method, double time, const Vector& solution,
-                                 const Vector& solution_derivative, double derivative_shift,
-                                 SparseMatrix& matrix) const = 0;
+    // d(du_dt)/du = alpha * I.
+    virtual void assemble_matrix(NonlinearMethod method, double t, const Vector& u,
+                                 const Vector& du_dt, double alpha, SparseMatrix& A) const = 0;
 };

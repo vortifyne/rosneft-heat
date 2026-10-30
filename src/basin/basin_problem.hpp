@@ -17,19 +17,19 @@ struct BasinLayerProfile {
     std::vector<double> top;
     std::vector<double> bottom;
     std::vector<int> lithotype;
-    std::vector<double> porosity;
+    std::vector<double> phi; // Porosity [-].
 
     [[nodiscard]] double top_at(double coordinate) const;
     [[nodiscard]] double bottom_at(double coordinate) const;
-    [[nodiscard]] double porosity_at(double coordinate) const;
+    [[nodiscard]] double phi_at(double coordinate) const;
     [[nodiscard]] int lithotype_at(double coordinate) const;
 };
 
-struct BasinConfiguration {
+struct BasinConfig {
     double age_ma = 0.0;
     std::vector<BasinLayerProfile> layers;
-    ScalarProfile surface_temperature;
-    ScalarProfile basal_heat_flux;
+    ScalarProfile T_surf;
+    ScalarProfile q_basal;
 
     [[nodiscard]] const BasinLayerProfile& layer(int id) const;
 };
