@@ -1,0 +1,29 @@
+#pragma once
+
+#include <cstddef>
+#include <span>
+#include <vector>
+
+struct BasinConfig;
+
+struct BasinLayerRegion {
+    int id = 0;
+    double x_min = 0.0;
+    double x_max = 0.0;
+};
+
+struct BasinGeometry {
+    std::vector<double> x;
+    // Layer i lies between z[i] and z[i + 1], on the shared x axis.
+    std::vector<std::vector<double>> z; // Boundary depths [contact][x index], m.
+    std::vector<BasinLayerRegion> layers;
+
+    [[nodiscard]] double boundary_at(std::size_t contact, double coordinate) const;
+    [[nodiscard]] std::vector<double> mean_boundaries(double left, double right) const;
+};
+
+[[nodiscard]] BasinGeometry make_basin_geometry(const BasinConfig& cfg);
+
+// Retain source knots and required material coordinates; subdivide long intervals.
+[[nodiscard]] std::vector<double> make_column_axis(std::span<const double> knots, double dx,
+                                                   std::span<const double> required_x = {});

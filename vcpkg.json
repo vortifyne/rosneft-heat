@@ -3,7 +3,21 @@
   "name": "heat-solver",
   "version-string": "0.1.0",
   "dependencies": [
-    "fmt",
-    "gtest"
-  ]
+    "eigen3",
+    "suitesparse-umfpack"
+  ],
+  "features": {
+    "tests": {
+      "description": "Automated checks",
+      "dependencies": [
+        "gtest"
+      ]
+    },
+    "benchmarks": {
+      "description": "Performance benchmarks",
+      "dependencies": [
+        "benchmark"
+      ]
+    }
+  }
 }

@@ -2,9 +2,9 @@ name: CI Build & Test
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
 
 jobs:
   build-and-test:
@@ -17,15 +17,8 @@ jobs:
       - name: Build Docker environment
         run: docker build -t heat-env .
 
-      - name: Build C++ Project inside Docker
-        run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace heat-env bash -c "
-            cmake --preset release && \
-            cmake --build --preset release
-          "
+      - name: Build release application inside Docker
+        run: make docker-release
 
-      - name: Run Executable
-        run: |
-          docker run --rm -v ${{ github.workspace }}:/workspace heat-env bash -c "
-            ./build/release/heat_solver
-          "
+      - name: Build and test inside Docker
+        run: make docker-test MODEL=ON
