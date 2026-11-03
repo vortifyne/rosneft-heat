@@ -18,6 +18,7 @@ public:
     [[nodiscard]] std::size_t reaction_count() const noexcept;
     [[nodiscard]] std::vector<double> initial_state(std::size_t cell_count) const;
 
+    // The primitive table covers 20 <= E / (Rg * T) < 200 at both temperatures.
     void advance(std::span<const double> T0, std::span<const double> T1, double dt,
                  std::span<double> I) const;
 

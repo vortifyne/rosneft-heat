@@ -53,7 +53,7 @@ TEST(EasyRo, ReflectanceGrowsAfterHeating) {
     EXPECT_GT(heated[0], initial[0]);
 }
 
-TEST(EasyRo, QuadratureMatchesRefinedIntegrationAndPhysicalBounds) {
+TEST(EasyRo, IntegralMatchesRefinedIntegrationAndPhysicalBounds) {
     std::vector<double> energies;
     std::vector<double> f;
     for (int index = 0; index < 20; ++index) {
@@ -65,14 +65,41 @@ TEST(EasyRo, QuadratureMatchesRefinedIntegrationAndPhysicalBounds) {
     for (const auto T :
          {std::array{300.0, 500.0}, std::array{500.0, 300.0}, std::array{350.0, 360.0}}) {
         std::vector<double> state = model.initial_state(1);
+        std::vector<double> reference_state = model.initial_state(1);
         model.advance(std::array{T[0]}, std::array{T[1]}, timestep, state);
         for (std::size_t reaction = 0; reaction < energies.size(); ++reaction) {
             const double reference = refined_increment(energies[reaction], T[0], T[1], timestep);
+            reference_state[reaction] = reference;
             EXPECT_NEAR(std::exp(-state[reaction]), std::exp(-reference), 3.0e-4);
             const double left = timestep * reaction_rate(energies[reaction], T[0]);
             const double right = timestep * reaction_rate(energies[reaction], T[1]);
-            EXPECT_GE(state[reaction], std::min(left, right));
-            EXPECT_LE(state[reaction], std::max(left, right));
+            EXPECT_GE(state[reaction], std::min(left, right) - 1.0e-12);
+            EXPECT_LE(state[reaction], std::max(left, right) + 1.0e-12);
+        }
+        std::array<double, 1> Ro{}, reference_Ro{};
+        model.reflectance(state, Ro);
+        model.reflectance(reference_state, reference_Ro);
+        EXPECT_NEAR(Ro[0] / reference_Ro[0], 1.0, 1.0e-3);
+    }
+}
+
+TEST(EasyRo, TabulatedPrimitiveMatchesHeatingCoolingAndNearlyConstantHistories) {
+    const std::array energies{142351.2, 301449.6};
+    const EasyRoModel model(
+        {.A = 1.0e13, .Rg = 8.314, .E = {energies[0], energies[1]}, .f = {0.03, 0.01}});
+    constexpr double timestep = 1.0e6 * 365.25 * 24.0 * 3600.0;
+    const std::array T0{200.0, 250.0, 400.0, 400.000001, 750.0, 800.0};
+    const std::array T1{250.0, 200.0, 400.000001, 400.0, 800.0, 750.0};
+    auto state = model.initial_state(T0.size());
+
+    model.advance(T0, T1, timestep, state);
+
+    for (std::size_t P = 0; P < T0.size(); ++P) {
+        for (std::size_t i = 0; i < energies.size(); ++i) {
+            const double reference = refined_increment(energies[i], T0[P], T1[P], timestep);
+            // Tiny integrals may vanish when subtracting the primitive terms.
+            EXPECT_NEAR(state[P * energies.size() + i], reference,
+                        2.0e-6 * std::max(1.0, reference));
         }
     }
 }

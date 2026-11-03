@@ -58,7 +58,7 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
                "1,rock,2600,2.5,900,0\n"
                "2,rock2,2600,2.5,900,0\n");
     write_file(directory / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant\n"
-                                           "1e-15,1,1,8.314\n");
+                                           "1e13,142351.2,1,8.314\n");
     const BasinInput input = BasinInput::read(directory);
     bool saw_final = false;
     bool saw_initial_axis = false;
