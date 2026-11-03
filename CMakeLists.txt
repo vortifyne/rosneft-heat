@@ -67,7 +67,7 @@ add_library(basin_data STATIC
   src/basin/io/basin_binary.cpp
 )
 heat_configure_target(basin_data)
-target_link_libraries(basin_data PUBLIC basin_physics)
+target_link_libraries(basin_data PUBLIC basin_physics Eigen3::Eigen)
 
 add_library(basin_heat_forward STATIC
   src/basin/forward/basin_forward_solver.cpp

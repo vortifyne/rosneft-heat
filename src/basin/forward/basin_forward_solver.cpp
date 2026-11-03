@@ -46,14 +46,6 @@ std::span<const double> values(const Vector& v) {
     return {v.native().data(), static_cast<std::size_t>(v.size())};
 }
 
-Vector as_vector(std::span<const double> values) {
-    Vector result(static_cast<Vector::Index>(values.size()));
-    for (std::size_t i = 0; i < values.size(); ++i) {
-        result[static_cast<Vector::Index>(i)] = values[i];
-    }
-    return result;
-}
-
 struct State {
     ColGrid grid;
     Vector T;
@@ -110,31 +102,6 @@ void observe_state(const State& state, const EasyRoModel& easy_ro, BasinSnapshot
               .I = state.I,
               .Ro = Ro});
     timings.output_s += elapsed_seconds(start);
-}
-
-State transfer_state(const State& old, ColGrid new_grid, const EasyRoModel& easy_ro,
-                     int born_layer_id) {
-    const ColFieldTransfer transfer = make_col_field_transfer(old.grid, new_grid);
-    const std::vector<double> T = transfer.interpolate_temperature(values(old.T));
-    State state{
-        .grid = std::move(new_grid), .T = as_vector(T), .I = easy_ro.initial_state(T.size())};
-    const std::size_t reactions = easy_ro.reaction_count();
-    for (std::size_t reaction = 0; reaction < reactions; ++reaction) {
-        std::vector<double> old_field(old.grid.cells.size());
-        for (std::size_t cell = 0; cell < old_field.size(); ++cell) {
-            old_field[cell] = old.I[cell * reactions + reaction];
-        }
-        const std::vector<double> next = transfer.interpolate_same_layer(old_field);
-        for (std::size_t cell = 0; cell < next.size(); ++cell) {
-            if (state.grid.cells[cell].layer_id == born_layer_id)
-                continue;
-            if (transfer.layer_stencils[cell].empty()) {
-                throw std::runtime_error("Existing layer has no maturity donor");
-            }
-            state.I[cell * reactions + reaction] = next[cell];
-        }
-    }
-    return state;
 }
 
 } // namespace
@@ -238,7 +205,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
                     " nonlinear_iterations=" + std::to_string(step.nonlinear_iterations) +
                     " residual=" + std::to_string(step.last_r_norm));
             }
-            const Vector T1 = integrator.current_snapshot().u;
+            const Vector& T1 = integrator.current_snapshot().u;
             const auto easy_ro_start = Clock::now();
             easy_ro.advance(values(T0), values(T1), dt, state.I);
             step_stats.timings.easy_ro_s += elapsed_seconds(easy_ro_start);
@@ -279,7 +246,10 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
         }
         epoch_stats.timings.grid_s += elapsed_seconds(grid_start);
         const auto transfer_start = Clock::now();
-        state = transfer_state(state, std::move(next_grid), easy_ro, born);
+        state.T = interpolate_temperature(state.grid, next_grid, state.T);
+        state.I = interpolate_reaction_integrals(state.grid, next_grid, state.I,
+                                                 easy_ro.reaction_count(), born);
+        state.grid = std::move(next_grid);
         epoch_stats.timings.transfer_s += elapsed_seconds(transfer_start);
         observe_state(state, easy_ro, BasinSnapshot::Kind::after_event, epoch_index + 1, 0,
                       cfg1.age_ma, observe, epoch_stats.timings);
