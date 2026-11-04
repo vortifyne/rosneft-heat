@@ -17,7 +17,8 @@ struct BasinForwardSettings {
     // by rdp_tol without this additional simplification.
     std::optional<double> axis_rdp_tol = std::nullopt;
     MultipointFluxScheme scheme = MultipointFluxScheme::linear;
-    LinearSolverOptions linear_solver{};
+    LinearSolverOptions linear_solver{.method = LinearMethod::gmres,
+                                      .preconditioner = Preconditioner::ilu2};
     PcReuse pc_reuse = PcReuse::none;
     NonlinearSolveRequest nonlinear{};
     LinearSolveRequest linear{};

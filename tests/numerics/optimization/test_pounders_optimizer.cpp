@@ -1,5 +1,4 @@
 #include "numerics/optimization/pounders_optimizer.hpp"
-#include "support/petsc_test_session.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>
@@ -24,7 +23,6 @@ void expect_vector_near(const Vector& actual, const Vector& expected, double tol
 }
 
 TEST(PoundersOptimizerTest, SolvesBoundedLeastSquaresProblem) {
-    ensure_petsc_test_session();
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = Vector{-5.0, -5.0},
         .upper_bounds = Vector{5.0, 5.0},
@@ -48,7 +46,6 @@ TEST(PoundersOptimizerTest, SolvesBoundedLeastSquaresProblem) {
 }
 
 TEST(PoundersOptimizerTest, RespectsActiveParameterBound) {
-    ensure_petsc_test_session();
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = Vector{-1.0},
         .upper_bounds = Vector{1.0},
@@ -66,7 +63,6 @@ TEST(PoundersOptimizerTest, RespectsActiveParameterBound) {
 }
 
 TEST(PoundersOptimizerTest, SupportsNonUnitBounds) {
-    ensure_petsc_test_session();
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = Vector{2.0, -4.0},
         .upper_bounds = Vector{6.0, 0.0},
@@ -86,7 +82,6 @@ TEST(PoundersOptimizerTest, SupportsNonUnitBounds) {
 }
 
 TEST(PoundersOptimizerTest, ReportsFunctionEvaluationLimit) {
-    ensure_petsc_test_session();
     PoundersSolveRequest limited_request = kSolveRequest;
     limited_request.maxfev = 3;
     const BoundedLeastSquaresProblem problem{
@@ -113,7 +108,6 @@ TEST(PoundersOptimizerTest, ReportsFunctionEvaluationLimit) {
 }
 
 TEST(PoundersOptimizerTest, ValidatesProblemAndRequest) {
-    ensure_petsc_test_session();
     const auto residual = [](const Vector& parameters) { return Vector{parameters[0]}; };
     const BoundedLeastSquaresProblem valid_problem{
         .lower_bounds = Vector{-1.0},
@@ -174,7 +168,6 @@ TEST(PoundersOptimizerTest, ValidatesProblemAndRequest) {
 }
 
 TEST(PoundersOptimizerTest, RejectsInvalidResidualVector) {
-    ensure_petsc_test_session();
     const BoundedLeastSquaresProblem wrong_size{
         .lower_bounds = Vector{-1.0},
         .upper_bounds = Vector{1.0},
@@ -198,7 +191,6 @@ TEST(PoundersOptimizerTest, RejectsInvalidResidualVector) {
 }
 
 TEST(PoundersOptimizerTest, PropagatesResidualFunctionExceptionSafely) {
-    ensure_petsc_test_session();
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = Vector{-1.0},
         .upper_bounds = Vector{1.0},

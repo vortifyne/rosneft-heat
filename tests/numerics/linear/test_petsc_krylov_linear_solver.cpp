@@ -1,13 +1,11 @@
 #include "numerics/linear/petsc_krylov_linear_solver.hpp"
 #include "numerics/nonlinear/nonlinear_solver.hpp"
-#include "support/petsc_test_session.hpp"
 
 #include <gtest/gtest.h>
 #include <petscsys.h>
 #include <vector>
 
 TEST(PetscKrylovLinearSolver, SolvesCurrentMatrixForEveryMethodAndPreconditioner) {
-    ensure_petsc_test_session();
     for (const auto method : {LinearMethod::gmres, LinearMethod::bicgstab}) {
         for (const auto pc : {Preconditioner::ilu, Preconditioner::ilu2, Preconditioner::gamg,
                               Preconditioner::boomeramg}) {
@@ -43,7 +41,6 @@ TEST(PetscKrylovLinearSolver, SolvesCurrentMatrixForEveryMethodAndPreconditioner
 }
 
 TEST(PetscKrylovLinearSolver, ExplicitResetRebuildsPreconditionerForChangedCoefficients) {
-    ensure_petsc_test_session();
     for (const auto pc : {Preconditioner::ilu, Preconditioner::ilu2, Preconditioner::gamg,
                           Preconditioner::boomeramg}) {
         PetscKrylovLinearSolver solver(LinearMethod::gmres, pc);
@@ -70,7 +67,6 @@ TEST(PetscKrylovLinearSolver, ExplicitResetRebuildsPreconditionerForChangedCoeff
 }
 
 TEST(PetscKrylovLinearSolver, UpdatesValuesAndReusesObjectsAtExplicitBoundaries) {
-    ensure_petsc_test_session();
     PetscKrylovLinearSolver solver;
     Vector solution;
     for (int step = 0; step < 3; ++step) {
@@ -96,7 +92,6 @@ TEST(PetscKrylovLinearSolver, UpdatesValuesAndReusesObjectsAtExplicitBoundaries)
 }
 
 TEST(PetscKrylovLinearSolver, NativeOptionsOverrideApplicationDefaults) {
-    ensure_petsc_test_session();
     PetscOptionsSetValue(nullptr, "-pc_type", "none");
     PetscOptionsSetValue(nullptr, "-ksp_max_it", "1");
     PetscKrylovLinearSolver solver;

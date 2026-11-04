@@ -109,6 +109,7 @@ if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
   add_executable(heat_numerics_tests
+    tests/main.cpp
     tests/numerics/algebra/test_sparse_matrix.cpp
     tests/numerics/algebra/test_vector.cpp
     tests/numerics/linear/test_umfpack_linear_solver.cpp
@@ -122,11 +123,12 @@ if(BUILD_TESTING)
   target_include_directories(heat_numerics_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
   target_link_libraries(heat_numerics_tests PRIVATE
     heat_numerics heat_opt
-    GTest::gtest_main PkgConfig::PETSc MPI::MPI_CXX
+    GTest::gtest PkgConfig::PETSc MPI::MPI_CXX
   )
   gtest_discover_tests(heat_numerics_tests PROPERTIES LABELS numerics)
 
   add_executable(basin_heat_tests
+    tests/main.cpp
     tests/basin/geometry/test_basin_geometry.cpp
     tests/basin/mesh/test_col_epoch_grid.cpp
     tests/basin/mesh/test_col_field_transfer.cpp
@@ -145,12 +147,13 @@ if(BUILD_TESTING)
   target_include_directories(basin_heat_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
   target_link_libraries(basin_heat_tests PRIVATE
     basin_heat_forward
-    GTest::gtest_main PkgConfig::PETSc MPI::MPI_CXX
+    GTest::gtest PkgConfig::PETSc MPI::MPI_CXX
   )
   gtest_discover_tests(basin_heat_tests PROPERTIES LABELS basin)
 
   if(HEAT_BUILD_MODEL)
     add_executable(model_heat_tests
+      tests/main.cpp
       tests/model/forward/test_model_heat_forward_solver.cpp
       tests/model/forward/test_model_heat_system.cpp
       tests/model/inverse/test_model_heat_inverse_recovery.cpp
@@ -162,7 +165,7 @@ if(BUILD_TESTING)
     heat_configure_target(model_heat_tests)
     target_include_directories(model_heat_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
     target_link_libraries(model_heat_tests PRIVATE
-      model_heat_inverse GTest::gtest_main PkgConfig::PETSc MPI::MPI_CXX
+      model_heat_inverse GTest::gtest PkgConfig::PETSc MPI::MPI_CXX
     )
     gtest_discover_tests(model_heat_tests PROPERTIES LABELS model)
   endif()

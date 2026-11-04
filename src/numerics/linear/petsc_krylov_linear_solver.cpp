@@ -97,6 +97,10 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
         ++timings.ksp_builds;
         const auto ksp = impl_->ksp.get();
         check(KSPSetType(ksp, method_ == LinearMethod::gmres ? KSPGMRES : KSPBCGS));
+        if (method_ == LinearMethod::gmres) {
+            check(KSPGMRESSetRestart(ksp, 100));
+            check(KSPGMRESSetOrthogonalization(ksp, KSPGMRESModifiedGramSchmidtOrthogonalization));
+        }
         check(KSPSetPCSide(ksp, PC_LEFT));
         check(KSPSetNormType(ksp, KSP_NORM_PRECONDITIONED));
         check(KSPSetErrorIfNotConverged(ksp, PETSC_FALSE));
