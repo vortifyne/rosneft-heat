@@ -3,6 +3,7 @@
 #include "support/petsc_test_session.hpp"
 
 #include <gtest/gtest.h>
+#include <petscsys.h>
 #include <vector>
 
 TEST(PetscKrylovLinearSolver, SolvesCurrentMatrixForEveryMethodAndPreconditioner) {
@@ -66,4 +67,47 @@ TEST(PetscKrylovLinearSolver, ExplicitResetRebuildsPreconditionerForChangedCoeff
         solver.reset();
         EXPECT_EQ(solve_diagonal(7.0, 11.0), LinearSolveStatus::converged);
     }
+}
+
+TEST(PetscKrylovLinearSolver, UpdatesValuesAndReusesObjectsAtExplicitBoundaries) {
+    ensure_petsc_test_session();
+    PetscKrylovLinearSolver solver;
+    Vector solution;
+    for (int step = 0; step < 3; ++step) {
+        const int size = step == 2 ? 3 : 2;
+        SparseMatrix matrix(size, size, SparseStorageOrder::csr);
+        std::vector<MatrixTriplet> entries;
+        for (int i = 0; i < size; ++i)
+            entries.emplace_back(i, i, 2.0 + step + i);
+        matrix.set_from_triplets(entries);
+        Vector expected(size);
+        expected.set_constant(3.0);
+        const Vector rhs = matrix * expected;
+        const auto result =
+            solver.solve(matrix, rhs, solution, {.new_pattern = step != 1, .new_solve = step != 1});
+        ASSERT_EQ(result.status, LinearSolveStatus::converged);
+        EXPECT_LT((solution - expected).norm(), 1.0e-10);
+        EXPECT_EQ((rhs - matrix * expected).norm(), 0.0);
+        EXPECT_EQ(result.timings.ksp_builds, step == 0 ? 1 : 0);
+        EXPECT_EQ(result.timings.vector_builds, step == 1 ? 0 : 2);
+        EXPECT_EQ(result.timings.matrix_builds, step == 1 ? 0 : 1);
+        EXPECT_EQ(result.timings.pc_updates, 1);
+    }
+}
+
+TEST(PetscKrylovLinearSolver, NativeOptionsOverrideApplicationDefaults) {
+    ensure_petsc_test_session();
+    PetscOptionsSetValue(nullptr, "-pc_type", "none");
+    PetscOptionsSetValue(nullptr, "-ksp_max_it", "1");
+    PetscKrylovLinearSolver solver;
+    SparseMatrix matrix(2, 2, SparseStorageOrder::csr);
+    const std::vector<MatrixTriplet> entries{{0, 0, 2.0}, {1, 1, 3.0}};
+    matrix.set_from_triplets(entries);
+    Vector solution{42.0};
+    const auto result = solver.solve(matrix, Vector{2.0, 3.0}, solution, {.maxiter = 10});
+    PetscOptionsClearValue(nullptr, "-ksp_max_it");
+    PetscOptionsClearValue(nullptr, "-pc_type");
+    EXPECT_EQ(result.status, LinearSolveStatus::maxiter);
+    EXPECT_EQ(result.iterations, 1);
+    EXPECT_DOUBLE_EQ(solution[0], 42.0);
 }

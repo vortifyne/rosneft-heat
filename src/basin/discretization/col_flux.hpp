@@ -30,6 +30,14 @@ void compute_internal_flux(const ColGrid& grid, const VerticalSubface& face,
                            std::span<const double> T, const HeatBoundaryData& bc,
                            FluxStencil& stencil);
 
+void compute_mpfa_flux(const ColGrid& grid, const VerticalSubface& face,
+                       std::span<const double> lambda, const HeatBoundaryData& bc,
+                       FluxStencil& stencil);
+
+void compute_nmpfa_flux(const ColGrid& grid, const VerticalSubface& face,
+                        std::span<const double> lambda, std::span<const double> T,
+                        const HeatBoundaryData& bc, FluxStencil& stencil);
+
 void compute_surface_flux(const ColGrid& grid, const VerticalBoundaryFace& face,
                           std::span<const double> lambda, const HeatBoundaryData& bc,
                           FluxStencil& stencil);
