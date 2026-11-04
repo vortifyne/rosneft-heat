@@ -2,8 +2,8 @@
 Data reader for the Academic Tournament 2026:
 two-dimensional heat transfer in a sedimentary basin.
 
-Loads six XLSX files with geometry, lithology, porosity,
-boundary conditions and lithotype properties.
+Loads XLSX files with geometry, lithology, porosity,
+boundary conditions and lithotype properties. Basal heat flow may be absent for inverse inputs.
 
 Usage:
     from basin_data import BasinData
@@ -111,7 +111,8 @@ class BasinData:
         self._depth = _load_property_xlsx(os.path.join(xlsx_dir, 'Depth.xlsx'))
         self._lith = _load_property_xlsx(os.path.join(xlsx_dir, 'Lithology.xlsx'))
         self._poro = _load_property_xlsx(os.path.join(xlsx_dir, 'Porosity.xlsx'))
-        self._hf = _load_property_xlsx(os.path.join(xlsx_dir, 'Heat_Flow_Basal.xlsx'))
+        heat_flow_path = os.path.join(xlsx_dir, 'Heat_Flow_Basal.xlsx')
+        self._hf = _load_property_xlsx(heat_flow_path) if os.path.exists(heat_flow_path) else None
         self._tsurf = _load_property_xlsx(os.path.join(xlsx_dir, 'Tsurf.xlsx'))
 
         # All layers from Depth
@@ -231,6 +232,8 @@ class BasinData:
 
         Read from the bottommost layer at the given age.
         """
+        if self._hf is None:
+            return None
         bot_layer = self.layers_at(time)[-1]
         sub = self._get_slice(self._hf, bot_layer, time)
         return (sub.iloc[:, 0].values.astype(np.float64),

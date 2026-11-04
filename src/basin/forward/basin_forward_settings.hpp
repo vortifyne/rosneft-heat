@@ -16,6 +16,7 @@ struct BasinForwardSettings {
     // If set, simplify only the column axis; integrate the geometry selected
     // by rdp_tol without this additional simplification.
     std::optional<double> axis_rdp_tol = std::nullopt;
+    bool intermediate_snapshots = true;
     MultipointFluxScheme scheme = MultipointFluxScheme::linear;
     LinearSolverOptions linear_solver{.method = LinearMethod::gmres,
                                       .preconditioner = Preconditioner::ilu2};

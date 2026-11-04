@@ -3,6 +3,8 @@
 #include "basin/forward/basin_forward_settings.hpp"
 #include "basin/forward/basin_statistics.hpp"
 #include "basin/io/basin_input.hpp"
+#include "basin/mesh/col_epoch_grid.hpp"
+#include "numerics/algebra/vector.hpp"
 
 #include <filesystem>
 #include <functional>
@@ -25,11 +27,29 @@ class BasinForwardSolver {
 public:
     BasinForwardSolver(BasinInput input, BasinForwardSettings settings = {});
 
+    void set_parameters(const Vector& parameters);
+    void set_intermediate_snapshots(bool enabled) noexcept;
+    [[nodiscard]] std::span<const BasinConfig> configs() const noexcept;
+    [[nodiscard]] const ColGrid& final_grid() const noexcept;
+
     [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe = {}) const;
     [[nodiscard]] BasinForwardResult solve(const std::filesystem::path& output_directory,
                                            const BasinObserver& observe = {}) const;
 
 private:
+    struct EpochData {
+        ColEpochGrid mesh;
+        ColGrid initial_grid;
+        std::vector<int> lithotypes;
+        std::vector<double> phi0;
+        std::vector<double> phi1;
+    };
+
     BasinInput input_;
     BasinForwardSettings settings_;
+    EasyRoModel easy_ro_;
+    std::vector<EpochData> epochs_;
+    ColGrid final_grid_;
+    Vector initial_temperature_;
+    Vector parameters_; // Basal heat flux [W/m²] at configuration ages.
 };

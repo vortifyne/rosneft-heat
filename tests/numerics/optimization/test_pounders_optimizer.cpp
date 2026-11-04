@@ -3,6 +3,7 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
+#include <petscsys.h>
 #include <stdexcept>
 
 namespace {
@@ -60,6 +61,31 @@ TEST(PoundersOptimizerTest, RespectsActiveParameterBound) {
     expect_vector_near(result.parameters, Vector{1.0});
     expect_vector_near(result.residuals, Vector{-1.0});
     EXPECT_NEAR(result.objective, 1.0, 1e-5);
+}
+
+TEST(PoundersOptimizerTest, ClipsInitialGuessUsingPetscStepAndStopsWithinResidualBounds) {
+    ASSERT_EQ(PetscOptionsSetValue(nullptr, "-tao_pounders_delta", "0.2"), PETSC_SUCCESS);
+    std::vector<double> evaluated;
+    const BoundedLeastSquaresProblem problem{
+        .lower_bounds = Vector{0.0},
+        .upper_bounds = Vector{1.0},
+        .residual_count = 1,
+        .residual_function =
+            [&](const Vector& x) {
+                evaluated.push_back(x[0]);
+                return Vector{x[0] - 0.9};
+            },
+    };
+    auto request = kSolveRequest;
+    request.residual_tolerance = 0.11;
+    const auto result = PoundersOptimizer{}.solve(problem, Vector{1.0}, request);
+    EXPECT_EQ(PetscOptionsClearValue(nullptr, "-tao_pounders_delta"), PETSC_SUCCESS);
+    ASSERT_FALSE(evaluated.empty());
+    EXPECT_DOUBLE_EQ(evaluated.front(), 0.8);
+    EXPECT_EQ(result.status, PoundersStatus::user_converged);
+    EXPECT_LE(result.residuals.infinity_norm(), request.residual_tolerance);
+    EXPECT_DOUBLE_EQ(result.residuals[0], result.parameters[0] - 0.9);
+    EXPECT_EQ(result.function_evaluations, static_cast<int>(evaluated.size()));
 }
 
 TEST(PoundersOptimizerTest, SupportsNonUnitBounds) {

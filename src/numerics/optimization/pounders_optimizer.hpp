@@ -8,6 +8,7 @@ struct PoundersSolveRequest {
     double gttol;
     int maxiter;
     int maxfev;
+    double residual_tolerance = 0.0; // Stop when every residual is within this bound; 0 disables.
 };
 
 enum class PoundersStatus {
