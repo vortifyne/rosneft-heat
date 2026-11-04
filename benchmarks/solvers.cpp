@@ -32,11 +32,12 @@ void easy_ro_advance(benchmark::State& state) {
         T1[i] = T0[i] + 10.0;
     }
     auto I = model.initial_state(cells);
+    const std::vector<double> deposition(cells, 0.0);
     for (auto _ : state) {
         state.PauseTiming();
         std::fill(I.begin(), I.end(), 0.0);
         state.ResumeTiming();
-        model.advance(T0, T1, 1e12, I);
+        model.advance(T0, T1, 0.0, 1e12, deposition, I);
         benchmark::DoNotOptimize(I.data());
         benchmark::ClobberMemory();
     }

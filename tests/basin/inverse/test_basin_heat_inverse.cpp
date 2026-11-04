@@ -114,9 +114,10 @@ TEST(BasinForwardSolver, ReusesPreparationAndResetsStateAfterUpdatingParameters)
         EXPECT_DOUBLE_EQ(snapshot.age_ma, 0.0);
         for (Vector::Index i = 0; i < first_temperature.size(); ++i) {
             EXPECT_DOUBLE_EQ(snapshot.T[static_cast<std::size_t>(i)], first_temperature[i]);
-            EXPECT_DOUBLE_EQ(snapshot.Ro[static_cast<std::size_t>(i)],
-                             first_reflectance[static_cast<std::size_t>(i)]);
         }
+        ASSERT_EQ(snapshot.Ro.size(), first_reflectance.size());
+        for (std::size_t i = 0; i < first_reflectance.size(); ++i)
+            EXPECT_DOUBLE_EQ(snapshot.Ro[i], first_reflectance[i]);
     });
     EXPECT_EQ(callbacks, 1);
     write_basin_parameters(path / "parameters.csv", solver.configs(), original);
@@ -141,12 +142,14 @@ TEST(BasinHeatInverseSolver, RecoversKnownFluxHistoryFromSyntheticTemperatureAnd
                               .z = center.z,
                               .value = snapshot.T[cell.index],
                               .error = 0.02 * (snapshot.T[cell.index] - 273.15)});
+            const auto node = cell.index + cell.column;
+            const double Ro = 0.5 * (snapshot.Ro[node] + snapshot.Ro[node + 1]);
             points.push_back({.kind = BasinObservable::reflectance,
                               .well = "synthetic",
                               .x = center.x,
                               .z = center.z,
-                              .value = snapshot.Ro[cell.index],
-                              .error = 0.02 * snapshot.Ro[cell.index]});
+                              .value = Ro,
+                              .error = 0.02 * Ro});
         }
     });
     BasinHeatInverseSolver inverse(BasinHeatResidualEvaluator(

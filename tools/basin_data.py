@@ -215,10 +215,10 @@ class BasinData:
             x     : np.array [m]
             tsurf : np.array [°C]
 
-        Read from the topmost layer at the given age.
+        The bottommost layer carries the surface profile over the whole domain.
         """
-        top_layer = self.layers_at(time)[0]
-        sub = self._get_slice(self._tsurf, top_layer, time)
+        bottom_layer = self.layers_at(time)[-1]
+        sub = self._get_slice(self._tsurf, bottom_layer, time)
         return (sub.iloc[:, 0].values.astype(np.float64),
                 sub.iloc[:, 7].values.astype(np.float64))
 

@@ -155,6 +155,9 @@ PetscErrorCode evaluate_residual(Tao tao, Vec px, Vec pr, void* raw_context) {
 
     try {
         Vector x = copy_from_petsc(px, context->problem->lower_bounds.size());
+        x.native() = x.native()
+                         .cwiseMax(context->problem->lower_bounds.native())
+                         .cwiseMin(context->problem->upper_bounds.native());
         Vector r = context->problem->residual_function(x);
         if (r.size() != context->problem->residual_count) {
             throw std::runtime_error("Residual function returned a vector with an invalid size");

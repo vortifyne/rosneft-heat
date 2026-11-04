@@ -1,5 +1,6 @@
 #include "basin/physics/easy_ro.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <utility>
@@ -38,12 +39,12 @@ std::size_t EasyRoModel::reaction_count() const noexcept {
     return beta_.size();
 }
 
-std::vector<double> EasyRoModel::initial_state(std::size_t cell_count) const {
-    return std::vector<double>(cell_count * reaction_count(), 0.0);
+std::vector<double> EasyRoModel::initial_state(std::size_t point_count) const {
+    return std::vector<double>(point_count * reaction_count(), 0.0);
 }
 
-void EasyRoModel::advance(std::span<const double> T0, std::span<const double> T1, double dt,
-                          std::span<double> I) const {
+void EasyRoModel::advance(std::span<const double> T0, std::span<const double> T1, double t_old,
+                          double t_new, std::span<const double> t_dep, std::span<double> I) const {
     const auto& table = scaled_primitive_table();
     const auto H = [&table](double x) {
         const double position = (x - kXMin) * kInverseStep;
@@ -53,7 +54,11 @@ void EasyRoModel::advance(std::span<const double> T0, std::span<const double> T1
     };
     const std::size_t reactions = reaction_count();
     for (std::size_t P = 0; P < T0.size(); ++P) {
-        const double T_old = T0[P];
+        const double begin = std::max(t_old, t_dep[P]);
+        if (begin >= t_new)
+            continue;
+        const double dt = t_new - begin;
+        const double T_old = std::lerp(T0[P], T1[P], (begin - t_old) / (t_new - t_old));
         const double T_new = T1[P];
         const double inverse_T_old = 1.0 / T_old;
         const double inverse_T_new = 1.0 / T_new;

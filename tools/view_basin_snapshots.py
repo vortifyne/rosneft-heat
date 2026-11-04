@@ -11,7 +11,7 @@ from matplotlib.collections import PolyCollection
 from matplotlib.widgets import Slider
 import numpy as np
 
-from basin_snapshot import read_snapshot
+from basin_snapshot import cell_reflectance, read_snapshot
 
 
 def polygons(snapshot: dict) -> np.ndarray:
@@ -36,7 +36,8 @@ def main() -> None:
         parser.error(f"No snapshot_*.cgrd files found in {arguments.directory / 'snapshots'}")
     snapshots = [read_snapshot(path) for path in paths]
     key = arguments.field
-    data = [snapshot[key] for snapshot in snapshots]
+    data = [cell_reflectance(snapshot) if key == "reflectance" else snapshot[key]
+            for snapshot in snapshots]
     minimum = min(float(np.min(values)) for values in data)
     maximum = max(float(np.max(values)) for values in data)
     if maximum == minimum:

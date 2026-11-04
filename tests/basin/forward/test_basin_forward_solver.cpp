@@ -35,7 +35,7 @@ void expect_timing_tree(const BasinTimings& t) {
 
 } // namespace
 
-TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
+TEST(BasinForwardSolver, PreservesTemperatureAndAccumulatesFinalLayerNodalHistory) {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto directory =
         std::filesystem::temp_directory_path() / ("column-basin-test-" + std::to_string(suffix));
@@ -75,15 +75,18 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
             return;
         saw_final = true;
         EXPECT_EQ(snapshot.grid.x, (std::vector<double>{0.0, 1.0, 2.0}));
-        ASSERT_EQ(snapshot.I.size(), snapshot.grid.cells.size());
+        ASSERT_EQ(snapshot.I.size(), snapshot.grid.cells.size() + snapshot.grid.columns.size());
         for (const auto& cell : snapshot.grid.cells) {
             EXPECT_NEAR(snapshot.T[cell.index], 300.0, 1.0e-8);
+            const auto node = cell.index + cell.column;
             if (cell.layer_id == 1) {
-                EXPECT_DOUBLE_EQ(snapshot.I[cell.index], 0.0);
-                EXPECT_NEAR(snapshot.Ro[cell.index], std::exp(-1.6), 1.0e-12);
+                EXPECT_DOUBLE_EQ(snapshot.I[node], 0.0);
+                EXPECT_NEAR(snapshot.Ro[node], std::exp(-1.6), 1.0e-12);
+                EXPECT_GT(snapshot.I[node + 1], snapshot.I[node]);
+                EXPECT_GT(snapshot.Ro[node + 1], snapshot.Ro[node]);
             } else {
-                EXPECT_GT(snapshot.I[cell.index], 0.0);
-                EXPECT_GT(snapshot.Ro[cell.index], std::exp(-1.6));
+                EXPECT_GT(snapshot.I[node], 0.0);
+                EXPECT_GT(snapshot.Ro[node], std::exp(-1.6));
             }
         }
     });
@@ -150,5 +153,18 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
         EXPECT_GT(std::filesystem::file_size(output_directory / "snapshots" / name), 40U);
         EXPECT_FALSE(std::filesystem::exists(output_directory / name));
     }
+    const BasinForwardSolver reset_solver(
+        input, {.dx = 10.0, .dz = 1.0, .dt_ma = 0.5, .reset_final_maturity = true});
+    (void)reset_solver.solve([&](const BasinSnapshot& snapshot) {
+        if (snapshot.kind != BasinSnapshot::Kind::after_event)
+            return;
+        for (const auto& cell : snapshot.grid.cells) {
+            if (cell.layer_id == 1) {
+                const auto node = cell.index + cell.column;
+                EXPECT_DOUBLE_EQ(snapshot.I[node], 0.0);
+                EXPECT_DOUBLE_EQ(snapshot.I[node + 1], 0.0);
+            }
+        }
+    });
     std::filesystem::remove_all(directory);
 }

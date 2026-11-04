@@ -29,6 +29,36 @@ double fraction(double value, double left, double right) {
 
 } // namespace
 
+std::vector<double> horizontal_node_depths(const ColGrid& grid) {
+    std::vector<double> z(grid.cells.size() + grid.columns.size());
+    for (const auto& column : grid.columns) {
+        for (const auto index : column) {
+            const auto& cell = grid.cells[index];
+            z[index + cell.column] = cell.z_top;
+        }
+        const auto& last = grid.cells[column.back()];
+        z[last.index + last.column + 1] = last.z_bottom;
+    }
+    return z;
+}
+
+void interpolate_horizontal_temperature(const ColGrid& grid, const Vector& T,
+                                        std::span<double> node_T) {
+    for (const auto& column : grid.columns) {
+        const auto offset = column.front() + grid.cells[column.front()].column;
+        for (std::size_t row = 0; row <= column.size(); ++row) {
+            const auto right = std::min(std::max(row, std::size_t{1}), column.size() - 1);
+            const auto left = right == 0 ? 0 : right - 1;
+            const auto& a = grid.cells[column[left]];
+            const auto& b = grid.cells[column[right]];
+            const double z = row == column.size() ? b.z_bottom : grid.cells[column[row]].z_top;
+            node_T[offset + row] = std::lerp(T[static_cast<Vector::Index>(a.index)],
+                                             T[static_cast<Vector::Index>(b.index)],
+                                             fraction(z, a.center().z, b.center().z));
+        }
+    }
+}
+
 Vector interpolate_temperature(const ColGrid& old_grid, const ColGrid& new_grid,
                                const Vector& old_T) {
     Vector T(static_cast<Vector::Index>(new_grid.cells.size()));
@@ -65,7 +95,11 @@ Vector interpolate_temperature(const ColGrid& old_grid, const ColGrid& new_grid,
 std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, const ColGrid& new_grid,
                                                    std::span<const double> old_I,
                                                    std::size_t reaction_count, int born_layer_id) {
-    std::vector<double> I(new_grid.cells.size() * reaction_count, 0.0);
+    std::vector<double> I((new_grid.cells.size() + new_grid.columns.size()) * reaction_count, 0.0);
+    const auto old_z = horizontal_node_depths(old_grid);
+    const auto new_z = horizontal_node_depths(new_grid);
+    std::vector<std::size_t> node_indices(old_z.size());
+    std::iota(node_indices.begin(), node_indices.end(), 0);
     std::vector<int> layer_ids;
     for (const auto& cell : old_grid.cells) {
         if (cell.layer_id != born_layer_id &&
@@ -75,7 +109,7 @@ std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, cons
     const auto x = [&](std::size_t column) {
         return 0.5 * (old_grid.x[column] + old_grid.x[column + 1]);
     };
-    const auto z = [&](std::size_t cell) { return old_grid.cells[cell].center().z; };
+    const auto z = [&](std::size_t node) { return old_z[node]; };
     for (const int layer_id : layer_ids) {
         std::vector<std::size_t> columns;
         std::vector<std::span<const std::size_t>> rows(old_grid.columns.size());
@@ -89,7 +123,9 @@ std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, cons
                 continue;
             const auto last = std::find_if_not(first, cells.end(), in_layer);
             columns.push_back(column);
-            rows[column] = std::span(first, last);
+            rows[column] =
+                std::span<const std::size_t>(node_indices)
+                    .subspan(*first + column, static_cast<std::size_t>(last - first) + 1);
         }
         std::size_t column_upper = 0;
         for (std::size_t column = 0; column < new_grid.columns.size(); ++column) {
@@ -98,10 +134,18 @@ std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, cons
                 neighboring_indices(columns, target_x, column_upper, false, x);
             const double wx = fraction(target_x, x(left), x(right));
             std::size_t left_upper = 0, right_upper = 0;
-            for (const std::size_t cell : new_grid.columns[column]) {
-                if (new_grid.cells[cell].layer_id != layer_id)
-                    continue;
-                const double target_z = new_grid.cells[cell].center().z;
+            const auto& cells = new_grid.columns[column];
+            const auto first = std::find_if(cells.begin(), cells.end(), [&](std::size_t cell) {
+                return new_grid.cells[cell].layer_id == layer_id;
+            });
+            if (first == cells.end())
+                continue;
+            const auto last = std::find_if_not(first, cells.end(), [&](std::size_t cell) {
+                return new_grid.cells[cell].layer_id == layer_id;
+            });
+            const auto end_node = *(last - 1) + column + 1;
+            for (std::size_t node = *first + column; node <= end_node; ++node) {
+                const double target_z = new_z[node];
                 const auto [l0, l1] =
                     neighboring_indices(rows[left], target_z, left_upper, false, z);
                 const auto [r0, r1] =
@@ -113,10 +157,16 @@ std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, cons
                                                     old_I[l1 * reaction_count + reaction], wl);
                     const double right_I = std::lerp(old_I[r0 * reaction_count + reaction],
                                                      old_I[r1 * reaction_count + reaction], wr);
-                    I[cell * reaction_count + reaction] = std::lerp(left_I, right_I, wx);
+                    I[node * reaction_count + reaction] = std::lerp(left_I, right_I, wx);
                 }
             }
         }
+    }
+    for (const auto& cell : new_grid.cells) {
+        if (cell.layer_id == born_layer_id)
+            std::fill_n(I.begin() + static_cast<std::ptrdiff_t>((cell.index + cell.column) *
+                                                                reaction_count),
+                        2 * reaction_count, 0.0);
     }
     return I;
 }

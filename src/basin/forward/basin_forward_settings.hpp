@@ -17,6 +17,7 @@ struct BasinForwardSettings {
     // by rdp_tol without this additional simplification.
     std::optional<double> axis_rdp_tol = std::nullopt;
     bool intermediate_snapshots = true;
+    bool reset_final_maturity = false; // Discard the final new layer's reaction history.
     MultipointFluxScheme scheme = MultipointFluxScheme::linear;
     LinearSolverOptions linear_solver{.method = LinearMethod::gmres,
                                       .preconditioner = Preconditioner::ilu2};
