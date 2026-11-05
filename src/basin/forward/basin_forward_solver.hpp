@@ -31,6 +31,7 @@ public:
     void set_intermediate_snapshots(bool enabled) noexcept;
     [[nodiscard]] std::span<const BasinConfig> configs() const noexcept;
     [[nodiscard]] const ColGrid& final_grid() const noexcept;
+    void final_temperature_nodes(std::span<const double> T, std::span<double> node_T) const;
 
     [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe = {}) const;
     [[nodiscard]] BasinForwardResult solve(const std::filesystem::path& output_directory,

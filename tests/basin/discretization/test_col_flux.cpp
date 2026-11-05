@@ -1,4 +1,5 @@
 #include "basin/discretization/col_flux.hpp"
+#include "basin/mesh/col_field_transfer.hpp"
 #include "basin/mesh/column_test_utils.hpp"
 
 #include <gtest/gtest.h>
@@ -74,4 +75,36 @@ TEST(ColFlux, UsesHarmonicNormalFluxAcrossMaterialJump) {
                               stencil);
         EXPECT_NEAR(evaluate_flux(stencil, T), -flux_scale, 2.0e-11);
     }
+}
+
+TEST(ColFlux, ReconstructsLinearTemperatureAtHorizontalNodes) {
+    const auto grid = make_test_column_grid(2, 3, 4.0, 2.0);
+    Vector T(static_cast<Vector::Index>(grid.cells.size()));
+    for (const auto& cell : grid.cells)
+        T[static_cast<Vector::Index>(cell.index)] = 300.0 + 5.0 * cell.center().z;
+    const auto z = horizontal_node_depths(grid);
+    std::vector<double> nodes(z.size());
+    const std::vector<double> lambda(grid.cells.size(), 2.0);
+    interpolate_horizontal_temperature(
+        grid, {T.native().data(), grid.cells.size()}, lambda,
+        {.T_surf = [](Point2D) { return 300.0; }, .q_basal = [](Point2D) { return 10.0; }}, nodes);
+    for (std::size_t i = 0; i < nodes.size(); ++i)
+        EXPECT_NEAR(nodes[i], 300.0 + 5.0 * z[i], 1e-12);
+}
+
+TEST(ColFlux, ReconstructsTemperatureAcrossAConductivityJumpAndAtBoundaries) {
+    const BasinGeometry geometry{.x = {0.0, 1.0},
+                                 .z = {{0.0, 0.0}, {0.4, 0.4}, {2.0, 2.0}},
+                                 .layers = {{1, 0.0, 1.0}, {2, 0.0, 1.0}}};
+    const auto grid = make_col_grid(geometry, geometry.x, 2.0);
+    const std::vector<double> T{300.4, 301.2};
+    const std::vector<double> lambda{1.0, 4.0};
+    std::vector<double> nodes(3);
+    interpolate_horizontal_temperature(
+        grid, T, lambda,
+        {.T_surf = [](Point2D) { return 300.0; }, .q_basal = [](Point2D) { return 2.0; }}, nodes);
+    EXPECT_DOUBLE_EQ(nodes.front(), 300.0);
+    EXPECT_NEAR(nodes[1], 300.8, 1e-12);
+    EXPECT_NEAR(nodes.back(), 301.6, 1e-12);
+    EXPECT_NEAR(lambda[0] * (nodes[1] - T[0]) / 0.2, lambda[1] * (T[1] - nodes[1]) / 0.8, 1e-12);
 }

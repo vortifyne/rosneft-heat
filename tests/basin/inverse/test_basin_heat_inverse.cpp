@@ -134,6 +134,15 @@ TEST(BasinHeatInverseSolver, RecoversKnownFluxHistoryFromSyntheticTemperatureAnd
     forward.set_intermediate_snapshots(false);
     std::vector<BasinObservation> points;
     (void)forward.solve([&](const BasinSnapshot& snapshot) {
+        for (const auto index : snapshot.grid.top_cells) {
+            const auto& cell = snapshot.grid.cells[index];
+            points.push_back({.kind = BasinObservable::temperature,
+                              .well = "surface",
+                              .x = cell.center().x,
+                              .z = cell.z_top,
+                              .value = 283.15,
+                              .error = 0.2});
+        }
         for (const auto& cell : snapshot.grid.cells) {
             const auto center = cell.center();
             points.push_back({.kind = BasinObservable::temperature,

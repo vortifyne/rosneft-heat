@@ -33,6 +33,8 @@ public:
     void assemble_residual(const Vector& T, Vector& r) const;
     void assemble_matrix(const Vector& T, SparseMatrix& M) const;
 
+    void interpolate_horizontal_temperature(const Vector& T, std::span<double> node_T) const;
+
     void assemble_residual(double t, const Vector& T, const Vector& dT_dt,
                            Vector& r) const override;
     void assemble_matrix(NonlinearMethod method, double t, const Vector& T, const Vector& dT_dt,

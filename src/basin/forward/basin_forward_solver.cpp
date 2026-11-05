@@ -208,6 +208,25 @@ const ColGrid& BasinForwardSolver::final_grid() const noexcept {
     return final_grid_;
 }
 
+void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
+                                                 std::span<double> node_T) const {
+    const auto& cfg = input_.configs().back();
+    std::vector<double> lambda(T.size());
+    for (const auto& cell : final_grid_.cells) {
+        const auto& layer = cfg.layer(cell.layer_id);
+        const double x = cell.center().x;
+        lambda[cell.index] = thermal_properties(T[cell.index], layer.phi_at(x),
+                                                input_.lithotype(layer.lithotype_at(x)), kFluid)
+                                 .lambda;
+    }
+    auto boundaries = bc(cfg, cfg, 0.0);
+    if (!parameters_.empty()) {
+        const double q = parameters_[parameters_.size() - 1];
+        boundaries.q_basal = [q](Point2D) { return q; };
+    }
+    interpolate_horizontal_temperature(final_grid_, T, lambda, boundaries, node_T);
+}
+
 BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const {
     const auto solve_start = Clock::now();
     auto grid_start = solve_start;
@@ -240,11 +259,23 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
         const double dt_max = settings.dt_ma * kSecondsPerMa;
         const auto& epoch = epochs_[epoch_index];
         std::vector<double> node_T0(epoch.deposition_times.size()), node_T1(node_T0.size());
-        interpolate_horizontal_temperature(state.grid, state.T, node_T0);
         std::vector<const LithotypeProperties*> lithotypes(epoch.lithotypes.size());
         for (std::size_t i = 0; i < lithotypes.size(); ++i)
             lithotypes[i] = &input.lithotype(epoch.lithotypes[i]);
-        std::vector<double> phi(state.grid.cells.size());
+        std::vector<double> phi = epoch.phi0;
+        const auto boundaries_at = [&](double theta) {
+            auto boundaries = bc(cfg0, cfg1, theta);
+            if (!parameters_.empty()) {
+                const auto index = static_cast<Vector::Index>(epoch_index);
+                const double q = std::lerp(parameters_[index], parameters_[index + 1], theta);
+                boundaries.q_basal = [q](Point2D) { return q; };
+            }
+            return boundaries;
+        };
+        {
+            const ColHeatSystem initial(state.grid, phi, lithotypes, kFluid, boundaries_at(0.0));
+            initial.interpolate_horizontal_temperature(state.T, node_T0);
+        }
         double t = 0.0;
         integrator.set_initial_solution(t, state.T);
         if (epoch_index > 0 && settings.pc_reuse == PcReuse::manual) {
@@ -263,13 +294,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
             ColGrid grid = epoch.mesh.at(theta);
             for (std::size_t i = 0; i < phi.size(); ++i)
                 phi[i] = std::lerp(epoch.phi0[i], epoch.phi1[i], theta);
-            auto boundaries = bc(cfg0, cfg1, theta);
-            if (!parameters_.empty()) {
-                const auto index = static_cast<Vector::Index>(epoch_index);
-                const double q = std::lerp(parameters_[index], parameters_[index + 1], theta);
-                boundaries.q_basal = [q](Point2D) { return q; };
-            }
-            ColHeatSystem system(grid, phi, lithotypes, kFluid, std::move(boundaries));
+            ColHeatSystem system(grid, phi, lithotypes, kFluid, boundaries_at(theta));
             system.set_flux_scheme(settings.scheme);
             integrator.set_timestep(dt);
             step_stats.timings.grid_s += elapsed_seconds(grid_start);
@@ -293,7 +318,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
             }
             const Vector& T1 = integrator.current_snapshot().u;
             const auto easy_ro_start = Clock::now();
-            interpolate_horizontal_temperature(grid, T1, node_T1);
+            system.interpolate_horizontal_temperature(T1, node_T1);
             easy_ro.advance(node_T0, node_T1, epoch_begin + t, epoch_begin + t_next,
                             epoch.deposition_times, state.I);
             node_T0.swap(node_T1);

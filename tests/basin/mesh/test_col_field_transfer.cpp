@@ -99,18 +99,6 @@ TEST(ColFieldTransfer, NodalHistoriesStayWithinTheirLayer) {
     }
 }
 
-TEST(ColFieldTransfer, ReconstructsLinearTemperatureAtHorizontalNodes) {
-    const auto grid = make_test_column_grid(2, 3, 4.0, 2.0);
-    Vector T(static_cast<Vector::Index>(grid.cells.size()));
-    for (const auto& cell : grid.cells)
-        T[static_cast<Vector::Index>(cell.index)] = 300.0 + 5.0 * cell.center().z;
-    const auto z = horizontal_node_depths(grid);
-    std::vector<double> nodes(z.size());
-    interpolate_horizontal_temperature(grid, T, nodes);
-    for (std::size_t i = 0; i < nodes.size(); ++i)
-        EXPECT_NEAR(nodes[i], 300.0 + 5.0 * z[i], 1e-12);
-}
-
 TEST(ColFieldTransfer, SingleSourceCell) {
     const auto source = make_test_column_grid(1, 1, 4.0, 2.0);
     const auto target = make_test_column_grid(4, 4, 4.0, 2.0);

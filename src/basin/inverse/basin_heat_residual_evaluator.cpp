@@ -1,6 +1,7 @@
 #include "basin/inverse/basin_heat_residual_evaluator.hpp"
 
 #include "basin/basin_snapshot.hpp"
+#include "basin/geometry/basin_geometry.hpp"
 #include "basin/mesh/col_field_transfer.hpp"
 
 #include <algorithm>
@@ -9,7 +10,7 @@
 
 namespace {
 
-// Reconstruct linearly from centers, including points at cell boundaries.
+// Queries can interpolate or extrapolate between the outer two points.
 std::array<std::size_t, 2> neighboring(std::span<const std::size_t> indices, double value,
                                        const auto& coordinate) {
     auto upper =
@@ -38,24 +39,40 @@ BasinHeatResidualEvaluator::BasinHeatResidualEvaluator(BasinForwardSolver forwar
     const auto x = [&](std::size_t column) { return 0.5 * (grid.x[column] + grid.x[column + 1]); };
     const auto depths = horizontal_node_depths(grid);
     std::vector<std::vector<std::size_t>> nodes(grid.columns.size());
+    std::vector<std::vector<std::size_t>> temperatures(grid.columns.size());
+    const auto count = grid.cells.size();
     for (std::size_t c = 0; c < nodes.size(); ++c) {
         nodes[c].resize(grid.columns[c].size() + 1);
         std::iota(nodes[c].begin(), nodes[c].end(), grid.columns[c].front() + c);
+        for (auto cell : grid.columns[c]) {
+            temperatures[c].push_back(count + cell + c);
+            temperatures[c].push_back(cell);
+        }
+        temperatures[c].push_back(count + nodes[c].back());
     }
+    const auto& cfg = forward_.configs().back();
+    const auto geometry = make_basin_geometry(cfg);
     interpolation_.reserve(static_cast<std::size_t>(observations_.size()));
     for (const auto& point : observations_.points()) {
-        const auto [left, right] = neighboring(columns, point.x, x);
         const bool nodal = point.kind == BasinObservable::reflectance;
+        if (!nodal && point.z <= geometry.boundary_at(0, point.x)) {
+            interpolation_.push_back(
+                {.indices = {}, .weights = {}, .constant = cfg.T_surf.at(point.x)});
+            continue;
+        }
+        const auto [left, right] = neighboring(columns, point.x, x);
         const auto z = [&](std::size_t index) {
-            return nodal ? depths[index] : grid.cells[index].center().z;
+            if (nodal)
+                return depths[index];
+            return index < count ? grid.cells[index].center().z : depths[index - count];
         };
-        const auto [l0, l1] = neighboring(nodal ? nodes[left] : grid.columns[left], point.z, z);
-        const auto [r0, r1] = neighboring(nodal ? nodes[right] : grid.columns[right], point.z, z);
+        const auto [l0, l1] = neighboring(nodal ? nodes[left] : temperatures[left], point.z, z);
+        const auto [r0, r1] = neighboring(nodal ? nodes[right] : temperatures[right], point.z, z);
         const double wx = fraction(point.x, x(left), x(right));
         const double wl = fraction(point.z, z(l0), z(l1));
         const double wr = fraction(point.z, z(r0), z(r1));
         interpolation_.push_back(
-            {.cells = {l0, l1, r0, r1},
+            {.indices = {l0, l1, r0, r1},
              .weights = {(1.0 - wx) * (1.0 - wl), (1.0 - wx) * wl, wx * (1.0 - wr), wx * wr}});
     }
 }
@@ -75,18 +92,26 @@ BasinForwardSolver& BasinHeatResidualEvaluator::forward_solver() noexcept {
 Vector BasinHeatResidualEvaluator::evaluate(const Vector& normalized) {
     forward_.set_parameters(parameter_space_.to_physical(normalized));
     Vector calculated(observations_.size());
+    std::vector<double> node_T(forward_.final_grid().cells.size() +
+                               forward_.final_grid().columns.size());
     (void)forward_.solve([&](const BasinSnapshot& snapshot) {
         if (snapshot.epoch + 1 != forward_.configs().size())
             return;
+        forward_.final_temperature_nodes(snapshot.T, node_T);
         for (Vector::Index i = 0; i < calculated.size(); ++i) {
             const auto index = static_cast<std::size_t>(i);
-            const auto values = observations_.points()[index].kind == BasinObservable::temperature
-                                    ? snapshot.T
-                                    : snapshot.Ro;
+            const bool temperature =
+                observations_.points()[index].kind == BasinObservable::temperature;
             const auto& interpolation = interpolation_[index];
-            double value = 0.0;
-            for (std::size_t j = 0; j < interpolation.cells.size(); ++j)
-                value += interpolation.weights[j] * values[interpolation.cells[j]];
+            double value = interpolation.constant;
+            for (std::size_t j = 0; j < interpolation.indices.size(); ++j) {
+                const auto source = interpolation.indices[j];
+                const double T =
+                    temperature ? (source < snapshot.T.size() ? snapshot.T[source]
+                                                              : node_T[source - snapshot.T.size()])
+                                : snapshot.Ro[source];
+                value += interpolation.weights[j] * T;
+            }
             calculated[i] = value;
         }
     });

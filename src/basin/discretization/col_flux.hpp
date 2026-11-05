@@ -15,6 +15,11 @@ struct HeatBoundaryData {
     std::function<double(Point2D)> q_right{};
 };
 
+// Reconstruct interface temperatures from the two half-cell thermal resistances.
+void interpolate_horizontal_temperature(const ColGrid& grid, std::span<const double> T,
+                                        std::span<const double> lambda, const HeatBoundaryData& bc,
+                                        std::span<double> node_T);
+
 // sum(a[i] * T[cells[i]]) + b; at most four cells for MPFA and NMPFA.
 struct FluxStencil {
     std::array<std::size_t, 4> cells{};

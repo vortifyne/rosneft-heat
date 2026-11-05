@@ -17,8 +17,10 @@ public:
 
 private:
     struct Interpolation {
-        std::array<std::size_t, 4> cells;
+        // Temperature indices address centers, then horizontal nodes; Ro uses nodes only.
+        std::array<std::size_t, 4> indices;
         std::array<double, 4> weights;
+        double constant = 0.0;
     };
 
     BasinForwardSolver forward_;

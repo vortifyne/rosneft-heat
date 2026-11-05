@@ -46,6 +46,14 @@ void ColHeatSystem::set_flux_scheme(MultipointFluxScheme scheme) noexcept {
     scheme_ = scheme;
 }
 
+void ColHeatSystem::interpolate_horizontal_temperature(const Vector& T,
+                                                       std::span<double> node_T) const {
+    double seconds = 0.0;
+    update_coefficients(T, seconds);
+    ::interpolate_horizontal_temperature(
+        *grid_, {T.native().data(), static_cast<std::size_t>(T.size())}, lambda_, bc_, node_T);
+}
+
 Vector::Index ColHeatSystem::size() const noexcept {
     return static_cast<Vector::Index>(grid_->cells.size());
 }

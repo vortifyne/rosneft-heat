@@ -216,3 +216,24 @@ void compute_surface_flux(const ColGrid& grid, const VerticalBoundaryFace& face,
     }
     stencil.b *= face.length();
 }
+
+void interpolate_horizontal_temperature(const ColGrid& grid, std::span<const double> T,
+                                        std::span<const double> lambda, const HeatBoundaryData& bc,
+                                        std::span<double> node_T) {
+    for (const auto& column : grid.columns) {
+        const auto offset = column.front() + grid.cells[column.front()].column;
+        const auto& top = grid.cells[column.front()];
+        node_T[offset] = bc.T_surf({top.center().x, top.z_top});
+        for (std::size_t row = 1; row < column.size(); ++row) {
+            const auto& a = grid.cells[column[row - 1]];
+            const auto& b = grid.cells[column[row]];
+            const double ra = 0.5 * a.height() / lambda[a.index];
+            const double rb = 0.5 * b.height() / lambda[b.index];
+            node_T[offset + row] = std::lerp(T[a.index], T[b.index], ra / (ra + rb));
+        }
+        const auto& bottom = grid.cells[column.back()];
+        node_T[offset + column.size()] =
+            T[bottom.index] + bc.q_basal({bottom.center().x, bottom.z_bottom}) * 0.5 *
+                                  bottom.height() / lambda[bottom.index];
+    }
+}

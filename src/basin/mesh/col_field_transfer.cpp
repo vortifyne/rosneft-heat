@@ -42,23 +42,6 @@ std::vector<double> horizontal_node_depths(const ColGrid& grid) {
     return z;
 }
 
-void interpolate_horizontal_temperature(const ColGrid& grid, const Vector& T,
-                                        std::span<double> node_T) {
-    for (const auto& column : grid.columns) {
-        const auto offset = column.front() + grid.cells[column.front()].column;
-        for (std::size_t row = 0; row <= column.size(); ++row) {
-            const auto right = std::min(std::max(row, std::size_t{1}), column.size() - 1);
-            const auto left = right == 0 ? 0 : right - 1;
-            const auto& a = grid.cells[column[left]];
-            const auto& b = grid.cells[column[right]];
-            const double z = row == column.size() ? b.z_bottom : grid.cells[column[row]].z_top;
-            node_T[offset + row] = std::lerp(T[static_cast<Vector::Index>(a.index)],
-                                             T[static_cast<Vector::Index>(b.index)],
-                                             fraction(z, a.center().z, b.center().z));
-        }
-    }
-}
-
 Vector interpolate_temperature(const ColGrid& old_grid, const ColGrid& new_grid,
                                const Vector& old_T) {
     Vector T(static_cast<Vector::Index>(new_grid.cells.size()));
