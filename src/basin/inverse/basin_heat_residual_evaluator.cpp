@@ -104,13 +104,17 @@ Vector BasinHeatResidualEvaluator::evaluate(const Vector& normalized) {
                 observations_.points()[index].kind == BasinObservable::temperature;
             const auto& interpolation = interpolation_[index];
             double value = interpolation.constant;
-            for (std::size_t j = 0; j < interpolation.indices.size(); ++j) {
-                const auto source = interpolation.indices[j];
-                const double T =
-                    temperature ? (source < snapshot.T.size() ? snapshot.T[source]
-                                                              : node_T[source - snapshot.T.size()])
-                                : snapshot.Ro[source];
-                value += interpolation.weights[j] * T;
+            if (temperature) {
+                for (std::size_t j = 0; j < interpolation.indices.size(); ++j) {
+                    const auto source = interpolation.indices[j];
+                    const double T = source < snapshot.T.size()
+                                         ? snapshot.T[source]
+                                         : node_T[source - snapshot.T.size()];
+                    value += interpolation.weights[j] * T;
+                }
+            } else {
+                for (std::size_t j = 0; j < interpolation.indices.size(); ++j)
+                    value += interpolation.weights[j] * snapshot.Ro[interpolation.indices[j]];
             }
             calculated[i] = value;
         }

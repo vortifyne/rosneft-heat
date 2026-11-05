@@ -10,12 +10,13 @@ struct BasinHeatInverseSolveRequest {
     PoundersSolveRequest optimization{.gatol = 1e-6,
                                       .grtol = 1e-6,
                                       .gttol = 1e-6,
-                                      .maxiter = 100,
-                                      .maxfev = 500,
+                                      .maxiter = 10,
+                                      .maxfev = 100,
                                       .residual_tolerance = 1.0};
 };
 
-using BasinInverseObserver = std::function<void(int, const Vector&, const Vector&)>;
+// Optimizer iteration, forward evaluation, physical parameters, normalized residuals.
+using BasinInverseObserver = std::function<void(int, int, const Vector&, const Vector&)>;
 
 class BasinHeatInverseSolver {
 public:

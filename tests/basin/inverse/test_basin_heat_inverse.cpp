@@ -167,12 +167,20 @@ TEST(BasinHeatInverseSolver, RecoversKnownFluxHistoryFromSyntheticTemperatureAnd
     request.optimization = {
         .gatol = 1e-10, .grtol = 1e-10, .gttol = 1e-10, .maxiter = 100, .maxfev = 400};
     int evaluations = 0;
+    int last_iteration = 0;
     const Vector found =
-        inverse.solve(request, [&](int, const Vector&, const Vector&) { ++evaluations; });
+        inverse.solve(request, [&](int iteration, int evaluation, const Vector&, const Vector& r) {
+            EXPECT_GE(iteration, last_iteration);
+            last_iteration = iteration;
+            EXPECT_EQ(evaluation, ++evaluations);
+            EXPECT_EQ(r.size(), inverse.residual_evaluator().observations().size());
+        });
     const auto& result = inverse.optimization_result();
     EXPECT_LT((found - known).infinity_norm(), 5e-4);
     EXPECT_LT(result.residuals.infinity_norm(), 1e-3);
     EXPECT_EQ(evaluations, result.function_evaluations);
+    EXPECT_GT(last_iteration, 0);
+    EXPECT_LE(last_iteration, result.iterations);
     EXPECT_LE(evaluations, 401);
     for (Vector::Index i = 1; i < found.size(); ++i)
         EXPECT_LE(found[i], found[i - 1]);

@@ -2,6 +2,8 @@
 
 #include "numerics/optimization/bounded_least_squares_problem.hpp"
 
+#include <functional>
+
 struct PoundersSolveRequest {
     double gatol;
     double grtol;
@@ -54,8 +56,12 @@ struct [[nodiscard]] PoundersSolveResult {
     }
 };
 
+// Optimizer iteration, residual evaluation, parameters, residuals.
+using PoundersObserver = std::function<void(int, int, const Vector&, const Vector&)>;
+
 class PoundersOptimizer {
 public:
     PoundersSolveResult solve(const BoundedLeastSquaresProblem& problem, const Vector& x0,
-                              const PoundersSolveRequest& request) const;
+                              const PoundersSolveRequest& request,
+                              const PoundersObserver& observe = {}) const;
 };

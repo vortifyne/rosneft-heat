@@ -47,12 +47,6 @@ std::span<const double> values(const Vector& v) {
     return {v.native().data(), static_cast<std::size_t>(v.size())};
 }
 
-struct State {
-    ColGrid grid;
-    Vector T;
-    std::vector<double> I;
-};
-
 std::vector<double> deposition_times(const ColGrid& grid, std::span<const BasinConfig> configs) {
     std::unordered_map<int, std::pair<double, double>> birth;
     for (std::size_t i = 0; i < configs.size(); ++i) {
@@ -114,23 +108,23 @@ Vector initial_temperature(const ColGrid& grid, const ScalarProfile& surface, in
     return T;
 }
 
-void observe_state(const State& state, const EasyRoModel& easy_ro, BasinSnapshot::Kind kind,
-                   std::size_t epoch, int step, double age_ma, const BasinObserver& observer,
-                   BasinTimings& timings) {
+void observe_state(const ColGrid& grid, const Vector& T, std::span<const double> I,
+                   const EasyRoModel& easy_ro, BasinSnapshot::Kind kind, std::size_t epoch,
+                   int step, double age_ma, const BasinObserver& observer, BasinTimings& timings) {
     if (!observer)
         return;
     auto start = Clock::now();
-    std::vector<double> Ro(state.grid.cells.size() + state.grid.columns.size());
-    easy_ro.reflectance(state.I, Ro);
+    std::vector<double> Ro(grid.cells.size() + grid.columns.size());
+    easy_ro.reflectance(I, Ro);
     timings.easy_ro_s += elapsed_seconds(start);
     start = Clock::now();
     observer({.kind = kind,
               .epoch = epoch,
               .step = step,
               .age_ma = age_ma,
-              .grid = state.grid,
-              .T = values(state.T),
-              .I = state.I,
+              .grid = grid,
+              .T = values(T),
+              .I = I,
               .Ro = Ro});
     timings.output_s += elapsed_seconds(start);
 }
@@ -235,17 +229,17 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
     const auto& settings = settings_;
     const auto configs = input.configs();
     const auto& easy_ro = easy_ro_;
-    State state{.grid = epochs_.front().initial_grid,
-                .T = initial_temperature_,
-                .I = easy_ro.initial_state(epochs_.front().deposition_times.size())};
+    ColGrid grid = epochs_.front().initial_grid;
+    Vector T = initial_temperature_;
+    auto I = easy_ro.initial_state(epochs_.front().deposition_times.size());
     result.epochs.reserve(configs.size() - 1);
     TimeIntegrator integrator;
     integrator.set_linear_solver(settings.linear_solver);
     integrator.set_preconditioner_reuse(settings.pc_reuse);
     result.timings.grid_s += elapsed_seconds(grid_start);
     if (settings.intermediate_snapshots)
-        observe_state(state, easy_ro, BasinSnapshot::Kind::initial, 0, 0, configs.front().age_ma,
-                      observe, result.timings);
+        observe_state(grid, T, I, easy_ro, BasinSnapshot::Kind::initial, 0, 0,
+                      configs.front().age_ma, observe, result.timings);
 
     for (std::size_t epoch_index = 0; epoch_index + 1 < configs.size(); ++epoch_index) {
         const auto epoch_start = Clock::now();
@@ -273,11 +267,16 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
             return boundaries;
         };
         {
-            const ColHeatSystem initial(state.grid, phi, lithotypes, kFluid, boundaries_at(0.0));
-            initial.interpolate_horizontal_temperature(state.T, node_T0);
+            std::vector<double> lambda(grid.cells.size());
+            for (const auto& cell : grid.cells)
+                lambda[cell.index] = thermal_properties(T[cell.index], phi[cell.index],
+                                                        *lithotypes[cell.index], kFluid)
+                                         .lambda;
+            interpolate_horizontal_temperature(grid, values(T), lambda, boundaries_at(0.0),
+                                               node_T0);
         }
         double t = 0.0;
-        integrator.set_initial_solution(t, state.T);
+        integrator.set_initial_solution(t, T);
         if (epoch_index > 0 && settings.pc_reuse == PcReuse::manual) {
             integrator.reset_linear_solver();
         }
@@ -291,7 +290,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
             BasinIntervalStats step_stats{.epoch = epoch_index,
                                           .age_begin_ma = cfg0.age_ma - t / kSecondsPerMa,
                                           .age_end_ma = cfg0.age_ma - t_next / kSecondsPerMa};
-            ColGrid grid = epoch.mesh.at(theta);
+            grid = epoch.mesh.at(theta);
             for (std::size_t i = 0; i < phi.size(); ++i)
                 phi[i] = std::lerp(epoch.phi0[i], epoch.phi1[i], theta);
             ColHeatSystem system(grid, phi, lithotypes, kFluid, boundaries_at(theta));
@@ -320,19 +319,17 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
             const auto easy_ro_start = Clock::now();
             system.interpolate_horizontal_temperature(T1, node_T1);
             easy_ro.advance(node_T0, node_T1, epoch_begin + t, epoch_begin + t_next,
-                            epoch.deposition_times, state.I);
+                            epoch.deposition_times, I);
             node_T0.swap(node_T1);
             step_stats.timings.easy_ro_s += elapsed_seconds(easy_ro_start);
             step_stats.timesteps = step.accepted_steps;
             step_stats.nonlinear_iterations = step.nonlinear_iterations;
             step_stats.linear_iterations = step.linear_iterations;
-            state.grid = std::move(grid);
-            state.T = T1;
             t = t_next;
             const bool at_event = t == duration;
             if (settings.intermediate_snapshots)
                 observe_state(
-                    state, easy_ro,
+                    grid, T1, I, easy_ro,
                     at_event ? BasinSnapshot::Kind::before_event : BasinSnapshot::Kind::timestep,
                     epoch_index, epoch_stats.timesteps + step_stats.timesteps,
                     at_event ? cfg1.age_ma : step_stats.age_end_ma, observe, step_stats.timings);
@@ -353,20 +350,18 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
         ColGrid next_grid = last ? final_grid_ : epochs_[epoch_index + 1].initial_grid;
         epoch_stats.timings.grid_s += elapsed_seconds(grid_start);
         const auto transfer_start = Clock::now();
-        state.T = interpolate_temperature(state.grid, next_grid, state.T);
-        state.I = interpolate_reaction_integrals(state.grid, next_grid, state.I,
-                                                 easy_ro.reaction_count(), born);
+        T = interpolate_temperature(grid, next_grid, integrator.current_snapshot().u);
+        I = interpolate_reaction_integrals(grid, next_grid, I, easy_ro.reaction_count(), born);
         if (!last && born != -1) {
             for (const auto& cell : next_grid.cells) {
                 if (cell.layer_id == born)
-                    state.T[static_cast<Vector::Index>(cell.index)] =
-                        cfg1.T_surf.at(cell.center().x);
+                    T[static_cast<Vector::Index>(cell.index)] = cfg1.T_surf.at(cell.center().x);
             }
         }
-        state.grid = std::move(next_grid);
+        grid = std::move(next_grid);
         epoch_stats.timings.transfer_s += elapsed_seconds(transfer_start);
         if (settings.intermediate_snapshots || last)
-            observe_state(state, easy_ro, BasinSnapshot::Kind::after_event, epoch_index + 1, 0,
+            observe_state(grid, T, I, easy_ro, BasinSnapshot::Kind::after_event, epoch_index + 1, 0,
                           cfg1.age_ma, observe, epoch_stats.timings);
         epoch_stats.timings.total_s = elapsed_seconds(epoch_start);
         result.timesteps += epoch_stats.timesteps;

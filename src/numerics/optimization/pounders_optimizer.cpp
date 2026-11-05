@@ -138,7 +138,9 @@ Vector copy_from_petsc(Vec source, Vector::Index size) {
 
 struct ResidualCallbackContext {
     const BoundedLeastSquaresProblem* problem;
+    const PoundersObserver* observer;
     std::exception_ptr exception;
+    int evaluations = 0;
     double residual_tolerance = 0.0;
     double objective = std::numeric_limits<double>::infinity();
     Vector parameters{};
@@ -147,7 +149,6 @@ struct ResidualCallbackContext {
 };
 
 PetscErrorCode evaluate_residual(Tao tao, Vec px, Vec pr, void* raw_context) {
-    static_cast<void>(tao);
     auto* context = static_cast<ResidualCallbackContext*>(raw_context);
     if (context->exception != nullptr) {
         return PETSC_ERR_USER;
@@ -166,6 +167,12 @@ PetscErrorCode evaluate_residual(Tao tao, Vec px, Vec pr, void* raw_context) {
             throw std::runtime_error("Residual function returned non-finite values");
         }
         copy_to_petsc(r, pr);
+        ++context->evaluations;
+        if (*context->observer) {
+            PetscInt iteration = 0;
+            check_petsc(TaoGetIterationNumber(tao, &iteration), "Failed to get POUNDERS iteration");
+            (*context->observer)(static_cast<int>(iteration), context->evaluations, x, r);
+        }
         const double objective = r.squared_norm();
         const bool within_errors =
             context->residual_tolerance > 0.0 && r.infinity_norm() <= context->residual_tolerance;
@@ -235,8 +242,8 @@ int to_int(PetscInt value, const char* name) {
 } // namespace
 
 PoundersSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& problem,
-                                             const Vector& x0,
-                                             const PoundersSolveRequest& request) const {
+                                             const Vector& x0, const PoundersSolveRequest& request,
+                                             const PoundersObserver& observe) const {
     validate_problem(problem, x0);
     validate_request(request);
     ensure_petsc_is_active();
@@ -267,6 +274,7 @@ PoundersSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& p
     copy_to_petsc(problem.upper_bounds, upper.get());
 
     ResidualCallbackContext context{.problem = &problem,
+                                    .observer = &observe,
                                     .exception = nullptr,
                                     .residual_tolerance = request.residual_tolerance};
     TaoHandle tao;

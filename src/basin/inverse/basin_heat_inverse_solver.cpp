@@ -8,22 +8,19 @@ BasinHeatInverseSolver::BasinHeatInverseSolver(BasinHeatResidualEvaluator residu
 Vector BasinHeatInverseSolver::solve(const BasinHeatInverseSolveRequest& request,
                                      const BasinInverseObserver& observe) {
     const auto& space = residual_evaluator_.parameter_space();
-    int evaluations = 0;
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = space.normalized_lower_bounds(),
         .upper_bounds = space.normalized_upper_bounds(),
         .residual_count = residual_evaluator_.observations().size(),
         .residual_function =
-            [&](const Vector& normalized) {
-                Vector residuals = residual_evaluator_.evaluate(normalized);
-                ++evaluations;
-                if (observe)
-                    observe(evaluations, space.to_physical(normalized), residuals);
-                return residuals;
-            },
+            [&](const Vector& normalized) { return residual_evaluator_.evaluate(normalized); },
     };
-    result_ = optimizer_.solve(problem, space.to_normalized(request.initial_parameters),
-                               request.optimization);
+    result_ = optimizer_.solve(
+        problem, space.to_normalized(request.initial_parameters), request.optimization,
+        [&](int iteration, int evaluation, const Vector& normalized, const Vector& residuals) {
+            if (observe)
+                observe(iteration, evaluation, space.to_physical(normalized), residuals);
+        });
     return space.to_physical(result_.parameters);
 }
 

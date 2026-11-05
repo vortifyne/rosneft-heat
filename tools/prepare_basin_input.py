@@ -31,7 +31,6 @@ def main() -> None:
     arguments.output.mkdir(parents=True, exist_ok=True)
     layer_ids = {name: index + 1 for index, name in enumerate(data.layers)}
 
-    configuration_rows = []
     layer_rows = []
     boundary_rows = []
     for age in ages:

@@ -83,7 +83,6 @@ int main(int argc, char* argv[]) {
             const auto start = Clock::now();
             const std::filesystem::path input(argv[1]), output(argv[2]);
             std::filesystem::create_directories(output);
-            settings.intermediate_snapshots = false;
             BasinForwardSolver forward(BasinInput::read(input), settings);
             request.initial_parameters =
                 Vector(static_cast<Vector::Index>(forward.configs().size()));
@@ -92,25 +91,58 @@ int main(int argc, char* argv[]) {
                 request.initial_parameters = read_basin_parameters(initial_path, forward.configs());
             BasinHeatInverseSolver solver(BasinHeatResidualEvaluator(
                 std::move(forward), BasinHeatObservationData::read(input / "observations.csv")));
+            const auto points = solver.residual_evaluator().observations().points();
+            int temperature_count = 0, reflectance_count = 0;
+            for (const auto& point : points) {
+                if (point.kind == BasinObservable::temperature)
+                    ++temperature_count;
+                else
+                    ++reflectance_count;
+            }
+            const auto count_within_errors = [points](const Vector& r) {
+                int temperature = 0, reflectance = 0;
+                for (std::size_t j = 0; j < points.size(); ++j) {
+                    if (std::abs(r[static_cast<Vector::Index>(j)]) > 1.0)
+                        continue;
+                    if (points[j].kind == BasinObservable::temperature)
+                        ++temperature;
+                    else
+                        ++reflectance;
+                }
+                return std::pair{temperature, reflectance};
+            };
+            std::cout << "Starting inversion: " << request.initial_parameters.size()
+                      << " parameters; T observations=" << temperature_count
+                      << "; Ro observations=" << reflectance_count << '\n'
+                      << std::flush;
             std::ofstream progress(output / "progress.csv");
-            progress << "evaluation,objective,max_normalized_residual,elapsed_s\n"
+            progress << "iteration,evaluation,objective,max_normalized_residual,"
+                        "temperature_in_tolerance,temperature_count,"
+                        "reflectance_in_tolerance,reflectance_count,elapsed_s\n"
                      << std::setprecision(17);
-            const Vector parameters =
-                solver.solve(request, [&](int evaluation, const Vector& q, const Vector& r) {
-                    if (evaluation == 1)
-                        write_basin_parameters(
-                            output / "initial_parameters.csv",
-                            solver.residual_evaluator().forward_solver().configs(), q);
-                    const double elapsed = elapsed_seconds(start);
-                    progress << evaluation << ',' << r.squared_norm() << ',' << r.infinity_norm()
-                             << ',' << elapsed << '\n'
-                             << std::flush;
-                    std::cout << "Forward " << evaluation << ": objective=" << r.squared_norm()
-                              << "; max residual=" << r.infinity_norm() << "; elapsed=" << elapsed
-                              << " s\n"
-                              << std::flush;
-                });
+            const Vector parameters = solver.solve(request, [&](int iteration, int evaluation,
+                                                                const Vector& q, const Vector& r) {
+                if (evaluation == 1)
+                    write_basin_parameters(output / "initial_parameters.csv",
+                                           solver.residual_evaluator().forward_solver().configs(),
+                                           q);
+                const double elapsed = elapsed_seconds(start);
+                const auto [temperature_inside, reflectance_inside] = count_within_errors(r);
+                progress << iteration << ',' << evaluation << ',' << r.squared_norm() << ','
+                         << r.infinity_norm() << ',' << temperature_inside << ','
+                         << temperature_count << ',' << reflectance_inside << ','
+                         << reflectance_count << ',' << elapsed << '\n'
+                         << std::flush;
+                std::cout << "Iteration " << iteration << ", forward " << evaluation
+                          << ": objective=" << r.squared_norm()
+                          << "; max residual=" << r.infinity_norm() << "; T=" << temperature_inside
+                          << '/' << temperature_count << "; Ro=" << reflectance_inside << '/'
+                          << reflectance_count << "; elapsed=" << elapsed << " s\n"
+                          << std::flush;
+            });
             const auto& result = solver.optimization_result();
+            const auto [temperature_inside, reflectance_inside] =
+                count_within_errors(result.residuals);
             auto& evaluator = solver.residual_evaluator();
             auto& final_forward = evaluator.forward_solver();
             write_basin_parameters(output / "parameters.csv", final_forward.configs(), parameters);
@@ -134,15 +166,21 @@ int main(int argc, char* argv[]) {
                     << "\nobservations=" << result.residuals.size()
                     << "\nobjective=" << result.objective
                     << "\nmax_normalized_residual=" << result.residuals.infinity_norm()
+                    << "\ntemperature_in_tolerance=" << temperature_inside
+                    << "\ntemperature_count=" << temperature_count
+                    << "\nreflectance_in_tolerance=" << reflectance_inside
+                    << "\nreflectance_count=" << reflectance_count
                     << "\niterations=" << result.iterations
                     << "\nforward_evaluations=" << result.function_evaluations
                     << "\nelapsed_s=" << elapsed_seconds(start) << '\n';
             std::cout << "Finished: " << termination(result.status)
                       << "; objective=" << result.objective
-                      << "; max residual=" << result.residuals.infinity_norm() << '\n';
+                      << "; max residual=" << result.residuals.infinity_norm()
+                      << "; T=" << temperature_inside << '/' << temperature_count
+                      << "; Ro=" << reflectance_inside << '/' << reflectance_count << '\n';
             if (save_forward) {
                 final_forward.set_parameters(parameters);
-                final_forward.set_intermediate_snapshots(true);
+                final_forward.set_intermediate_snapshots(settings.intermediate_snapshots);
                 (void)final_forward.solve(output / "forward");
             }
         }

@@ -8,11 +8,11 @@
 #include <optional>
 
 struct BasinForwardSettings {
-    double dx = 50.0;       // Horizontal step [m].
+    double dx = 200.0;      // Horizontal step [m].
     double dz = 50.0;       // Vertical step [m].
     double dz_min = 5.0e-2; // Minimum cell height [m].
     double dt_ma = 1.0;     // Time step [Ma].
-    double rdp_tol = 0.0;
+    double rdp_tol = 5.0;
     // If set, simplify only the column axis; integrate the geometry selected
     // by rdp_tol without this additional simplification.
     std::optional<double> axis_rdp_tol = std::nullopt;
