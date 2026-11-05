@@ -39,31 +39,66 @@ BasinConfig new_configuration() {
 
 } // namespace
 
-TEST(ColEpochGrid, PreparesBirthAtTheLocalUppermostOldLayer) {
+TEST(ColEpochGrid, IncludesNewLayerAndKeepsOldContacts) {
     const auto epoch =
         make_col_epoch_grid(make_basin_geometry(old_configuration()),
                             make_basin_geometry(new_configuration()), 10.0, 0.4, 1e-4);
     ASSERT_EQ(epoch.born_layer_id, 1);
     EXPECT_EQ(epoch.x, (std::vector<double>{0.0, 0.5, 1.0, 2.0}));
-    EXPECT_EQ(epoch.layer_ids, (std::vector<int>{2, 3}));
-    // The future new-layer volume belongs to layer 3 left of x=1, and layer 2 right of it.
-    EXPECT_NEAR(epoch.z1[1][1], 0.0, 1e-12);
-    EXPECT_NEAR(epoch.z1[1][2], 3.0, 1e-12);
+    EXPECT_EQ(epoch.layer_ids, (std::vector<int>{1, 2, 3}));
+    EXPECT_NEAR(epoch.z0[1][1], epoch.z0[1][0], 1e-12);
+    EXPECT_NEAR(epoch.z1[1][1], 0.2, 1e-12);
+    EXPECT_NEAR(epoch.z1[1][2], 0.2, 1e-12);
+    EXPECT_NEAR(epoch.z1[1][3], 3.0, 1e-12);
     EXPECT_NEAR(epoch.z1[2][0], 0.0, 1e-12);
-    EXPECT_NEAR(epoch.z1[2][1], 0.8, 1e-12);
+    EXPECT_NEAR(epoch.z1[2][1], 0.4, 1e-12);
+    EXPECT_NEAR(epoch.z1[2][2], 0.8, 1e-12);
 }
 
-TEST(ColEpochGrid, InterpolatesOnlyOldLayersDuringEpoch) {
+TEST(ColEpochGrid, GrowsNewLayerAndInterpolatesOldContacts) {
     const auto epoch =
         make_col_epoch_grid(make_basin_geometry(old_configuration()),
                             make_basin_geometry(new_configuration()), 10.0, 0.4, 1e-4);
     const auto grid = epoch.at(0.5);
     const auto& column = grid.columns.back();
+    EXPECT_EQ(grid.cells[column.front()].layer_id, 1);
     EXPECT_NEAR(grid.cells[column.front()].z_top, 0.0, 1e-12);
-    EXPECT_NEAR(grid.cells[column[1]].z_bottom, 0.65, 1e-12);
+    EXPECT_NEAR(grid.cells[column.front()].z_bottom, 0.2, 1e-12);
+    EXPECT_NEAR(grid.cells[column[1]].z_bottom, 0.425, 1e-12);
+    EXPECT_NEAR(grid.cells[column[2]].z_bottom, 0.65, 1e-12);
     EXPECT_NEAR(grid.cells[column.back()].z_bottom, 3.0, 1e-12);
-    for (const auto& cell : grid.cells)
-        EXPECT_NE(cell.layer_id, 1);
+}
+
+TEST(ColEpochGrid, UnfoldsCellsFromBottomAtTheirDepositionTimes) {
+    const BasinConfig first{.age_ma = 1.0,
+                            .layers = {layer(2, {0.0, 1.0}, {0.0, 0.0}, {10.0, 10.0})},
+                            .T_surf = {},
+                            .q_basal = {}};
+    const BasinConfig second{.age_ma = 0.0,
+                             .layers = {layer(1, {0.0, 1.0}, {2.0, 2.0}, {6.0, 6.0}),
+                                        layer(2, {0.0, 1.0}, {6.0, 6.0}, {12.0, 12.0})},
+                             .T_surf = {},
+                             .q_basal = {}};
+    constexpr double minimum_height = 0.01;
+    const auto epoch = make_col_epoch_grid(make_basin_geometry(first), make_basin_geometry(second),
+                                           1.0, 1.0, minimum_height);
+    const auto initial = epoch.at(0.0);
+    const auto final = epoch.at(1.0);
+    for (std::size_t row = 0; row < 4; ++row) {
+        EXPECT_NEAR(initial.cells[row].height(), minimum_height, 1e-12);
+        EXPECT_NEAR(final.cells[row].z_top, 2.0 + static_cast<double>(row), 1e-12);
+        const double a = static_cast<double>(row) / 4.0;
+        const auto at_birth = epoch.at(1.0 - a);
+        const double surface = 2.0 * (1.0 - a);
+        EXPECT_NEAR(at_birth.cells.front().z_top, surface, 1e-12);
+        EXPECT_LE(at_birth.cells[row].z_top - surface, 4.0 * minimum_height);
+    }
+    const auto middle = epoch.at(0.5);
+    EXPECT_NEAR(middle.cells[0].height(), minimum_height, 1e-12);
+    EXPECT_NEAR(middle.cells[1].height(), minimum_height, 1e-12);
+    EXPECT_GT(middle.cells[2].height(), 0.99);
+    EXPECT_GT(middle.cells[3].height(), 0.99);
+    EXPECT_NEAR(middle.cells[4].z_top, 3.0, 2.0 * minimum_height);
 }
 
 TEST(ColEpochGrid, MovingGridPreservesCellIdentityAndOuterArea) {
@@ -86,14 +121,14 @@ TEST(ColEpochGrid, MovingGridPreservesCellIdentityAndOuterArea) {
     }
 }
 
-TEST(ColEpochGrid, RdpRetainsPinchoutAndLocalOwner) {
+TEST(ColEpochGrid, RdpRetainsPinchoutAndOldContact) {
     const auto first = make_basin_geometry(old_configuration());
     const auto second = make_basin_geometry(new_configuration());
     const auto reduced =
         make_col_epoch_grid(simplify_basin_geometry_rdp(first, 0.5),
                             simplify_basin_geometry_rdp(second, 0.5), 10.0, 0.4, 1e-4);
     EXPECT_NE(std::find(reduced.x.begin(), reduced.x.end(), 1.0), reduced.x.end());
-    EXPECT_NEAR(reduced.z1.back()[1], 0.8, 1e-12);
+    EXPECT_NEAR(reduced.z1.back()[2], 0.8, 1e-12);
     const auto original_on_reduced_axis = make_col_epoch_grid(first, second, 10.0, 0.4, 1e-4, 0.5);
     EXPECT_NE(std::find(original_on_reduced_axis.x.begin(), original_on_reduced_axis.x.end(), 1.0),
               original_on_reduced_axis.x.end());

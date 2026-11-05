@@ -98,7 +98,7 @@ HeatBoundaryData bc(const BasinConfig& cfg0, const BasinConfig& cfg1, double the
     };
 }
 
-Vector initial_temperature(const ColGrid& grid, const ScalarProfile& surface) {
+Vector initial_temperature(const ColGrid& grid, const ScalarProfile& surface, int born) {
     double integral = 0.0;
     for (std::size_t i = 1; i < surface.x.size(); ++i)
         integral +=
@@ -107,7 +107,9 @@ Vector initial_temperature(const ColGrid& grid, const ScalarProfile& surface) {
     Vector T(static_cast<Vector::Index>(grid.cells.size()));
     for (const auto& cell : grid.cells) {
         const double top = grid.cells[grid.top_cells[cell.column]].z_top;
-        T[static_cast<Vector::Index>(cell.index)] = mean_surface + 0.03 * (cell.center().z - top);
+        T[static_cast<Vector::Index>(cell.index)] =
+            cell.layer_id == born ? surface.at(cell.center().x)
+                                  : mean_surface + 0.03 * (cell.center().z - top);
     }
     return T;
 }
@@ -159,14 +161,17 @@ BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings op
                                         settings.dz_min, settings.axis_rdp_tol,
                                         lithotype_breakpoints(configs[i], &configs[i + 1]));
         data.initial_grid = data.mesh.at(0.0);
-        data.deposition_times = deposition_times(data.initial_grid, configs);
+        // Use the final layer coordinates: the new cells are compressed at the start.
+        data.deposition_times = deposition_times(data.mesh.at(1.0), configs);
         const auto count = data.initial_grid.cells.size();
         data.lithotypes.resize(count);
         data.phi0.resize(count);
         data.phi1.resize(count);
         for (const auto& cell : data.initial_grid.cells) {
             const double x = cell.center().x;
-            const auto& layer0 = configs[i].layer(cell.layer_id);
+            const auto& layer0 = data.mesh.born_layer_id == cell.layer_id
+                                     ? configs[i + 1].layer(cell.layer_id)
+                                     : configs[i].layer(cell.layer_id);
             data.lithotypes[cell.index] = layer0.lithotype_at(x);
             data.phi0[cell.index] = layer0.phi_at(x);
             data.phi1[cell.index] = configs[i + 1].layer(cell.layer_id).phi_at(x);
@@ -180,63 +185,8 @@ BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings op
     final_grid_ = make_col_grid(
         geometry, make_column_axis(knots, settings.dx, lithotype_breakpoints(configs.back())),
         settings.dz);
-    initial_temperature_ =
-        initial_temperature(epochs_.front().initial_grid, configs.front().T_surf);
-    if (!settings.reset_final_maturity && epochs_.back().mesh.born_layer_id) {
-        const int born = *epochs_.back().mesh.born_layer_id;
-        const auto source = epochs_.back().mesh.at(1.0);
-        const auto depths = horizontal_node_depths(final_grid_);
-        const auto times = deposition_times(final_grid_, configs);
-        std::vector<double> centers;
-        for (std::size_t column = 0; column < source.columns.size(); ++column)
-            centers.push_back(std::midpoint(source.x[column], source.x[column + 1]));
-        for (const auto& column : final_grid_.columns) {
-            const auto first = std::find_if(column.begin(), column.end(), [&](std::size_t index) {
-                return final_grid_.cells[index].layer_id == born;
-            });
-            if (first == column.end())
-                continue;
-            const auto last = std::find_if_not(first, column.end(), [&](std::size_t index) {
-                return final_grid_.cells[index].layer_id == born;
-            });
-            const auto c = final_grid_.cells[*first].column;
-            const double x = std::midpoint(final_grid_.x[c], final_grid_.x[c + 1]);
-            auto right = static_cast<std::size_t>(
-                std::lower_bound(centers.begin(), centers.end(), x) - centers.begin());
-            right = std::min(std::max(right, std::size_t{1}), centers.size() - 1);
-            const auto left = right == 0 ? 0 : right - 1;
-            const double wx =
-                left == right ? 0.0 : (x - centers[left]) / (centers[right] - centers[left]);
-            for (std::size_t node = *first + c; node <= *(last - 1) + c + 1; ++node) {
-                std::array<std::size_t, 4> cells;
-                std::array<double, 4> weights;
-                for (std::size_t side = 0; side < 2; ++side) {
-                    const auto& indices = source.columns[side == 0 ? left : right];
-                    const auto upper =
-                        std::lower_bound(indices.begin(), indices.end(), depths[node],
-                                         [&](std::size_t index, double z) {
-                                             return source.cells[index].center().z < z;
-                                         });
-                    const auto r = std::min(
-                        std::max(std::size_t{1}, static_cast<std::size_t>(upper - indices.begin())),
-                        indices.size() - 1);
-                    const auto l = r == 0 ? 0 : r - 1;
-                    const double z0 = source.cells[indices[l]].center().z;
-                    const double z1 = source.cells[indices[r]].center().z;
-                    const double wz = l == r ? 0.0 : (depths[node] - z0) / (z1 - z0);
-                    cells[2 * side] = indices[l];
-                    cells[2 * side + 1] = indices[r];
-                    const double weight_x = side == 0 ? 1.0 - wx : wx;
-                    weights[2 * side] = weight_x * (1.0 - wz);
-                    weights[2 * side + 1] = weight_x * wz;
-                }
-                final_birth_nodes_.push_back(node);
-                final_birth_cells_.push_back(cells);
-                final_birth_weights_.push_back(weights);
-                final_birth_deposition_.push_back(times[node]);
-            }
-        }
-    }
+    initial_temperature_ = initial_temperature(epochs_.front().initial_grid, configs.front().T_surf,
+                                               epochs_.front().mesh.born_layer_id.value_or(-1));
 }
 
 void BasinForwardSolver::set_parameters(const Vector& parameters) {
@@ -269,8 +219,6 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
     State state{.grid = epochs_.front().initial_grid,
                 .T = initial_temperature_,
                 .I = easy_ro.initial_state(epochs_.front().deposition_times.size())};
-    auto final_birth_I = easy_ro.initial_state(final_birth_nodes_.size());
-    std::vector<double> birth_T0(final_birth_nodes_.size()), birth_T1(final_birth_nodes_.size());
     result.epochs.reserve(configs.size() - 1);
     TimeIntegrator integrator;
     integrator.set_linear_solver(settings.linear_solver);
@@ -313,7 +261,6 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
                                           .age_begin_ma = cfg0.age_ma - t / kSecondsPerMa,
                                           .age_end_ma = cfg0.age_ma - t_next / kSecondsPerMa};
             ColGrid grid = epoch.mesh.at(theta);
-            const Vector& T0 = state.T;
             for (std::size_t i = 0; i < phi.size(); ++i)
                 phi[i] = std::lerp(epoch.phi0[i], epoch.phi1[i], theta);
             auto boundaries = bc(cfg0, cfg1, theta);
@@ -350,21 +297,6 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
             easy_ro.advance(node_T0, node_T1, epoch_begin + t, epoch_begin + t_next,
                             epoch.deposition_times, state.I);
             node_T0.swap(node_T1);
-            if (epoch_index + 1 == epochs_.size() && !final_birth_nodes_.empty()) {
-                for (std::size_t node = 0; node < final_birth_nodes_.size(); ++node) {
-                    double old_value = 0.0, new_value = 0.0;
-                    for (std::size_t j = 0; j < 4; ++j) {
-                        const auto index = static_cast<Vector::Index>(final_birth_cells_[node][j]);
-                        const double weight = final_birth_weights_[node][j];
-                        old_value += weight * T0[index];
-                        new_value += weight * T1[index];
-                    }
-                    birth_T0[node] = old_value;
-                    birth_T1[node] = new_value;
-                }
-                easy_ro.advance(birth_T0, birth_T1, epoch_begin + t, epoch_begin + t_next,
-                                final_birth_deposition_, final_birth_I);
-            }
             step_stats.timings.easy_ro_s += elapsed_seconds(easy_ro_start);
             step_stats.timesteps = step.accepted_steps;
             step_stats.nonlinear_iterations = step.nonlinear_iterations;
@@ -388,20 +320,23 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
         }
         grid_start = Clock::now();
         const bool last = epoch_index + 2 == configs.size();
-        const int born = epoch.mesh.born_layer_id.value_or(-1);
+        int born = -1;
+        if (!last)
+            born = epochs_[epoch_index + 1].mesh.born_layer_id.value_or(-1);
+        else if (settings.reset_final_maturity)
+            born = epoch.mesh.born_layer_id.value_or(-1);
         ColGrid next_grid = last ? final_grid_ : epochs_[epoch_index + 1].initial_grid;
         epoch_stats.timings.grid_s += elapsed_seconds(grid_start);
         const auto transfer_start = Clock::now();
         state.T = interpolate_temperature(state.grid, next_grid, state.T);
         state.I = interpolate_reaction_integrals(state.grid, next_grid, state.I,
                                                  easy_ro.reaction_count(), born);
-        if (last) {
-            const auto reactions = easy_ro.reaction_count();
-            for (std::size_t node = 0; node < final_birth_nodes_.size(); ++node)
-                std::copy_n(final_birth_I.begin() + static_cast<std::ptrdiff_t>(node * reactions),
-                            reactions,
-                            state.I.begin() +
-                                static_cast<std::ptrdiff_t>(final_birth_nodes_[node] * reactions));
+        if (!last && born != -1) {
+            for (const auto& cell : next_grid.cells) {
+                if (cell.layer_id == born)
+                    state.T[static_cast<Vector::Index>(cell.index)] =
+                        cfg1.T_surf.at(cell.center().x);
+            }
         }
         state.grid = std::move(next_grid);
         epoch_stats.timings.transfer_s += elapsed_seconds(transfer_start);
