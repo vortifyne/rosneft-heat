@@ -2,6 +2,7 @@
 #include "basin/mesh/column_test_utils.hpp"
 #include "basin/postprocessing/energy_rates.hpp"
 
+#include <cmath>
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -123,4 +124,31 @@ TEST(ColHeatSystem, UsesThermalFieldsAndConservesEnergy) {
     EXPECT_NEAR(r.native().sum(),
                 rates.surface_outflow - rates.basal_inflow - rates.lateral_inflow - rates.source,
                 1.0e-9);
+}
+
+TEST(ColHeatSystem, MpfaKeepsCsrPatternWhenConductivityChanges) {
+    const auto grid = make_test_column_grid(4, 3, 200.0, 300.0);
+    const LithotypeProperties rock{
+        .code = 1, .rho_s = 2600.0, .lambda20 = 3.0, .c20 = 850.0, .A_s = 1.0e-6};
+    const std::vector<double> phi(grid.cells.size(), 0.2);
+    const std::vector<const LithotypeProperties*> rocks(grid.cells.size(), &rock);
+    ColHeatSystem system(
+        grid, phi, rocks, {.lambda = 0.7, .rho = 1040.0, .c = 4184.0},
+        {.T_surf = [](Point2D) { return 285.0; }, .q_basal = [](Point2D) { return 0.06; }});
+    Vector T(static_cast<Vector::Index>(grid.cells.size()));
+    T.set_constant(290.0);
+    SparseMatrix first(T.size(), T.size(), SparseStorageOrder::csr);
+    SparseMatrix second(T.size(), T.size(), SparseStorageOrder::csr);
+    system.assemble_matrix(T, first);
+    for (Vector::Index i = 0; i < T.size(); ++i)
+        T[i] = 350.0 + 50.0 * std::sin(static_cast<double>(i));
+    system.assemble_matrix(T, second);
+    ASSERT_TRUE(system.has_fixed_matrix_pattern());
+    ASSERT_EQ(first.nonzero_count(), second.nonzero_count());
+    for (Vector::Index i = 0; i <= T.size(); ++i)
+        EXPECT_EQ(first.native_csr().outerIndexPtr()[i], second.native_csr().outerIndexPtr()[i]);
+    for (Vector::Index i = 0; i < first.nonzero_count(); ++i)
+        EXPECT_EQ(first.native_csr().innerIndexPtr()[i], second.native_csr().innerIndexPtr()[i]);
+    system.set_flux_scheme(MultipointFluxScheme::nonlinear_conservative);
+    EXPECT_FALSE(system.has_fixed_matrix_pattern());
 }

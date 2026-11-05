@@ -22,12 +22,18 @@ public:
     void set_flux_scheme(MultipointFluxScheme scheme) noexcept;
     [[nodiscard]] Vector::Index size() const noexcept;
 
+    bool has_fixed_matrix_pattern() const noexcept override {
+        return scheme_ == MultipointFluxScheme::linear;
+    }
+
     [[nodiscard]] const AssemblyTimings& property_timings() const noexcept {
         return property_timings_;
     }
 
     void assemble_residual(const Vector& T, Vector& r) const;
     void assemble_matrix(const Vector& T, SparseMatrix& M) const;
+
+    void interpolate_horizontal_temperature(const Vector& T, std::span<double> node_T) const;
 
     void assemble_residual(double t, const Vector& T, const Vector& dT_dt,
                            Vector& r) const override;
@@ -38,8 +44,10 @@ private:
     void update_coefficients(const Vector& T, double& property_s) const;
     [[nodiscard]] double horizontal_transmissibility(const HorizontalFace& face) const;
 
-    void add_vertical_flux_residual(const Vector& T, Vector& r) const;
-    void add_vertical_flux_matrix(const Vector& T) const;
+    void add_mpfa_residual(const Vector& T, Vector& r) const;
+    void add_nmpfa_residual(const Vector& T, Vector& r) const;
+    void add_mpfa_matrix() const;
+    void add_nmpfa_matrix(const Vector& T) const;
     void add_surface_step_residual(const Vector& T, Vector& r) const;
     void add_surface_step_matrix() const;
     void add_horizontal_flux_residual(const Vector& T, Vector& r) const;

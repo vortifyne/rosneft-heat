@@ -46,6 +46,14 @@ void ColHeatSystem::set_flux_scheme(MultipointFluxScheme scheme) noexcept {
     scheme_ = scheme;
 }
 
+void ColHeatSystem::interpolate_horizontal_temperature(const Vector& T,
+                                                       std::span<double> node_T) const {
+    double seconds = 0.0;
+    update_coefficients(T, seconds);
+    ::interpolate_horizontal_temperature(
+        *grid_, {T.native().data(), static_cast<std::size_t>(T.size())}, lambda_, bc_, node_T);
+}
+
 Vector::Index ColHeatSystem::size() const noexcept {
     return static_cast<Vector::Index>(grid_->cells.size());
 }
@@ -76,7 +84,10 @@ void ColHeatSystem::assemble_residual(const Vector& T, Vector& r) const {
     update_coefficients(T, property_timings_.residual_s);
     r.resize(size());
     r.set_zero();
-    add_vertical_flux_residual(T, r);
+    if (scheme_ == MultipointFluxScheme::linear)
+        add_mpfa_residual(T, r);
+    else
+        add_nmpfa_residual(T, r);
     add_surface_step_residual(T, r);
     add_horizontal_flux_residual(T, r);
     add_boundary_residual(T, r);
@@ -110,7 +121,10 @@ void ColHeatSystem::assemble_matrix(NonlinearMethod method, double, const Vector
 void ColHeatSystem::assemble_matrix(const Vector& T, double alpha, SparseMatrix& M) const {
     update_coefficients(T, property_timings_.matrix_s);
     triplets_.clear();
-    add_vertical_flux_matrix(T);
+    if (scheme_ == MultipointFluxScheme::linear)
+        add_mpfa_matrix();
+    else
+        add_nmpfa_matrix(T);
     add_surface_step_matrix();
     add_horizontal_flux_matrix();
     add_boundary_matrix();
@@ -120,32 +134,56 @@ void ColHeatSystem::assemble_matrix(const Vector& T, double alpha, SparseMatrix&
     M.set_from_triplets(triplets_);
 }
 
-void ColHeatSystem::add_vertical_flux_residual(const Vector& T, Vector& r) const {
+void ColHeatSystem::add_mpfa_residual(const Vector& T, Vector& r) const {
     const std::span<const double> values{T.native().data(), static_cast<std::size_t>(T.size())};
     FluxStencil stencil;
     for (const auto& face : grid_->vertical_subfaces) {
         const auto P = face.left_cell;
         const auto N = face.right_cell;
-        compute_internal_flux(*grid_, face, scheme_, lambda_, values, bc_, stencil);
+        compute_mpfa_flux(*grid_, face, lambda_, bc_, stencil);
         const double F = evaluate_flux(stencil, values);
         r[static_cast<Vector::Index>(P)] += F;
         r[static_cast<Vector::Index>(N)] -= F;
     }
 }
 
-void ColHeatSystem::add_vertical_flux_matrix(const Vector& T) const {
+void ColHeatSystem::add_nmpfa_residual(const Vector& T, Vector& r) const {
     const std::span<const double> values{T.native().data(), static_cast<std::size_t>(T.size())};
+    FluxStencil stencil;
+    for (const auto& face : grid_->vertical_subfaces) {
+        compute_nmpfa_flux(*grid_, face, lambda_, values, bc_, stencil);
+        const double F = evaluate_flux(stencil, values);
+        r[static_cast<Vector::Index>(face.left_cell)] += F;
+        r[static_cast<Vector::Index>(face.right_cell)] -= F;
+    }
+}
+
+void ColHeatSystem::add_mpfa_matrix() const {
     FluxStencil stencil;
     for (const auto& face : grid_->vertical_subfaces) {
         const auto P = face.left_cell;
         const auto N = face.right_cell;
-        compute_internal_flux(*grid_, face, scheme_, lambda_, values, bc_, stencil);
+        compute_mpfa_flux(*grid_, face, lambda_, bc_, stencil);
         for (std::size_t i = 0; i < stencil.size; ++i) {
             triplets_.emplace_back(static_cast<Vector::Index>(P),
                                    static_cast<Vector::Index>(stencil.cells[i]), stencil.a[i]);
         }
         for (std::size_t i = 0; i < stencil.size; ++i) {
             triplets_.emplace_back(static_cast<Vector::Index>(N),
+                                   static_cast<Vector::Index>(stencil.cells[i]), -stencil.a[i]);
+        }
+    }
+}
+
+void ColHeatSystem::add_nmpfa_matrix(const Vector& T) const {
+    const std::span<const double> values{T.native().data(), static_cast<std::size_t>(T.size())};
+    FluxStencil stencil;
+    for (const auto& face : grid_->vertical_subfaces) {
+        compute_nmpfa_flux(*grid_, face, lambda_, values, bc_, stencil);
+        for (std::size_t i = 0; i < stencil.size; ++i) {
+            triplets_.emplace_back(static_cast<Vector::Index>(face.left_cell),
+                                   static_cast<Vector::Index>(stencil.cells[i]), stencil.a[i]);
+            triplets_.emplace_back(static_cast<Vector::Index>(face.right_cell),
                                    static_cast<Vector::Index>(stencil.cells[i]), -stencil.a[i]);
         }
     }

@@ -22,7 +22,9 @@ void write_intervals(const std::filesystem::path& path,
     std::ofstream file(path);
     file << "index,epoch,age_begin_ma,age_end_ma,timesteps,nonlinear_iterations,linear_iterations,"
             "total_s,grid_s,transfer_s,nonlinear_s,assembly_s,residual_s,matrix_s,"
-            "residual_properties_s,matrix_properties_s,linear_s,easy_ro_s,output_s,other_s\n";
+            "residual_properties_s,matrix_properties_s,linear_s,easy_ro_s,output_s,other_s,"
+            "linear_transfer_s,linear_setup_s,linear_solve_s,matrix_builds,vector_builds,"
+            "ksp_builds,pc_updates\n";
     file << std::setprecision(17);
     std::size_t index = 0;
     for (const auto& interval : intervals) {
@@ -34,7 +36,10 @@ void write_intervals(const std::filesystem::path& path,
              << ',' << t.nonlinear.assembly.total_s() << ',' << t.nonlinear.assembly.residual_s
              << ',' << t.nonlinear.assembly.matrix_s << ',' << t.properties.residual_s << ','
              << t.properties.matrix_s << ',' << t.nonlinear.linear_s << ',' << t.easy_ro_s << ','
-             << t.output_s << ',' << other_seconds(t) << '\n';
+             << t.output_s << ',' << other_seconds(t) << ',' << t.nonlinear.linear.transfer_s << ','
+             << t.nonlinear.linear.setup_s << ',' << t.nonlinear.linear.solve_s << ','
+             << t.nonlinear.linear.matrix_builds << ',' << t.nonlinear.linear.vector_builds << ','
+             << t.nonlinear.linear.ksp_builds << ',' << t.nonlinear.linear.pc_updates << '\n';
     }
     file.close();
     if (!file)
@@ -75,6 +80,14 @@ void write_basin_statistics(std::ostream& output, const BasinForwardResult& resu
     row("          Properties", t.properties.matrix_s);
     row("          Other", std::max(0.0, nonlinear.assembly.matrix_s - t.properties.matrix_s));
     row("      Linear solve", nonlinear.linear_s);
+    const auto& linear = nonlinear.linear;
+    if (linear.matrix_builds > 0) {
+        row("        Data and PETSc objects", linear.transfer_s);
+        row("        KSP/PC setup", linear.setup_s);
+        row("        Krylov iterations", linear.solve_s);
+        row("        Other", std::max(0.0, nonlinear.linear_s - linear.transfer_s - linear.setup_s -
+                                               linear.solve_s));
+    }
     row("      Other",
         std::max(0.0, nonlinear.total_s - nonlinear.assembly.total_s() - nonlinear.linear_s));
     row("    EASY%Ro", t.easy_ro_s);
@@ -83,6 +96,10 @@ void write_basin_statistics(std::ostream& output, const BasinForwardResult& resu
     row("  Other", std::max(0.0, program_s - initialization_s - input_s - t.total_s));
     output << '\n';
     row("Properties, total (included in assembly)", t.properties.total_s());
+    if (linear.matrix_builds > 0)
+        output << "\nPETSc objects created: Mat=" << linear.matrix_builds
+               << "; Vec=" << linear.vector_builds << "; KSP=" << linear.ksp_builds
+               << "; PC updates=" << linear.pc_updates << '\n';
 
     output << '\n'
            << std::setw(5) << "Epoch" << std::setw(16) << "Start age, Ma" << std::setw(14)

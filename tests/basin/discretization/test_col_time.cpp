@@ -2,13 +2,42 @@
 #include "basin/geometry/basin_geometry.hpp"
 #include "basin/mesh/column_test_utils.hpp"
 #include "numerics/time/time_integrator.hpp"
-#include "support/petsc_test_session.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>
 #include <numbers>
 #include <optional>
 #include <vector>
+
+TEST(ColTime, RebuildsMpfaPatternPerStepAndNmpfaPatternPerIteration) {
+    const auto grid = make_test_column_grid(3, 3, 200.0, 300.0);
+    const LithotypeProperties rock{
+        .code = 1, .rho_s = 2600.0, .lambda20 = 3.0, .c20 = 850.0, .A_s = 1.0e-6};
+    const std::vector<double> phi(grid.cells.size(), 0.2);
+    const std::vector<const LithotypeProperties*> rocks(grid.cells.size(), &rock);
+    for (const auto scheme :
+         {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
+        ColHeatSystem system(
+            grid, phi, rocks, {.lambda = 0.7, .rho = 1040.0, .c = 4184.0},
+            {.T_surf = [](Point2D) { return 285.0; }, .q_basal = [](Point2D) { return 0.06; }});
+        system.set_flux_scheme(scheme);
+        Vector initial(static_cast<Vector::Index>(grid.cells.size()));
+        initial.set_constant(350.0);
+        TimeIntegrator integrator;
+        integrator.set_initial_solution(0.0, initial);
+        integrator.set_timestep(1.0e10);
+        integrator.set_linear_solver({.method = LinearMethod::gmres});
+        const auto result = integrator.advance_to(system, 2.0e10, {}, {});
+        ASSERT_TRUE(result.completed());
+        EXPECT_GT(result.nonlinear_iterations, result.accepted_steps);
+        EXPECT_EQ(result.timings.linear.matrix_builds, scheme == MultipointFluxScheme::linear
+                                                           ? result.accepted_steps
+                                                           : result.nonlinear_iterations);
+        EXPECT_EQ(result.timings.linear.vector_builds, 2);
+        EXPECT_EQ(result.timings.linear.ksp_builds, 1);
+        EXPECT_EQ(result.timings.linear.pc_updates, result.nonlinear_iterations);
+    }
+}
 
 namespace {
 
@@ -252,7 +281,6 @@ TEST(ColHeatSystem, AdvancesAffineFieldOnIndependentColumns) {
 }
 
 TEST(ColHeatSystem, TemperatureDependentCaseRefinesAndAgreesWithGamg) {
-    ensure_petsc_test_session();
     const Vector coarse = solve_temperature_dependent_case(0.25, LinearSolverOptions{});
     const Vector medium = solve_temperature_dependent_case(0.125, LinearSolverOptions{});
     const Vector fine = solve_temperature_dependent_case(0.0625, LinearSolverOptions{});
