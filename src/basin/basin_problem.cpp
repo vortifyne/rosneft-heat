@@ -3,6 +3,7 @@
 #include "basin/geometry/profile_interpolation.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <stdexcept>
 
@@ -18,8 +19,9 @@ double BasinLayerProfile::bottom_at(const double coordinate) const {
     return basin_detail::interpolate(x, bottom, coordinate);
 }
 
-double BasinLayerProfile::phi_at(const double coordinate) const {
-    return basin_detail::interpolate(x, phi, coordinate);
+double BasinLayerProfile::phi_at(const double coordinate, const double relative_depth) const {
+    return std::lerp(basin_detail::interpolate(x, phi_top, coordinate),
+                     basin_detail::interpolate(x, phi_bottom, coordinate), relative_depth);
 }
 
 int BasinLayerProfile::lithotype_at(const double coordinate) const {

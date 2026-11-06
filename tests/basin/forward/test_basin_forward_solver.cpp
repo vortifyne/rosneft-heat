@@ -42,12 +42,13 @@ TEST(BasinForwardSolver, PreservesTemperatureAndAccumulatesFinalLayerNodalHistor
         std::filesystem::temp_directory_path() / ("column-basin-test-" + std::to_string(suffix));
     std::filesystem::create_directories(directory);
     write_file(directory / "configurations.csv", "age_ma\n1\n0\n");
-    write_file(directory / "layers.csv",
-               "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity\n"
-               "1,2,old,0,0,2,1,0.1\n1,2,old,1,0,2,2,0.1\n"
-               "1,2,old,2,0,2,2,0.1\n"
-               "0,1,new,0,0,0.5,1,0.1\n0,1,new,2,0,0.5,1,0.1\n"
-               "0,2,old,0,0.5,2,1,0.1\n0,2,old,2,0.5,2,2,0.1\n");
+    write_file(
+        directory / "layers.csv",
+        "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity_top,porosity_bottom\n"
+        "1,2,old,0,0,2,1,0.1,0.1\n1,2,old,1,0,2,2,0.1,0.1\n"
+        "1,2,old,2,0,2,2,0.1,0.1\n"
+        "0,1,new,0,0,0.5,1,0.1,0.1\n0,1,new,2,0,0.5,1,0.1,0.1\n"
+        "0,2,old,0,0.5,2,1,0.1,0.1\n0,2,old,2,0.5,2,2,0.1,0.1\n");
     write_file(directory / "boundaries.csv",
                "age_ma,kind,x,value_si\n"
                "1,surface_temperature,0,300\n1,surface_temperature,2,300\n"
@@ -176,14 +177,15 @@ TEST(BasinForwardSolver, PreservesGrownLayerHistoryAcrossTheNextBirth) {
         std::filesystem::temp_directory_path() / ("basin-growth-test-" + std::to_string(suffix));
     std::filesystem::create_directories(directory);
     write_file(directory / "configurations.csv", "age_ma\n2\n1\n0\n");
-    write_file(directory / "layers.csv",
-               "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity\n"
-               "2,3,old,0,0,2,1,0.1\n2,3,old,2,0,2,1,0.1\n"
-               "1,2,middle,0,0,1,1,0.1\n1,2,middle,2,0,1,1,0.1\n"
-               "1,3,old,0,1,3,1,0.1\n1,3,old,2,1,3,1,0.1\n"
-               "0,1,new,0,0,1,1,0.1\n0,1,new,2,0,1,1,0.1\n"
-               "0,2,middle,0,1,2,1,0.1\n0,2,middle,2,1,2,1,0.1\n"
-               "0,3,old,0,2,4,1,0.1\n0,3,old,2,2,4,1,0.1\n");
+    write_file(
+        directory / "layers.csv",
+        "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity_top,porosity_bottom\n"
+        "2,3,old,0,0,2,1,0.1,0.1\n2,3,old,2,0,2,1,0.1,0.1\n"
+        "1,2,middle,0,0,1,1,0.1,0.1\n1,2,middle,2,0,1,1,0.1,0.1\n"
+        "1,3,old,0,1,3,1,0.1,0.1\n1,3,old,2,1,3,1,0.1,0.1\n"
+        "0,1,new,0,0,1,1,0.1,0.1\n0,1,new,2,0,1,1,0.1,0.1\n"
+        "0,2,middle,0,1,2,1,0.1,0.1\n0,2,middle,2,1,2,1,0.1,0.1\n"
+        "0,3,old,0,2,4,1,0.1,0.1\n0,3,old,2,2,4,1,0.1,0.1\n");
     write_file(directory / "boundaries.csv",
                "age_ma,kind,x,value_si\n"
                "2,surface_temperature,0,300\n2,surface_temperature,2,300\n"

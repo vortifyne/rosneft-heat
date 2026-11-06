@@ -6,6 +6,7 @@
 #include "basin/mesh/col_epoch_grid.hpp"
 #include "numerics/algebra/vector.hpp"
 
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <vector>
@@ -42,8 +43,8 @@ private:
         ColEpochGrid mesh;
         ColGrid initial_grid;
         std::vector<int> lithotypes;
-        std::vector<double> phi0;
-        std::vector<double> phi1;
+        std::vector<std::array<double, 2>> phi0;
+        std::vector<std::array<double, 2>> phi1;
         std::vector<double> deposition_times;
     };
 

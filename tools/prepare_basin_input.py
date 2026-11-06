@@ -63,12 +63,14 @@ def main() -> None:
 
         for layer in snapshot:
             layer_id = layer_ids[str(layer["layer"])]
-            for x, top, bottom, lithotype, porosity in zip(
+            porosity = data._get_slice(data._poro, str(layer["layer"]), age)
+            for x, top, bottom, lithotype, phi_top, phi_bottom in zip(
                 layer["x"],
                 layer["z_top"],
                 layer["z_bot"],
                 layer["lith"],
-                layer["porosity"],
+                porosity.iloc[:, 5],
+                porosity.iloc[:, 6],
                 strict=True,
             ):
                 layer_rows.append(
@@ -80,7 +82,8 @@ def main() -> None:
                         f"{float(top):.17g}",
                         f"{float(bottom):.17g}",
                         int(lithotype),
-                        f"{0.01 * float(porosity):.17g}",
+                        f"{0.01 * float(phi_top):.17g}",
+                        f"{0.01 * float(phi_bottom):.17g}",
                     )
                 )
 
@@ -107,7 +110,7 @@ def main() -> None:
     write_csv(
         arguments.output / "layers.csv",
         ("age_ma", "layer_id", "layer_name", "x", "z_top", "z_bottom",
-         "lithotype", "porosity"),
+         "lithotype", "porosity_top", "porosity_bottom"),
         layer_rows,
     )
     write_csv(

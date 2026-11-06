@@ -12,7 +12,14 @@ namespace {
 
 BasinLayerProfile profile(const int id, const std::vector<double>& x,
                           const std::vector<double>& top, const std::vector<double>& bottom) {
-    return {.id = id, .name = {}, .x = x, .top = top, .bottom = bottom, .lithotype = {}, .phi = {}};
+    return {.id = id,
+            .name = {},
+            .x = x,
+            .top = top,
+            .bottom = bottom,
+            .lithotype = {},
+            .phi_top = {},
+            .phi_bottom = {}};
 }
 
 BasinConfig cfg(std::vector<BasinLayerProfile> layers, double age = 0.) {
@@ -27,6 +34,14 @@ TEST(BasinGeometry, PreservesOriginalPolylines) {
     EXPECT_EQ(geometry.z[0], input.layer(7).top);
     EXPECT_EQ(geometry.z[1], input.layer(7).bottom);
     EXPECT_DOUBLE_EQ(geometry.boundary_at(0, .65), input.layer(7).top_at(.65));
+}
+
+TEST(BasinLayerProfile, InterpolatesPorosityAcrossXAndLayerThickness) {
+    const BasinLayerProfile layer{
+        .x = {0.0, 10.0}, .phi_top = {0.4, 0.6}, .phi_bottom = {0.1, 0.3}};
+    EXPECT_NEAR(layer.phi_at(4.0, 0.0), 0.48, 1e-15);
+    EXPECT_NEAR(layer.phi_at(4.0, 1.0), 0.18, 1e-15);
+    EXPECT_NEAR(layer.phi_at(4.0, 0.25), 0.405, 1e-15);
 }
 
 TEST(BasinGeometry, SharesContactsAcrossDifferentSourceSamplings) {

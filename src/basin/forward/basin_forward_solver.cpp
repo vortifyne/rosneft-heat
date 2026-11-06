@@ -92,6 +92,24 @@ HeatBoundaryData bc(const BasinConfig& cfg0, const BasinConfig& cfg1, double the
     };
 }
 
+void for_each_layer_cell(const ColGrid& grid, const auto& visit) {
+    for (const auto& column : grid.columns) {
+        auto first = column.begin();
+        while (first != column.end()) {
+            const auto& top = grid.cells[*first];
+            const auto last = std::find_if_not(first, column.end(), [&](std::size_t index) {
+                return grid.cells[index].layer_id == top.layer_id;
+            });
+            const double height = grid.cells[*(last - 1)].z_bottom - top.z_top;
+            for (auto cell = first; cell != last; ++cell) {
+                const auto& value = grid.cells[*cell];
+                visit(value, (value.center().z - top.z_top) / height);
+            }
+            first = last;
+        }
+    }
+}
+
 Vector initial_temperature(const ColGrid& grid, const ScalarProfile& surface, int born) {
     double integral = 0.0;
     for (std::size_t i = 1; i < surface.x.size(); ++i)
@@ -167,8 +185,9 @@ BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings op
                                      ? configs[i + 1].layer(cell.layer_id)
                                      : configs[i].layer(cell.layer_id);
             data.lithotypes[cell.index] = layer0.lithotype_at(x);
-            data.phi0[cell.index] = layer0.phi_at(x);
-            data.phi1[cell.index] = configs[i + 1].layer(cell.layer_id).phi_at(x);
+            const auto& layer1 = configs[i + 1].layer(cell.layer_id);
+            data.phi0[cell.index] = {layer0.phi_at(x, 0.0), layer0.phi_at(x, 1.0)};
+            data.phi1[cell.index] = {layer1.phi_at(x, 0.0), layer1.phi_at(x, 1.0)};
         }
         epochs_.push_back(std::move(data));
     }
@@ -206,13 +225,13 @@ void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
                                                  std::span<double> node_T) const {
     const auto& cfg = input_.configs().back();
     std::vector<double> lambda(T.size());
-    for (const auto& cell : final_grid_.cells) {
+    for_each_layer_cell(final_grid_, [&](const ColCell& cell, double depth) {
         const auto& layer = cfg.layer(cell.layer_id);
         const double x = cell.center().x;
-        lambda[cell.index] = thermal_properties(T[cell.index], layer.phi_at(x),
+        lambda[cell.index] = thermal_properties(T[cell.index], layer.phi_at(x, depth),
                                                 input_.lithotype(layer.lithotype_at(x)), kFluid)
                                  .lambda;
-    }
+    });
     auto boundaries = bc(cfg, cfg, 0.0);
     if (!parameters_.empty()) {
         const double q = parameters_[parameters_.size() - 1];
@@ -256,7 +275,16 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
         std::vector<const LithotypeProperties*> lithotypes(epoch.lithotypes.size());
         for (std::size_t i = 0; i < lithotypes.size(); ++i)
             lithotypes[i] = &input.lithotype(epoch.lithotypes[i]);
-        std::vector<double> phi = epoch.phi0;
+        std::vector<double> phi(grid.cells.size());
+        const auto update_porosity = [&](double theta) {
+            for_each_layer_cell(grid, [&](const ColCell& cell, double depth) {
+                const auto i = cell.index;
+                const double top = std::lerp(epoch.phi0[i][0], epoch.phi1[i][0], theta);
+                const double bottom = std::lerp(epoch.phi0[i][1], epoch.phi1[i][1], theta);
+                phi[i] = std::lerp(top, bottom, depth);
+            });
+        };
+        update_porosity(0.0);
         const auto boundaries_at = [&](double theta) {
             auto boundaries = bc(cfg0, cfg1, theta);
             if (!parameters_.empty()) {
@@ -291,8 +319,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
                                           .age_begin_ma = cfg0.age_ma - t / kSecondsPerMa,
                                           .age_end_ma = cfg0.age_ma - t_next / kSecondsPerMa};
             grid = epoch.mesh.at(theta);
-            for (std::size_t i = 0; i < phi.size(); ++i)
-                phi[i] = std::lerp(epoch.phi0[i], epoch.phi1[i], theta);
+            update_porosity(theta);
             ColHeatSystem system(grid, phi, lithotypes, kFluid, boundaries_at(theta));
             system.set_flux_scheme(settings.scheme);
             integrator.set_timestep(dt);

@@ -21,11 +21,12 @@ std::filesystem::path small_problem() {
                        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(path);
     write_file(path / "configurations.csv", "age_ma\n20\n10\n0\n");
-    write_file(path / "layers.csv",
-               "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity\n"
-               "20,1,rock,0,0,2000,1,0.1\n20,1,rock,2000,0,2000,1,0.1\n"
-               "10,1,rock,0,0,2000,1,0.1\n10,1,rock,2000,0,2000,1,0.1\n"
-               "0,1,rock,0,0,2000,1,0.1\n0,1,rock,2000,0,2000,1,0.1\n");
+    write_file(
+        path / "layers.csv",
+        "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity_top,porosity_bottom\n"
+        "20,1,rock,0,0,2000,1,0.1,0.1\n20,1,rock,2000,0,2000,1,0.1,0.1\n"
+        "10,1,rock,0,0,2000,1,0.1,0.1\n10,1,rock,2000,0,2000,1,0.1,0.1\n"
+        "0,1,rock,0,0,2000,1,0.1,0.1\n0,1,rock,2000,0,2000,1,0.1,0.1\n");
     write_file(path / "boundaries.csv",
                "age_ma,kind,x,value_si\n"
                "20,surface_temperature,0,283.15\n20,surface_temperature,2000,283.15\n"
@@ -64,7 +65,7 @@ TEST(BasinHeatParameterSpace, RepresentsAllEpochBoundaryFluxesAndPreservesMonoto
 TEST(BasinHeatObservationData, UsesCelsiusErrorBoundsAndSeparateObservables) {
     const auto path = small_problem();
     write_file(path / "observations.csv", "kind,well,x,z,value,error\n"
-                                          "temperature,A,500,1000,20,0.4\n"
+                                          "temperature,A,500,1000,20,0.4,0.4\n"
                                           "reflectance,A,500,1000,0.5,0.01\n");
     const auto data = BasinHeatObservationData::read(path / "observations.csv");
     const auto residuals = data.normalized_residuals(Vector{293.55, 0.49});
