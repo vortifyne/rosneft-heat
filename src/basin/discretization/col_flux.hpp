@@ -10,7 +10,7 @@
 
 struct HeatBoundaryData {
     std::function<double(Point2D)> T_surf;  // Surface temperature [K].
-    std::function<double(Point2D)> q_basal; // Inward fluxes [W/m^2].
+    std::function<double(Point2D)> q_basal; // Inward flux per horizontal projection [W/m^2].
     std::function<double(Point2D)> q_left{};
     std::function<double(Point2D)> q_right{};
 };
