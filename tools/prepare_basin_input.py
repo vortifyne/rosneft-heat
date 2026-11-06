@@ -9,7 +9,32 @@ from pathlib import Path
 
 import pandas as pd
 
-from basin_data import BasinData
+from basin_data import BasinData, _EASY_RO, _layer_sort_key, _load_property_xlsx
+
+
+def read_basin_data(directory: Path) -> BasinData:
+    # Keep the organizer's reader unchanged; inverse inputs need no basal-flux file.
+    data = BasinData.__new__(BasinData)
+    data._dir = str(directory)
+    for attribute, filename in (("_depth", "Depth.xlsx"), ("_lith", "Lithology.xlsx"),
+                                ("_poro", "Porosity.xlsx"), ("_tsurf", "Tsurf.xlsx")):
+        setattr(data, attribute, _load_property_xlsx(str(directory / filename)))
+    flux = directory / "Heat_Flow_Basal.xlsx"
+    data._hf = _load_property_xlsx(str(flux)) if flux.exists() else None
+    data.layers = sorted(data._depth, key=_layer_sort_key)
+    data._layer_times = {name: sorted(frame.iloc[:, 1].unique())
+                         for name, frame in data._depth.items()}
+    data.times = sorted({age for times in data._layer_times.values() for age in times})
+    data.lithotypes = data._load_lithotypes(str(directory / "lithotype_properties.xlsx"))
+    data.easy_ro = _EASY_RO.copy()
+    return data
+
+
+def surface_temperature(data: BasinData, age: float):
+    # Tsurf repeats the same profile on each layer. Only the oldest covers all X.
+    layer = data.layers_at(age)[-1]
+    frame = data._get_slice(data._tsurf, layer, age)
+    return frame.iloc[:, 0].to_numpy(float), frame.iloc[:, 5].to_numpy(float)
 
 
 def write_csv(path: Path, header: tuple[str, ...], rows) -> None:
@@ -25,7 +50,7 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     arguments = parser.parse_args()
 
-    data = BasinData(arguments.data_dir)
+    data = read_basin_data(arguments.data_dir)
     ages = tuple(float(age) for age in reversed(data.times))
 
     arguments.output.mkdir(parents=True, exist_ok=True)
@@ -59,13 +84,13 @@ def main() -> None:
                     )
                 )
 
-        surface_x, surface_values = data.tsurf(age)
+        surface_x, surface_values = surface_temperature(data, age)
         for x, value in zip(surface_x, surface_values, strict=True):
             boundary_rows.append(
                 (f"{age:.15g}", "surface_temperature", f"{float(x):.15g}",
                  f"{float(value) + 273.15:.15g}")
             )
-        flow = data.heat_flow(age)
+        flow = data.heat_flow(age) if data._hf is not None else None
         if flow is not None:
             flow_x, flow_values = flow
             for x, value in zip(flow_x, flow_values, strict=True):
