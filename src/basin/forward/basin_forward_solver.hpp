@@ -40,6 +40,10 @@ public:
 
 private:
     [[nodiscard]] Vector solve_initial_temperature() const;
+    [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe,
+                                           bool configuration_output) const;
+    void temperature_nodes(const ColGrid& grid, std::size_t configuration,
+                           std::span<const double> T, std::span<double> node_T) const;
 
     struct EpochData {
         ColEpochGrid mesh;

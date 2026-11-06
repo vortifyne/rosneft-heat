@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -276,5 +277,29 @@ TEST(BasinForwardSolver, StartsFromStationaryTemperatureWithCurrentBasalFlux) {
         EXPECT_GT(result.timings.initial_s, 0.0);
         expect_timing_tree(result.timings);
     }
+    solver.set_intermediate_snapshots(false);
+    (void)solver.solve(directory / "result");
+    std::ifstream fields(directory / "result/fields.csv");
+    std::string line;
+    std::getline(fields, line);
+    int rows = 0;
+    while (std::getline(fields, line)) {
+        std::replace(line.begin(), line.end(), ',', ' ');
+        std::istringstream row(line);
+        double age, x, top, bottom, average;
+        int layer;
+        ASSERT_TRUE(static_cast<bool>(row >> age >> layer >> x >> top >> bottom >> average));
+        EXPECT_TRUE(age == 0.0 || age == 1.0);
+        EXPECT_EQ(layer, 1);
+        EXPECT_TRUE(x == 0.0 || x == 1000.0);
+        EXPECT_NEAR(top, 285.0 - 273.15, 1e-7);
+        EXPECT_NEAR(bottom, 285.0 - 273.15 + 0.09 * 1000.0 / 1.84, 1e-7);
+        EXPECT_NEAR(average, 0.5 * (top + bottom), 1e-12);
+        ++rows;
+    }
+    EXPECT_EQ(rows, 4);
+    EXPECT_EQ(std::distance(std::filesystem::directory_iterator(directory / "result/snapshots"),
+                            std::filesystem::directory_iterator{}),
+              1);
     std::filesystem::remove_all(directory);
 }

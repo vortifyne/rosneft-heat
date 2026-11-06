@@ -34,7 +34,10 @@ tools/run_basin_from_xlsx.sh path/to/input result
 
 Дополнительные опции PETSc ставятся в конце, например `-ksp_gmres_restart 200`
 (по умолчанию рестарт через 100 векторов).
-Поля сохраняются в `result/snapshots/`, настройки и статистика — в `summary.txt` и `timings.txt`.
+Скрипт выдаёт `Temperature.xlsx` (°C) и `Sweeney_Burnham_1990_EASY_Ro.xlsx` (%Ro)
+на исходной геометрии для всех возрастов. `Top` и `Bot` — значения на границах слоя,
+`Aver` — их полусумма, как в эталоне. Снимки полей — в `snapshots/`,
+настройки и статистика — в `summary.txt` и `timings.txt`.
 
 ### 2. Визуализация
 
@@ -53,7 +56,7 @@ uv run --frozen python tools/view_basin_snapshots.py result
 ### 1. Запуск
 
 ```bash
-tools/run_basin_from_xlsx.sh --inverse local/inverse_problem_data/data inverse_result --snapshots final --save-forward
+tools/run_basin_from_xlsx.sh --inverse local/inverse_problem_data/data inverse_result --snapshots final
 ```
 
 `--inverse` ставится перед путями. Подбирается история потока снизу;
@@ -68,10 +71,11 @@ tools/run_basin_from_xlsx.sh --inverse local/inverse_problem_data/data inverse_r
 | `--maxiter` | Лимит итераций оптимизатора | 10 |
 | `--maxfev` | Лимит вычислений функции; может быть превышен при построении начальной модели | 100 |
 | `--residual-tol` | Допуск для всех невязок, нормированных на погрешность; 0 отключает критерий | 1 |
-| `--save-forward` | Сохранить итоговый прямой расчёт в `forward/`; режим снимков задаёт `--snapshots` | Выключено |
 
 Опции PETSc также идут в конце.
 Итерация 0 строит начальную модель и требует нескольких прямых расчётов.
+После подбора скрипт выполняет итоговый прямой расчёт в `forward/` и выдаёт две
+XLSX с полями и `Heat_Flow_Basal.xlsx` с найденным потоком на исходной геометрии.
 Результат: `parameters.csv` — найденный поток, `observations.csv` — сравнение с измерениями,
 `progress.csv` — ход подбора, `summary.txt` — итог.
 
@@ -85,7 +89,7 @@ uv run --frozen python tools/view_basin_inverse.py inverse_result
 Единственная опция `--save figures` сохраняет PNG в указанный каталог;
 по умолчанию открываются окна.
 
-Поля итогового расчёта доступны после запуска с `--save-forward`:
+Поля итогового расчёта:
 
 ```bash
 uv run --frozen python tools/view_basin_snapshots.py inverse_result/forward --field reflectance --observations inverse_result/observations.csv

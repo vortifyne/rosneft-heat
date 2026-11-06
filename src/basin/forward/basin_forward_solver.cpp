@@ -236,9 +236,15 @@ const ColGrid& BasinForwardSolver::final_grid() const noexcept {
 
 void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
                                                  std::span<double> node_T) const {
-    const auto& cfg = input_.configs().back();
+    temperature_nodes(final_grid_, input_.configs().size() - 1, T, node_T);
+}
+
+void BasinForwardSolver::temperature_nodes(const ColGrid& grid, std::size_t configuration,
+                                           std::span<const double> T,
+                                           std::span<double> node_T) const {
+    const auto& cfg = input_.configs()[configuration];
     std::vector<double> lambda(T.size());
-    for_each_layer_cell(final_grid_, [&](const ColCell& cell, double depth) {
+    for_each_layer_cell(grid, [&](const ColCell& cell, double depth) {
         const auto& layer = cfg.layer(cell.layer_id);
         const double x = cell.center().x;
         lambda[cell.index] = thermal_properties(T[cell.index], layer.phi_at(x, depth),
@@ -247,13 +253,18 @@ void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
     });
     auto boundaries = bc(cfg, cfg, 0.0);
     if (!parameters_.empty()) {
-        const double q = parameters_[parameters_.size() - 1];
+        const double q = parameters_[static_cast<Vector::Index>(configuration)];
         boundaries.q_basal = [q](Point2D) { return q; };
     }
-    interpolate_horizontal_temperature(final_grid_, T, lambda, boundaries, node_T);
+    interpolate_horizontal_temperature(grid, T, lambda, boundaries, node_T);
 }
 
 BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const {
+    return solve(observe, false);
+}
+
+BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
+                                             bool configuration_output) const {
     const auto solve_start = Clock::now();
     BasinForwardResult result;
     const auto& input = input_;
@@ -263,7 +274,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
     const auto initial_start = Clock::now();
     Vector T = solve_initial_temperature();
     result.timings.initial_s = elapsed_seconds(initial_start);
-    if (settings.intermediate_snapshots) {
+    if (settings.intermediate_snapshots || configuration_output) {
         const auto initial_I =
             easy_ro.initial_state(initial_grid_.cells.size() + initial_grid_.columns.size());
         observe_state(initial_grid_, T, initial_I, easy_ro, BasinSnapshot::Kind::initial, 0, 0,
@@ -378,7 +389,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
             step_stats.linear_iterations = step.linear_iterations;
             t = t_next;
             const bool at_event = t == duration;
-            if (settings.intermediate_snapshots)
+            if (settings.intermediate_snapshots || (configuration_output && at_event))
                 observe_state(
                     grid, T1, I, easy_ro,
                     at_event ? BasinSnapshot::Kind::before_event : BasinSnapshot::Kind::timestep,
