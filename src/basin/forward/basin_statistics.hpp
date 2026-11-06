@@ -6,6 +6,7 @@
 
 struct BasinTimings {
     double total_s = 0.0;
+    double initial_s = 0.0;
     double grid_s = 0.0;
     double transfer_s = 0.0;
     SolverTimings nonlinear{};
@@ -15,6 +16,7 @@ struct BasinTimings {
 
     BasinTimings& operator+=(const BasinTimings& other) noexcept {
         total_s += other.total_s;
+        initial_s += other.initial_s;
         grid_s += other.grid_s;
         transfer_s += other.transfer_s;
         nonlinear += other.nonlinear;

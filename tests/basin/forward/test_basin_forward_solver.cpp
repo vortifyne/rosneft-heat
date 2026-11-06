@@ -23,12 +23,13 @@ void write_file(const std::filesystem::path& path, const char* contents) {
 
 void expect_timing_tree(const BasinTimings& t) {
     const auto& n = t.nonlinear;
-    for (double seconds :
-         {t.total_s, t.grid_s, t.transfer_s, n.total_s, n.assembly.residual_s, n.assembly.matrix_s,
-          t.properties.residual_s, t.properties.matrix_s, n.linear_s, t.easy_ro_s, t.output_s}) {
+    for (double seconds : {t.total_s, t.initial_s, t.grid_s, t.transfer_s, n.total_s,
+                           n.assembly.residual_s, n.assembly.matrix_s, t.properties.residual_s,
+                           t.properties.matrix_s, n.linear_s, t.easy_ro_s, t.output_s}) {
         EXPECT_GE(seconds, 0.0);
     }
-    EXPECT_LE(t.grid_s + t.transfer_s + n.total_s + t.easy_ro_s + t.output_s, t.total_s + 1e-10);
+    EXPECT_LE(t.initial_s + t.grid_s + t.transfer_s + n.total_s + t.easy_ro_s + t.output_s,
+              t.total_s + 1e-10);
     EXPECT_LE(n.assembly.total_s() + n.linear_s, n.total_s + 1e-10);
     EXPECT_LE(t.properties.residual_s, n.assembly.residual_s + 1e-10);
     EXPECT_LE(t.properties.matrix_s, n.assembly.matrix_s + 1e-10);
@@ -71,7 +72,7 @@ TEST(BasinForwardSolver, PreservesTemperatureAndAccumulatesFinalLayerNodalHistor
         observations.emplace_back(snapshot.kind, snapshot.epoch, snapshot.step, snapshot.age_ma);
         if (snapshot.kind == BasinSnapshot::Kind::initial) {
             saw_initial_axis = true;
-            EXPECT_EQ(snapshot.grid.x, (std::vector<double>{0.0, 0.5, 1.0, 2.0}));
+            EXPECT_EQ(snapshot.grid.x, (std::vector<double>{0.0, 0.5, 2.0}));
         }
         if (snapshot.kind != BasinSnapshot::Kind::after_event)
             return;
@@ -232,5 +233,48 @@ TEST(BasinForwardSolver, PreservesGrownLayerHistoryAcrossTheNextBirth) {
     });
     EXPECT_TRUE(checked_birth);
     EXPECT_TRUE(checked_final);
+    std::filesystem::remove_all(directory);
+}
+
+TEST(BasinForwardSolver, StartsFromStationaryTemperatureWithCurrentBasalFlux) {
+    const auto directory =
+        std::filesystem::temp_directory_path() /
+        ("basin-stationary-" + std::to_string(Clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(directory);
+    write_file(directory / "configurations.csv", "age_ma\n1\n0\n");
+    write_file(
+        directory / "layers.csv",
+        "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity_top,porosity_bottom\n"
+        "1,1,rock,0,0,1000,1,0,0\n1,1,rock,1000,0,1000,1,0,0\n"
+        "0,1,rock,0,0,1000,1,0,0\n0,1,rock,1000,0,1000,1,0,0\n");
+    write_file(directory / "boundaries.csv",
+               "age_ma,kind,x,value_si\n"
+               "1,surface_temperature,0,285\n1,surface_temperature,1000,285\n"
+               "1,basal_heat_flux,0,0.06\n1,basal_heat_flux,1000,0.06\n"
+               "0,surface_temperature,0,285\n0,surface_temperature,1000,285\n"
+               "0,basal_heat_flux,0,0.06\n0,basal_heat_flux,1000,0.06\n");
+    // This lambda20 makes Sekiguchi conductivity constant and equal to 1.84.
+    write_file(directory / "lithotypes.csv",
+               "code,name,solid_density,conductivity_20,specific_heat_20,heat_production\n"
+               "1,rock,2600,1.8402268504937909,900,0\n");
+    write_file(directory / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant\n"
+                                           "1e13,190000,1,8.314\n");
+    BasinForwardSolver solver(BasinInput::read(directory), {.dx = 500, .dz = 100});
+    for (double q : {0.06, 0.09}) {
+        solver.set_parameters(Vector{q, q});
+        bool observed = false;
+        const auto result = solver.solve([&](const BasinSnapshot& snapshot) {
+            if (snapshot.kind != BasinSnapshot::Kind::initial)
+                return;
+            observed = true;
+            for (const auto& cell : snapshot.grid.cells)
+                EXPECT_NEAR(snapshot.T[cell.index], 285.0 + q * cell.center().z / 1.84, 1e-7);
+            for (double integral : snapshot.I)
+                EXPECT_DOUBLE_EQ(integral, 0.0);
+        });
+        EXPECT_TRUE(observed);
+        EXPECT_GT(result.timings.initial_s, 0.0);
+        expect_timing_tree(result.timings);
+    }
     std::filesystem::remove_all(directory);
 }

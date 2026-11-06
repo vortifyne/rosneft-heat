@@ -39,6 +39,8 @@ public:
                                            const BasinObserver& observe = {}) const;
 
 private:
+    [[nodiscard]] Vector solve_initial_temperature() const;
+
     struct EpochData {
         ColEpochGrid mesh;
         ColGrid initial_grid;
@@ -53,6 +55,6 @@ private:
     EasyRoModel easy_ro_;
     std::vector<EpochData> epochs_;
     ColGrid final_grid_;
-    Vector initial_temperature_;
+    ColGrid initial_grid_;
     Vector parameters_; // Basal heat flux [W/m²] at configuration ages.
 };
