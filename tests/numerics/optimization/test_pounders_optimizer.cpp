@@ -1,9 +1,9 @@
 #include "numerics/optimization/pounders_optimizer.hpp"
-#include "support/petsc_test_session.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>
 #include <limits>
+#include <petscsys.h>
 #include <stdexcept>
 
 namespace {
@@ -24,7 +24,6 @@ void expect_vector_near(const Vector& actual, const Vector& expected, double tol
 }
 
 TEST(PoundersOptimizerTest, SolvesBoundedLeastSquaresProblem) {
-    ensure_petsc_test_session();
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = Vector{-5.0, -5.0},
         .upper_bounds = Vector{5.0, 5.0},
@@ -48,7 +47,6 @@ TEST(PoundersOptimizerTest, SolvesBoundedLeastSquaresProblem) {
 }
 
 TEST(PoundersOptimizerTest, RespectsActiveParameterBound) {
-    ensure_petsc_test_session();
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = Vector{-1.0},
         .upper_bounds = Vector{1.0},
@@ -65,8 +63,32 @@ TEST(PoundersOptimizerTest, RespectsActiveParameterBound) {
     EXPECT_NEAR(result.objective, 1.0, 1e-5);
 }
 
+TEST(PoundersOptimizerTest, ClipsInitialGuessUsingPetscStepAndStopsWithinResidualBounds) {
+    ASSERT_EQ(PetscOptionsSetValue(nullptr, "-tao_pounders_delta", "0.2"), PETSC_SUCCESS);
+    std::vector<double> evaluated;
+    const BoundedLeastSquaresProblem problem{
+        .lower_bounds = Vector{0.0},
+        .upper_bounds = Vector{1.0},
+        .residual_count = 1,
+        .residual_function =
+            [&](const Vector& x) {
+                evaluated.push_back(x[0]);
+                return Vector{x[0] - 0.9};
+            },
+    };
+    auto request = kSolveRequest;
+    request.residual_tolerance = 0.11;
+    const auto result = PoundersOptimizer{}.solve(problem, Vector{1.0}, request);
+    EXPECT_EQ(PetscOptionsClearValue(nullptr, "-tao_pounders_delta"), PETSC_SUCCESS);
+    ASSERT_FALSE(evaluated.empty());
+    EXPECT_DOUBLE_EQ(evaluated.front(), 0.8);
+    EXPECT_EQ(result.status, PoundersStatus::user_converged);
+    EXPECT_LE(result.residuals.infinity_norm(), request.residual_tolerance);
+    EXPECT_DOUBLE_EQ(result.residuals[0], result.parameters[0] - 0.9);
+    EXPECT_EQ(result.function_evaluations, static_cast<int>(evaluated.size()));
+}
+
 TEST(PoundersOptimizerTest, SupportsNonUnitBounds) {
-    ensure_petsc_test_session();
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = Vector{2.0, -4.0},
         .upper_bounds = Vector{6.0, 0.0},
@@ -86,7 +108,6 @@ TEST(PoundersOptimizerTest, SupportsNonUnitBounds) {
 }
 
 TEST(PoundersOptimizerTest, ReportsFunctionEvaluationLimit) {
-    ensure_petsc_test_session();
     PoundersSolveRequest limited_request = kSolveRequest;
     limited_request.maxfev = 3;
     const BoundedLeastSquaresProblem problem{
@@ -113,7 +134,6 @@ TEST(PoundersOptimizerTest, ReportsFunctionEvaluationLimit) {
 }
 
 TEST(PoundersOptimizerTest, ValidatesProblemAndRequest) {
-    ensure_petsc_test_session();
     const auto residual = [](const Vector& parameters) { return Vector{parameters[0]}; };
     const BoundedLeastSquaresProblem valid_problem{
         .lower_bounds = Vector{-1.0},
@@ -174,7 +194,6 @@ TEST(PoundersOptimizerTest, ValidatesProblemAndRequest) {
 }
 
 TEST(PoundersOptimizerTest, RejectsInvalidResidualVector) {
-    ensure_petsc_test_session();
     const BoundedLeastSquaresProblem wrong_size{
         .lower_bounds = Vector{-1.0},
         .upper_bounds = Vector{1.0},
@@ -198,7 +217,6 @@ TEST(PoundersOptimizerTest, RejectsInvalidResidualVector) {
 }
 
 TEST(PoundersOptimizerTest, PropagatesResidualFunctionExceptionSafely) {
-    ensure_petsc_test_session();
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = Vector{-1.0},
         .upper_bounds = Vector{1.0},

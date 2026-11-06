@@ -27,8 +27,10 @@ ColEpochGrid make_col_epoch_grid(const BasinGeometry& first, const BasinGeometry
     const std::size_t offset = birth ? 1 : 0;
     ColEpochGrid result;
     result.dz_min = dz_min;
-    if (birth)
+    if (birth) {
         result.born_layer_id = second.layers.front().id;
+        result.layer_ids.push_back(*result.born_layer_id);
+    }
     for (std::size_t layer = 0; layer < old_count; ++layer) {
         if (first.layers[layer].id != second.layers[layer + offset].id)
             throw std::invalid_argument("Old layer order or identity changed across the epoch");
@@ -42,29 +44,11 @@ ColEpochGrid make_col_epoch_grid(const BasinGeometry& first, const BasinGeometry
     for (std::size_t column = 0; column + 1 < result.x.size(); ++column) {
         const double left = result.x[column], right = result.x[column + 1];
         auto start = first.mean_boundaries(left, right);
-        const auto after = second.mean_boundaries(left, right);
-        std::vector<double> end(old_count + 1);
-        if (!birth) {
-            end = after;
-        } else {
-            const double middle = 0.5 * (left + right);
-            std::size_t owner = old_count;
-            for (std::size_t layer = 0; layer < old_count; ++layer) {
-                const auto& region = second.layers[layer + 1];
-                if (middle >= region.x_min && middle <= region.x_max &&
-                    after[layer + 2] - after[layer + 1] > 1.0e-12) {
-                    owner = layer;
-                    break;
-                }
-            }
-            if (owner == old_count)
-                throw std::invalid_argument("New layer has no old material below it");
-            end.front() = after.front();
-            for (std::size_t layer = 0; layer < old_count; ++layer)
-                end[layer + 1] = layer < owner ? after.front() : after[layer + 2];
-        }
+        auto end = second.mean_boundaries(left, right);
+        if (birth)
+            start.insert(start.begin(), start.front());
         std::vector<std::size_t> rows;
-        for (std::size_t layer = 0; layer < old_count; ++layer) {
+        for (std::size_t layer = 0; layer < result.layer_ids.size(); ++layer) {
             const double thickness =
                 std::max(start[layer + 1] - start[layer], end[layer + 1] - end[layer]);
             rows.push_back(
@@ -89,8 +73,26 @@ ColGrid ColEpochGrid::at(double theta) const {
         std::vector<double> boundaries(layer_ids.size() + 1);
         for (std::size_t i = 0; i < boundaries.size(); ++i)
             boundaries[i] = std::lerp(z0[column][i], z1[column][i], theta);
-        basin_detail::append_column_cells(result, column, layer_ids, boundaries, rows[column],
-                                          dz_min);
+        if (born_layer_id && rows[column].front() > 0) {
+            // Unfold the new layer from bottom to top. A node reaches the surface
+            // at theta = 1 - a, where a is its final relative depth in the layer.
+            const auto count = rows[column].front();
+            const double height = z1[column][1] - z1[column][0];
+            std::vector<double> depths{boundaries.front()};
+            std::vector<int> ids(count, *born_layer_id);
+            std::vector<std::size_t> counts(count, 1);
+            for (std::size_t row = 1; row <= count; ++row) {
+                const double a = static_cast<double>(row) / static_cast<double>(count);
+                depths.push_back(boundaries.front() + height * std::max(0.0, theta + a - 1.0));
+            }
+            ids.insert(ids.end(), layer_ids.begin() + 1, layer_ids.end());
+            counts.insert(counts.end(), rows[column].begin() + 1, rows[column].end());
+            depths.insert(depths.end(), boundaries.begin() + 2, boundaries.end());
+            basin_detail::append_column_cells(result, column, ids, depths, counts, dz_min);
+        } else {
+            basin_detail::append_column_cells(result, column, layer_ids, boundaries, rows[column],
+                                              dz_min);
+        }
     }
     rebuild_col_faces(result);
     return result;

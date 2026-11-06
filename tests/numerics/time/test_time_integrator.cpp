@@ -1,6 +1,5 @@
 #include "numerics/time/semi_discrete_system.hpp"
 #include "numerics/time/time_integrator.hpp"
-#include "support/petsc_test_session.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>
@@ -247,7 +246,6 @@ public:
 };
 
 TEST(TimeIntegratorTest, ResetsStepPreconditionerButRetainsManuallyManagedPreconditioner) {
-    ensure_petsc_test_session();
     ChangingDiagonalSystem system;
     for (const auto reuse : {PcReuse::none, PcReuse::step, PcReuse::manual}) {
         TimeIntegrator integrator;
