@@ -15,6 +15,7 @@
 \usepackage[hidelinks,unicode,linktoc=all,bookmarksnumbered]{hyperref}
 \addbibresource{references.bib}
 \graphicspath{{figures/}}
+\setcounter{tocdepth}{3}
 \setlength{\emergencystretch}{2em}
 \newcommand{\Ro}{\mathrm{Ro}}
 \newcommand{\dd}{\,\mathrm{d}}
@@ -42,17 +43,14 @@
 \input{inputs/01_introduction}
 \input{inputs/02_problem}
 \FloatBarrier
-\input{inputs/03_mesh}
+\input{inputs/03_numerical_algorithm}
 \FloatBarrier
-\input{inputs/04_forward_method}
+\input{inputs/04_implementation}
 \FloatBarrier
-\input{inputs/05_inverse_method}
-\input{inputs/06_verification}
+\input{inputs/05_verification}
 \FloatBarrier
-\input{inputs/07_results}
+\input{inputs/06_applications}
 \FloatBarrier
-\input{inputs/08_performance}
-\FloatBarrier
-\input{inputs/09_conclusion}
+\input{inputs/07_conclusion}
 \printbibliography[heading=bibintoc,title={Список литературы}]
 \end{document}
