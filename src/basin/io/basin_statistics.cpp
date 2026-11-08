@@ -13,7 +13,7 @@
 namespace {
 
 double other_seconds(const BasinTimings& timings) {
-    return std::max(0.0, timings.total_s - timings.grid_s - timings.transfer_s -
+    return std::max(0.0, timings.total_s - timings.initial_s - timings.grid_s - timings.transfer_s -
                              timings.nonlinear.total_s - timings.easy_ro_s - timings.output_s);
 }
 
@@ -69,6 +69,7 @@ void write_basin_statistics(std::ostream& output, const BasinForwardResult& resu
     row("  Initialization and shutdown", initialization_s);
     row("  Input", input_s);
     row("  Forward solve", t.total_s);
+    row("    Initial stationary solve", t.initial_s);
     row("    Geometry, grid and step preparation", t.grid_s);
     row("    State transfer", t.transfer_s);
     row("    Nonlinear solve", nonlinear.total_s);

@@ -42,6 +42,10 @@ ColHeatSystem::ColHeatSystem(const ColGrid& grid, std::span<const double> phi,
     triplets_.reserve(matrix_triplet_capacity(grid));
 }
 
+void ColHeatSystem::assemble_newton_matrix(const Vector&, SparseMatrix&) const {
+    throw std::invalid_argument("Column-grid heat system currently supports Picard only");
+}
+
 void ColHeatSystem::set_flux_scheme(MultipointFluxScheme scheme) noexcept {
     scheme_ = scheme;
 }

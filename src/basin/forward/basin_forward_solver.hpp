@@ -6,6 +6,7 @@
 #include "basin/mesh/col_epoch_grid.hpp"
 #include "numerics/algebra/vector.hpp"
 
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <vector>
@@ -38,12 +39,18 @@ public:
                                            const BasinObserver& observe = {}) const;
 
 private:
+    [[nodiscard]] Vector solve_initial_temperature() const;
+    [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe,
+                                           bool configuration_output) const;
+    void temperature_nodes(const ColGrid& grid, std::size_t configuration,
+                           std::span<const double> T, std::span<double> node_T) const;
+
     struct EpochData {
         ColEpochGrid mesh;
         ColGrid initial_grid;
         std::vector<int> lithotypes;
-        std::vector<double> phi0;
-        std::vector<double> phi1;
+        std::vector<std::array<double, 2>> phi0;
+        std::vector<std::array<double, 2>> phi1;
         std::vector<double> deposition_times;
     };
 
@@ -52,6 +59,6 @@ private:
     EasyRoModel easy_ro_;
     std::vector<EpochData> epochs_;
     ColGrid final_grid_;
-    Vector initial_temperature_;
+    ColGrid initial_grid_;
     Vector parameters_; // Basal heat flux [W/m²] at configuration ages.
 };

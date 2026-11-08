@@ -21,4 +21,12 @@ shift 2
 UV_CACHE_DIR=${UV_CACHE_DIR:-/tmp/rosneft-heat-uv-cache} \
     uv run --frozen --project "$repo_dir" python "$repo_dir/tools/prepare_basin_input.py" \
     "$data_dir" "$output_dir/input"
-exec "$repo_dir/tools/run_basin_${solver}.sh" "$output_dir/input" "$output_dir" "$@"
+export_options=()
+if [[ $solver == inverse ]]; then
+    set -- --save-forward "$@"
+    export_options=(--inverse)
+fi
+"$repo_dir/tools/run_basin_${solver}.sh" "$output_dir/input" "$output_dir" "$@"
+UV_CACHE_DIR=${UV_CACHE_DIR:-/tmp/rosneft-heat-uv-cache} \
+    uv run --frozen --project "$repo_dir" python "$repo_dir/tools/export_basin_results.py" \
+    "$data_dir" "$output_dir" "${export_options[@]}"

@@ -8,6 +8,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 from basin_data import BasinData
+from prepare_basin_input import surface_temperature
 
 
 class SurfaceProfileTest(unittest.TestCase):
@@ -16,12 +17,12 @@ class SurfaceProfileTest(unittest.TestCase):
         data.layers = ["young", "old"]
         data._layer_times = {"young": [0.0], "old": [0.0]}
         data._tsurf = {
-            "young": pd.DataFrame([[5., 0., 0., 0., 0., 0., 0., 15.],
-                                    [10., 0., 0., 0., 0., 0., 0., 20.]]),
-            "old": pd.DataFrame([[0., 0., 0., 0., 0., 0., 0., 10.],
-                                  [5., 0., 0., 0., 0., 0., 0., 15.],
-                                  [10., 0., 0., 0., 0., 0., 0., 20.]])}
-        x, temperature = data.tsurf(0.0)
+            "young": pd.DataFrame([[5., 0., 0., 0., 0., 15., 15., 15.],
+                                    [10., 0., 0., 0., 0., 20., 20., 20.]]),
+            "old": pd.DataFrame([[0., 0., 0., 0., 0., 10., 10., 10.],
+                                  [5., 0., 0., 0., 0., 15., 15., 15.],
+                                  [10., 0., 0., 0., 0., 20., 20., 20.]])}
+        x, temperature = surface_temperature(data, 0.0)
         np.testing.assert_array_equal(x, [0., 5., 10.])
         np.testing.assert_array_equal(temperature, [10., 15., 20.])
 

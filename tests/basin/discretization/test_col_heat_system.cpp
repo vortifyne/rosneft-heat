@@ -47,6 +47,31 @@ TEST(ColHeatSystem, ReproducesAffineFieldOnSurfaceStaircase) {
     }
 }
 
+TEST(ColHeatSystem, BasalFluxUsesHorizontalProjectionOnSteppedBottom) {
+    const BasinGeometry geometry{.x = {0.0, 1.0, 2.0},
+                                 .z = {{0.0, 0.0, 0.0}, {2.0, 3.0, 4.0}},
+                                 .layers = {{1, 0.0, 2.0}}};
+    const auto grid = make_col_grid(geometry, geometry.x, 0.4);
+    ASSERT_FALSE(grid.basal_vertical_faces.empty());
+    const std::vector<double> lambda(grid.cells.size(), 2.5);
+    const std::vector<double> production(grid.cells.size(), 0.0);
+    const HeatBoundaryData bc{.T_surf = [](Point2D) { return 300.0; },
+                              .q_basal = [](Point2D) { return 0.08; }};
+    ColHeatSystem system(grid, lambda, production, bc);
+    Vector T(static_cast<Vector::Index>(grid.cells.size()));
+    T.set_constant(300.0);
+    for (const auto scheme :
+         {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
+        system.set_flux_scheme(scheme);
+        Vector r;
+        system.assemble_residual(T, r);
+        EXPECT_NEAR(r.native().sum(), -0.08 * 2.0, 1e-11);
+        const auto rates = energy_rates(grid, {T.native().data(), grid.cells.size()}, lambda,
+                                         production, bc);
+        EXPECT_NEAR(rates.basal_inflow, 0.08 * 2.0, 1e-14);
+    }
+}
+
 TEST(ColHeatSystem, PicardMatrixMatchesResidualForBothSchemes) {
     const BasinGeometry source = make_test_layered_geometry();
     const auto layout = make_column_axis(source.x, 0.55);

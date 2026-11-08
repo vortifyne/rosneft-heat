@@ -17,7 +17,8 @@ BasinLayerProfile layer(int id, std::vector<double> x, std::vector<double> top,
             .top = std::move(top),
             .bottom = std::move(bottom),
             .lithotype = {},
-            .phi = {}};
+            .phi_top = {},
+            .phi_bottom = {}};
 }
 
 BasinConfig old_configuration() {

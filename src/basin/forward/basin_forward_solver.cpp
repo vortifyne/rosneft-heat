@@ -92,20 +92,22 @@ HeatBoundaryData bc(const BasinConfig& cfg0, const BasinConfig& cfg1, double the
     };
 }
 
-Vector initial_temperature(const ColGrid& grid, const ScalarProfile& surface, int born) {
-    double integral = 0.0;
-    for (std::size_t i = 1; i < surface.x.size(); ++i)
-        integral +=
-            0.5 * (surface.values[i - 1] + surface.values[i]) * (surface.x[i] - surface.x[i - 1]);
-    const double mean_surface = integral / (surface.x.back() - surface.x.front());
-    Vector T(static_cast<Vector::Index>(grid.cells.size()));
-    for (const auto& cell : grid.cells) {
-        const double top = grid.cells[grid.top_cells[cell.column]].z_top;
-        T[static_cast<Vector::Index>(cell.index)] =
-            cell.layer_id == born ? surface.at(cell.center().x)
-                                  : mean_surface + 0.03 * (cell.center().z - top);
+void for_each_layer_cell(const ColGrid& grid, const auto& visit) {
+    for (const auto& column : grid.columns) {
+        auto first = column.begin();
+        while (first != column.end()) {
+            const auto& top = grid.cells[*first];
+            const auto last = std::find_if_not(first, column.end(), [&](std::size_t index) {
+                return grid.cells[index].layer_id == top.layer_id;
+            });
+            const double height = grid.cells[*(last - 1)].z_bottom - top.z_top;
+            for (auto cell = first; cell != last; ++cell) {
+                const auto& value = grid.cells[*cell];
+                visit(value, (value.center().z - top.z_top) / height);
+            }
+            first = last;
+        }
     }
-    return T;
 }
 
 void observe_state(const ColGrid& grid, const Vector& T, std::span<const double> I,
@@ -167,8 +169,9 @@ BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings op
                                      ? configs[i + 1].layer(cell.layer_id)
                                      : configs[i].layer(cell.layer_id);
             data.lithotypes[cell.index] = layer0.lithotype_at(x);
-            data.phi0[cell.index] = layer0.phi_at(x);
-            data.phi1[cell.index] = configs[i + 1].layer(cell.layer_id).phi_at(x);
+            const auto& layer1 = configs[i + 1].layer(cell.layer_id);
+            data.phi0[cell.index] = {layer0.phi_at(x, 0.0), layer0.phi_at(x, 1.0)};
+            data.phi1[cell.index] = {layer1.phi_at(x, 0.0), layer1.phi_at(x, 1.0)};
         }
         epochs_.push_back(std::move(data));
     }
@@ -179,8 +182,37 @@ BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings op
     final_grid_ = make_col_grid(
         geometry, make_column_axis(knots, settings.dx, lithotype_breakpoints(configs.back())),
         settings.dz);
-    initial_temperature_ = initial_temperature(epochs_.front().initial_grid, configs.front().T_surf,
-                                               epochs_.front().mesh.born_layer_id.value_or(-1));
+    initial_grid_ = make_col_grid(
+        geometries.front(),
+        make_column_axis(geometries.front().x, settings.dx, lithotype_breakpoints(configs.front())),
+        settings.dz);
+}
+
+Vector BasinForwardSolver::solve_initial_temperature() const {
+    const auto& cfg = input_.configs().front();
+    Vector T(static_cast<Vector::Index>(initial_grid_.cells.size()));
+    std::vector<double> phi(initial_grid_.cells.size());
+    std::vector<const LithotypeProperties*> lithotypes(phi.size());
+    for_each_layer_cell(initial_grid_, [&](const ColCell& cell, double depth) {
+        const auto& layer = cfg.layer(cell.layer_id);
+        const double x = cell.center().x;
+        phi[cell.index] = layer.phi_at(x, depth);
+        lithotypes[cell.index] = &input_.lithotype(layer.lithotype_at(x));
+        T[static_cast<Vector::Index>(cell.index)] = cfg.T_surf.at(x);
+    });
+    auto boundaries = bc(cfg, cfg, 0.0);
+    if (!parameters_.empty()) {
+        const double q = parameters_[0];
+        boundaries.q_basal = [q](Point2D) { return q; };
+    }
+    ColHeatSystem system(initial_grid_, phi, lithotypes, kFluid, boundaries);
+    system.set_flux_scheme(settings_.scheme);
+    NonlinearSolver solver;
+    solver.set_linear_solver(settings_.linear_solver);
+    const auto result = solver.solve(system, T, settings_.nonlinear, settings_.linear);
+    if (!result.converged())
+        throw std::runtime_error("Initial stationary heat solve failed");
+    return T;
 }
 
 void BasinForwardSolver::set_parameters(const Vector& parameters) {
@@ -204,42 +236,64 @@ const ColGrid& BasinForwardSolver::final_grid() const noexcept {
 
 void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
                                                  std::span<double> node_T) const {
-    const auto& cfg = input_.configs().back();
+    temperature_nodes(final_grid_, input_.configs().size() - 1, T, node_T);
+}
+
+void BasinForwardSolver::temperature_nodes(const ColGrid& grid, std::size_t configuration,
+                                           std::span<const double> T,
+                                           std::span<double> node_T) const {
+    const auto& cfg = input_.configs()[configuration];
     std::vector<double> lambda(T.size());
-    for (const auto& cell : final_grid_.cells) {
+    for_each_layer_cell(grid, [&](const ColCell& cell, double depth) {
         const auto& layer = cfg.layer(cell.layer_id);
         const double x = cell.center().x;
-        lambda[cell.index] = thermal_properties(T[cell.index], layer.phi_at(x),
+        lambda[cell.index] = thermal_properties(T[cell.index], layer.phi_at(x, depth),
                                                 input_.lithotype(layer.lithotype_at(x)), kFluid)
                                  .lambda;
-    }
+    });
     auto boundaries = bc(cfg, cfg, 0.0);
     if (!parameters_.empty()) {
-        const double q = parameters_[parameters_.size() - 1];
+        const double q = parameters_[static_cast<Vector::Index>(configuration)];
         boundaries.q_basal = [q](Point2D) { return q; };
     }
-    interpolate_horizontal_temperature(final_grid_, T, lambda, boundaries, node_T);
+    interpolate_horizontal_temperature(grid, T, lambda, boundaries, node_T);
 }
 
 BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const {
+    return solve(observe, false);
+}
+
+BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
+                                             bool configuration_output) const {
     const auto solve_start = Clock::now();
-    auto grid_start = solve_start;
     BasinForwardResult result;
     const auto& input = input_;
     const auto& settings = settings_;
     const auto configs = input.configs();
     const auto& easy_ro = easy_ro_;
+    const auto initial_start = Clock::now();
+    Vector T = solve_initial_temperature();
+    result.timings.initial_s = elapsed_seconds(initial_start);
+    if (settings.intermediate_snapshots || configuration_output) {
+        const auto initial_I =
+            easy_ro.initial_state(initial_grid_.cells.size() + initial_grid_.columns.size());
+        observe_state(initial_grid_, T, initial_I, easy_ro, BasinSnapshot::Kind::initial, 0, 0,
+                      configs.front().age_ma, observe, result.timings);
+    }
+    auto grid_start = Clock::now();
     ColGrid grid = epochs_.front().initial_grid;
-    Vector T = initial_temperature_;
+    T = interpolate_temperature(initial_grid_, grid, T);
+    const int born = epochs_.front().mesh.born_layer_id.value_or(-1);
+    for (const auto& cell : grid.cells) {
+        if (cell.layer_id == born)
+            T[static_cast<Vector::Index>(cell.index)] = configs.front().T_surf.at(cell.center().x);
+    }
     auto I = easy_ro.initial_state(epochs_.front().deposition_times.size());
     result.epochs.reserve(configs.size() - 1);
     TimeIntegrator integrator;
     integrator.set_linear_solver(settings.linear_solver);
     integrator.set_preconditioner_reuse(settings.pc_reuse);
     result.timings.grid_s += elapsed_seconds(grid_start);
-    if (settings.intermediate_snapshots)
-        observe_state(grid, T, I, easy_ro, BasinSnapshot::Kind::initial, 0, 0,
-                      configs.front().age_ma, observe, result.timings);
 
     for (std::size_t epoch_index = 0; epoch_index + 1 < configs.size(); ++epoch_index) {
         const auto epoch_start = Clock::now();
@@ -256,7 +310,16 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
         std::vector<const LithotypeProperties*> lithotypes(epoch.lithotypes.size());
         for (std::size_t i = 0; i < lithotypes.size(); ++i)
             lithotypes[i] = &input.lithotype(epoch.lithotypes[i]);
-        std::vector<double> phi = epoch.phi0;
+        std::vector<double> phi(grid.cells.size());
+        const auto update_porosity = [&](double theta) {
+            for_each_layer_cell(grid, [&](const ColCell& cell, double depth) {
+                const auto i = cell.index;
+                const double top = std::lerp(epoch.phi0[i][0], epoch.phi1[i][0], theta);
+                const double bottom = std::lerp(epoch.phi0[i][1], epoch.phi1[i][1], theta);
+                phi[i] = std::lerp(top, bottom, depth);
+            });
+        };
+        update_porosity(0.0);
         const auto boundaries_at = [&](double theta) {
             auto boundaries = bc(cfg0, cfg1, theta);
             if (!parameters_.empty()) {
@@ -291,8 +354,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
                                           .age_begin_ma = cfg0.age_ma - t / kSecondsPerMa,
                                           .age_end_ma = cfg0.age_ma - t_next / kSecondsPerMa};
             grid = epoch.mesh.at(theta);
-            for (std::size_t i = 0; i < phi.size(); ++i)
-                phi[i] = std::lerp(epoch.phi0[i], epoch.phi1[i], theta);
+            update_porosity(theta);
             ColHeatSystem system(grid, phi, lithotypes, kFluid, boundaries_at(theta));
             system.set_flux_scheme(settings.scheme);
             integrator.set_timestep(dt);
@@ -327,7 +389,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
             step_stats.linear_iterations = step.linear_iterations;
             t = t_next;
             const bool at_event = t == duration;
-            if (settings.intermediate_snapshots)
+            if (settings.intermediate_snapshots || (configuration_output && at_event))
                 observe_state(
                     grid, T1, I, easy_ro,
                     at_event ? BasinSnapshot::Kind::before_event : BasinSnapshot::Kind::timestep,
