@@ -1,0 +1,21 @@
+\begin{table}[htbp]
+\centering\small
+\renewcommand{\arraystretch}{1.12}
+\caption{Время расчёта; проценты относительно UMFPACK для того же этапа и модели.}\label{tab:solvers}
+\begin{tabular}{ll D{,}{,}{2.3} D{,}{,}{3.1} D{,}{,}{2.3} D{,}{,}{3.1}}
+\toprule
+\multirow{2}{*}{Модель} & \multirow{2}{*}{Решатель} & \multicolumn{2}{c}{Линейное решение} & \multicolumn{2}{c}{Прямой расчёт} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+\multicolumn{1}{c}{} & \multicolumn{1}{c}{} & \multicolumn{1}{c}{с} & \multicolumn{1}{c}{\%} & \multicolumn{1}{c}{с} & \multicolumn{1}{c}{\%} \\
+\midrule
+\multirow{2}{*}{Модель 1} & GMRES/ILU(2) & 1,160 & 24,7 & 2,291 & 39,2 \\
+ & UMFPACK & 4,698 & 100,0 & 5,839 & 100,0 \\
+\addlinespace[3pt]
+\multirow{2}{*}{Модель 2} & GMRES/ILU(2) & 2,471 & 27,3 & 4,995 & 43,1 \\
+ & UMFPACK & 9,062 & 100,0 & 11,586 & 100,0 \\
+\addlinespace[3pt]
+\multirow{2}{*}{Модель 3} & GMRES/ILU(2) & 16,049 & 69,2 & 22,486 & 76,2 \\
+ & UMFPACK & 23,178 & 100,0 & 29,511 & 100,0 \\
+\bottomrule
+\end{tabular}
+\end{table}

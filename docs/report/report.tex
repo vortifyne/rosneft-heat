@@ -1,4 +1,4 @@
-% Сборка из корня: latexmk -pdf -cd -outdir=../../build/report docs/report/report.tex
+% Сборка из корня: make report
 \documentclass[a4paper,11pt]{article}
 \usepackage[T2A]{fontenc}
 \usepackage[utf8]{inputenc}
@@ -7,7 +7,7 @@
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx,xcolor}
 \usepackage{microtype}
-\usepackage{booktabs}
+\usepackage{booktabs,dcolumn,multirow}
 \usepackage{placeins}
 \usepackage[font=small,labelfont=bf]{caption}
 \usepackage{csquotes}

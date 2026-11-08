@@ -2,7 +2,7 @@
 
 .PHONY: help docker-image \
         docker-debug docker-release docker-test docker-bench \
-        local-debug local-release local-test local-bench clean clean-deps
+        local-debug local-release local-test local-bench report clean clean-deps
 
 DOCKER_IMAGE ?= heat-env
 JOBS ?= 4
@@ -20,7 +20,7 @@ DOCKER_RUN = docker run --rm \
 
 help:
 	@echo "make {docker,local}-{debug,release,test,bench} [MODEL=ON] [JOBS=4]"
-	@echo "make docker-image | clean | clean-deps"
+	@echo "make report | docker-image | clean | clean-deps"
 
 docker-image:
 	docker build -t $(DOCKER_IMAGE) .
@@ -51,6 +51,9 @@ local-bench:
 	cmake --preset bench -DHEAT_BUILD_MODEL=$(MODEL)
 	cmake --build --preset bench --parallel $(JOBS) --target benchmarks
 	build/local/bench/benchmarks $(BENCH_ARGS)
+
+report:
+	latexmk -pdf -cd -outdir=../../build/report -interaction=nonstopmode -halt-on-error docs/report/report.tex
 
 clean:
 	rm -rf build/ compile_commands.json
