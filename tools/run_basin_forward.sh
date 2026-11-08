@@ -18,10 +18,22 @@ if [[ ! -x "$binary" ]]; then
 fi
 binary=$(realpath -e -- "$binary")
 
-exec docker run --rm --network none \
+options=("$@")
+parameter_mount=()
+for ((i=0; i<${#options[@]}; ++i)); do
+    if [[ ${options[i]} == --parameters ]]; then
+        parameters=$(realpath -e -- "${options[i+1]}")
+        parameter_mount=(-v "$parameters:/parameters.csv:ro")
+        options[i+1]=/parameters.csv
+        break
+    fi
+done
+
+exec docker run --rm --init --network none \
     --user "$(id -u):$(id -g)" \
     -v "$binary:/app/basin_forward_solver:ro" \
     -v "$input_dir:/input:ro" -v "$output_dir:/output" \
+    "${parameter_mount[@]}" \
     -e OMP_NUM_THREADS=1 -e OPENBLAS_NUM_THREADS=1 \
     -e MKL_NUM_THREADS=1 -e BLIS_NUM_THREADS=1 \
-    "${DOCKER_IMAGE:-heat-env}" /app/basin_forward_solver /input /output "$@"
+    "${DOCKER_IMAGE:-heat-env}" /app/basin_forward_solver /input /output "${options[@]}"

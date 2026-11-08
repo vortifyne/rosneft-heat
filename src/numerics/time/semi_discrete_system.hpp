@@ -8,6 +8,10 @@ class SemiDiscreteSystem {
 public:
     virtual ~SemiDiscreteSystem() = default;
 
+    virtual bool has_fixed_matrix_pattern() const noexcept {
+        return false;
+    }
+
     virtual void assemble_residual(double t, const Vector& u, const Vector& du_dt,
                                    Vector& r) const = 0;
 

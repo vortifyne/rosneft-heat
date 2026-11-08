@@ -25,19 +25,20 @@ template <typename T> void write_array(std::ofstream& file, const std::vector<T>
 void write_basin_binary(const std::filesystem::path& path, const BasinSnapshot& snapshot) {
     static_assert(std::endian::native == std::endian::little);
     const std::size_t count = snapshot.grid.cells.size();
-    if (snapshot.T.size() != count || snapshot.Ro.size() != count ||
-        (count > 0 && snapshot.I.size() % count != 0)) {
+    const std::size_t nodes = count + snapshot.grid.columns.size();
+    if (snapshot.T.size() != count || snapshot.Ro.size() != nodes ||
+        (nodes > 0 && snapshot.I.size() % nodes != 0)) {
         throw std::invalid_argument("column-grid binary field sizes do not match");
     }
     std::ofstream file(path, std::ios::binary);
     if (!file)
         throw std::runtime_error("Cannot create column-grid binary snapshot");
-    file.write("CGRID001", 8);
+    file.write("CGRID002", 8);
     write_value(file, static_cast<std::uint32_t>(snapshot.kind));
     write_value(file, snapshot.age_ma);
     write_value(file, static_cast<std::uint64_t>(snapshot.grid.x.size()));
     write_value(file, static_cast<std::uint64_t>(count));
-    write_value(file, static_cast<std::uint32_t>(count == 0 ? 0 : snapshot.I.size() / count));
+    write_value(file, static_cast<std::uint32_t>(nodes == 0 ? 0 : snapshot.I.size() / nodes));
     write_array(file, snapshot.grid.x);
     std::vector<std::uint64_t> column(count);
     std::vector<std::int32_t> layer_id(count);
@@ -55,7 +56,7 @@ void write_basin_binary(const std::filesystem::path& path, const BasinSnapshot& 
     file.write(reinterpret_cast<const char*>(snapshot.T.data()),
                static_cast<std::streamsize>(count * sizeof(double)));
     file.write(reinterpret_cast<const char*>(snapshot.Ro.data()),
-               static_cast<std::streamsize>(count * sizeof(double)));
+               static_cast<std::streamsize>(nodes * sizeof(double)));
     file.write(reinterpret_cast<const char*>(snapshot.I.data()),
                static_cast<std::streamsize>(snapshot.I.size() * sizeof(double)));
     if (!file)

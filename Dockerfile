@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
   automake libtool ca-certificates petsc-dev \
   && rm -rf /var/lib/apt/lists/*
 
-RUN CMAKE_VERSION=3.31.5 && \
+RUN CMAKE_VERSION=4.3.3 && \
   curl -sSL https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz | \
   tar --strip-components=1 -xz -C /usr/local
 

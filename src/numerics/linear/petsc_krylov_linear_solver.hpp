@@ -8,7 +8,7 @@
 class PetscKrylovLinearSolver final : public LinearSolver {
 public:
     explicit PetscKrylovLinearSolver(LinearMethod method = LinearMethod::gmres,
-                                     Preconditioner preconditioner = Preconditioner::ilu);
+                                     Preconditioner preconditioner = Preconditioner::ilu2);
     ~PetscKrylovLinearSolver() override;
 
     void set_preconditioner_reuse(bool reuse) noexcept override;

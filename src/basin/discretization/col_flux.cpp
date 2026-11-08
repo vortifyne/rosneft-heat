@@ -8,9 +8,6 @@
 namespace {
 
 void add_term(FluxStencil& stencil, const std::size_t P, const double a) {
-    if (a == 0.0) {
-        return;
-    }
     for (std::size_t i = 0; i < stencil.size; ++i) {
         if (stencil.cells[i] == P) {
             stencil.a[i] += a;
@@ -74,8 +71,8 @@ double one_sided_flux(const ColGrid& grid, const std::size_t P, const std::size_
     FluxStencil target;
     add_term(target, P, 1.0 - w_N);
     add_term(target, N, w_N);
-    const double z_h = (lambda[P] * d_N * p.z + lambda[N] * d_P * n.z) / denom;
-    const Point2D d{x_f - p.x, z_h - p.z};
+    // This form keeps the vertical direction independent of conductivity rounding.
+    const Point2D d{x_f - p.x, w_N * (n.z - p.z)};
     const double a_x = lambda[P] / std::abs(d.x);
     FluxStencil vertical;
     const double dz = vertical_sample(grid, P, d.z >= 0.0, lambda, bc, vertical);
@@ -108,6 +105,38 @@ void compute_internal_flux(const ColGrid& grid, const VerticalSubface& face,
                            const MultipointFluxScheme scheme, const std::span<const double> lambda,
                            const std::span<const double> T, const HeatBoundaryData& bc,
                            FluxStencil& stencil) {
+    if (scheme == MultipointFluxScheme::linear)
+        compute_mpfa_flux(grid, face, lambda, bc, stencil);
+    else
+        compute_nmpfa_flux(grid, face, lambda, T, bc, stencil);
+}
+
+void compute_mpfa_flux(const ColGrid& grid, const VerticalSubface& face,
+                       const std::span<const double> lambda, const HeatBoundaryData& bc,
+                       FluxStencil& stencil) {
+    const auto P = face.left_cell;
+    const auto N = face.right_cell;
+    stencil.size = 0;
+    stencil.b = 0.0;
+    FluxStencil s_P;
+    FluxStencil s_N;
+    one_sided_flux(grid, P, N, face.x, lambda, bc, s_P);
+    one_sided_flux(grid, N, P, face.x, lambda, bc, s_N);
+    // Harmonic-point weights; 1/2 is valid only for equal normal conductances.
+    const double d_P = std::abs(face.x - grid.cells[P].center().x);
+    const double d_N = std::abs(grid.cells[N].center().x - face.x);
+    const double g_P = lambda[P] / d_P;
+    const double g_N = lambda[N] / d_N;
+    const double g_sum = g_P + g_N;
+    const double w_P = g_N / g_sum;
+    const double w_N = g_P / g_sum;
+    add_scaled(stencil, s_P, w_P * face.length());
+    add_scaled(stencil, s_N, -w_N * face.length());
+}
+
+void compute_nmpfa_flux(const ColGrid& grid, const VerticalSubface& face,
+                        const std::span<const double> lambda, const std::span<const double> T,
+                        const HeatBoundaryData& bc, FluxStencil& stencil) {
     const auto P = face.left_cell;
     const auto N = face.right_cell;
     stencil.size = 0;
@@ -116,49 +145,36 @@ void compute_internal_flux(const ColGrid& grid, const VerticalSubface& face,
     FluxStencil s_N;
     const double a_P = one_sided_flux(grid, P, N, face.x, lambda, bc, s_P);
     const double a_N = one_sided_flux(grid, N, P, face.x, lambda, bc, s_N);
-    if (scheme == MultipointFluxScheme::linear) {
-        // Harmonic-point weights; 1/2 is valid only for equal normal conductances.
-        const double d_P = std::abs(face.x - grid.cells[P].center().x);
-        const double d_N = std::abs(grid.cells[N].center().x - face.x);
-        const double g_P = lambda[P] / d_P;
-        const double g_N = lambda[N] / d_N;
-        const double g_sum = g_P + g_N;
-        const double w_P = g_N / g_sum;
-        const double w_N = g_P / g_sum;
-        add_scaled(stencil, s_P, w_P * face.length());
-        add_scaled(stencil, s_N, -w_N * face.length());
+    const double q_P = evaluate_flux(s_P, T);
+    const double q_N = evaluate_flux(s_N, T);
+    const double eps =
+        std::numeric_limits<double>::epsilon() * std::max({1.0, std::abs(q_P), std::abs(q_N)});
+    if (q_P * q_N <= 0.0) {
+        const double denom = std::abs(q_P) + std::abs(q_N) + 2.0 * eps;
+        const double w_P = (std::abs(q_N) + eps) / denom;
+        const double w_N = (std::abs(q_P) + eps) / denom;
+        add_scaled(stencil, s_P, face.length() * w_P);
+        add_scaled(stencil, s_N, -face.length() * w_N);
     } else {
-        const double q_P = evaluate_flux(s_P, T);
-        const double q_N = evaluate_flux(s_N, T);
-        const double eps =
-            std::numeric_limits<double>::epsilon() * std::max({1.0, std::abs(q_P), std::abs(q_N)});
-        if (q_P * q_N <= 0.0) {
-            const double denom = std::abs(q_P) + std::abs(q_N) + 2.0 * eps;
-            const double w_P = (std::abs(q_N) + eps) / denom;
-            const double w_N = (std::abs(q_P) + eps) / denom;
-            add_scaled(stencil, s_P, face.length() * w_P);
-            add_scaled(stencil, s_N, -face.length() * w_N);
-        } else {
-            FluxStencil r_P = s_P;
-            add_term(r_P, P, -a_P);
-            add_term(r_P, N, a_P);
-            FluxStencil r_N = s_N;
-            add_term(r_N, N, -a_N);
-            add_term(r_N, P, a_N);
-            const double v_P = evaluate_flux(r_P, T);
-            const double v_N = evaluate_flux(r_N, T);
-            const double eps_r = std::numeric_limits<double>::epsilon() *
-                                 std::max({1.0, std::abs(v_P), std::abs(v_N)});
-            const double denom = std::abs(v_P) + std::abs(v_N) + 2.0 * eps_r;
-            const double w_P = (std::abs(v_N) + eps_r) / denom;
-            const double w_N = (std::abs(v_P) + eps_r) / denom;
-            const double a_PN = w_P * a_P + w_N * a_N;
-            add_term(stencil, P, face.length() * a_PN);
-            add_term(stencil, N, -face.length() * a_PN);
-            if (v_P * v_N <= 0.0) {
-                add_scaled(stencil, r_P, face.length() * w_P);
-                add_scaled(stencil, r_N, -face.length() * w_N);
-            }
+        FluxStencil r_P = s_P;
+        add_term(r_P, P, -a_P);
+        add_term(r_P, N, a_P);
+        FluxStencil r_N = s_N;
+        add_term(r_N, N, -a_N);
+        add_term(r_N, P, a_N);
+        const double v_P = evaluate_flux(r_P, T);
+        const double v_N = evaluate_flux(r_N, T);
+        const double eps_r =
+            std::numeric_limits<double>::epsilon() * std::max({1.0, std::abs(v_P), std::abs(v_N)});
+        const double denom = std::abs(v_P) + std::abs(v_N) + 2.0 * eps_r;
+        const double w_P = (std::abs(v_N) + eps_r) / denom;
+        const double w_N = (std::abs(v_P) + eps_r) / denom;
+        const double a_PN = w_P * a_P + w_N * a_N;
+        add_term(stencil, P, face.length() * a_PN);
+        add_term(stencil, N, -face.length() * a_PN);
+        if (v_P * v_N <= 0.0) {
+            add_scaled(stencil, r_P, face.length() * w_P);
+            add_scaled(stencil, r_N, -face.length() * w_N);
         }
     }
 }
@@ -199,4 +215,25 @@ void compute_surface_flux(const ColGrid& grid, const VerticalBoundaryFace& face,
         stencil.a[i] *= face.length();
     }
     stencil.b *= face.length();
+}
+
+void interpolate_horizontal_temperature(const ColGrid& grid, std::span<const double> T,
+                                        std::span<const double> lambda, const HeatBoundaryData& bc,
+                                        std::span<double> node_T) {
+    for (const auto& column : grid.columns) {
+        const auto offset = column.front() + grid.cells[column.front()].column;
+        const auto& top = grid.cells[column.front()];
+        node_T[offset] = bc.T_surf({top.center().x, top.z_top});
+        for (std::size_t row = 1; row < column.size(); ++row) {
+            const auto& a = grid.cells[column[row - 1]];
+            const auto& b = grid.cells[column[row]];
+            const double ra = 0.5 * a.height() / lambda[a.index];
+            const double rb = 0.5 * b.height() / lambda[b.index];
+            node_T[offset + row] = std::lerp(T[a.index], T[b.index], ra / (ra + rb));
+        }
+        const auto& bottom = grid.cells[column.back()];
+        node_T[offset + column.size()] =
+            T[bottom.index] + bc.q_basal({bottom.center().x, bottom.z_bottom}) * 0.5 *
+                                  bottom.height() / lambda[bottom.index];
+    }
 }

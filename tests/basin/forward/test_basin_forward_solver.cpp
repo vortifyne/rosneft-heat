@@ -2,6 +2,7 @@
 #include "basin/forward/basin_forward_solver.hpp"
 #include "basin/mesh/col_grid.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -35,7 +36,7 @@ void expect_timing_tree(const BasinTimings& t) {
 
 } // namespace
 
-TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
+TEST(BasinForwardSolver, PreservesTemperatureAndAccumulatesFinalLayerNodalHistory) {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto directory =
         std::filesystem::temp_directory_path() / ("column-basin-test-" + std::to_string(suffix));
@@ -58,7 +59,7 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
                "1,rock,2600,2.5,900,0\n"
                "2,rock2,2600,2.5,900,0\n");
     write_file(directory / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant\n"
-                                           "1e-15,1,1,8.314\n");
+                                           "1e13,142351.2,1,8.314\n");
     const BasinInput input = BasinInput::read(directory);
     bool saw_final = false;
     bool saw_initial_axis = false;
@@ -75,15 +76,18 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
             return;
         saw_final = true;
         EXPECT_EQ(snapshot.grid.x, (std::vector<double>{0.0, 1.0, 2.0}));
-        ASSERT_EQ(snapshot.I.size(), snapshot.grid.cells.size());
+        ASSERT_EQ(snapshot.I.size(), snapshot.grid.cells.size() + snapshot.grid.columns.size());
         for (const auto& cell : snapshot.grid.cells) {
             EXPECT_NEAR(snapshot.T[cell.index], 300.0, 1.0e-8);
+            const auto node = cell.index + cell.column;
             if (cell.layer_id == 1) {
-                EXPECT_DOUBLE_EQ(snapshot.I[cell.index], 0.0);
-                EXPECT_NEAR(snapshot.Ro[cell.index], std::exp(-1.6), 1.0e-12);
+                EXPECT_DOUBLE_EQ(snapshot.I[node], 0.0);
+                EXPECT_NEAR(snapshot.Ro[node], std::exp(-1.6), 1.0e-12);
+                EXPECT_GT(snapshot.I[node + 1], snapshot.I[node]);
+                EXPECT_GT(snapshot.Ro[node + 1], snapshot.Ro[node]);
             } else {
-                EXPECT_GT(snapshot.I[cell.index], 0.0);
-                EXPECT_GT(snapshot.Ro[cell.index], std::exp(-1.6));
+                EXPECT_GT(snapshot.I[node], 0.0);
+                EXPECT_GT(snapshot.Ro[node], std::exp(-1.6));
             }
         }
     });
@@ -150,5 +154,81 @@ TEST(BasinForwardSolver, PreservesUniformTemperatureAndResetsBornLayerHistory) {
         EXPECT_GT(std::filesystem::file_size(output_directory / "snapshots" / name), 40U);
         EXPECT_FALSE(std::filesystem::exists(output_directory / name));
     }
+    const BasinForwardSolver reset_solver(
+        input, {.dx = 10.0, .dz = 1.0, .dt_ma = 0.5, .reset_final_maturity = true});
+    (void)reset_solver.solve([&](const BasinSnapshot& snapshot) {
+        if (snapshot.kind != BasinSnapshot::Kind::after_event)
+            return;
+        for (const auto& cell : snapshot.grid.cells) {
+            if (cell.layer_id == 1) {
+                const auto node = cell.index + cell.column;
+                EXPECT_DOUBLE_EQ(snapshot.I[node], 0.0);
+                EXPECT_DOUBLE_EQ(snapshot.I[node + 1], 0.0);
+            }
+        }
+    });
+    std::filesystem::remove_all(directory);
+}
+
+TEST(BasinForwardSolver, PreservesGrownLayerHistoryAcrossTheNextBirth) {
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto directory =
+        std::filesystem::temp_directory_path() / ("basin-growth-test-" + std::to_string(suffix));
+    std::filesystem::create_directories(directory);
+    write_file(directory / "configurations.csv", "age_ma\n2\n1\n0\n");
+    write_file(directory / "layers.csv",
+               "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity\n"
+               "2,3,old,0,0,2,1,0.1\n2,3,old,2,0,2,1,0.1\n"
+               "1,2,middle,0,0,1,1,0.1\n1,2,middle,2,0,1,1,0.1\n"
+               "1,3,old,0,1,3,1,0.1\n1,3,old,2,1,3,1,0.1\n"
+               "0,1,new,0,0,1,1,0.1\n0,1,new,2,0,1,1,0.1\n"
+               "0,2,middle,0,1,2,1,0.1\n0,2,middle,2,1,2,1,0.1\n"
+               "0,3,old,0,2,4,1,0.1\n0,3,old,2,2,4,1,0.1\n");
+    write_file(directory / "boundaries.csv",
+               "age_ma,kind,x,value_si\n"
+               "2,surface_temperature,0,300\n2,surface_temperature,2,300\n"
+               "2,basal_heat_flux,0,0\n2,basal_heat_flux,2,0\n"
+               "1,surface_temperature,0,300\n1,surface_temperature,2,300\n"
+               "1,basal_heat_flux,0,0\n1,basal_heat_flux,2,0\n"
+               "0,surface_temperature,0,300\n0,surface_temperature,2,300\n"
+               "0,basal_heat_flux,0,0\n0,basal_heat_flux,2,0\n");
+    write_file(directory / "lithotypes.csv",
+               "code,name,solid_density,conductivity_20,specific_heat_20,heat_production\n"
+               "1,rock,2600,2.5,900,0\n");
+    write_file(directory / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant\n"
+                                           "1e13,142351.2,1,8.314\n");
+    const BasinForwardSolver solver(BasinInput::read(directory),
+                                    {.dx = 1.0, .dz = 0.5, .dz_min = 1e-4, .dt_ma = 0.25});
+    double before_birth = 0.0;
+    bool checked_birth = false, checked_final = false;
+    const double rate = 1e13 * std::exp(-142351.2 / (8.314 * 300.0));
+    const double seconds_per_ma = 1e6 * 365.25 * 24.0 * 3600.0;
+    (void)solver.solve([&](const BasinSnapshot& snapshot) {
+        if (snapshot.kind == BasinSnapshot::Kind::before_event && snapshot.epoch == 0) {
+            before_birth = snapshot.I[1]; // Middle of layer 2 in the first column.
+            EXPECT_GT(before_birth, 0.0);
+        }
+        if (snapshot.kind != BasinSnapshot::Kind::after_event)
+            return;
+        const auto& cells = snapshot.grid.columns.front();
+        const auto middle = std::find_if(cells.begin(), cells.end(), [&](std::size_t index) {
+            return snapshot.grid.cells[index].layer_id == 2;
+        });
+        ASSERT_NE(middle, cells.end());
+        const auto node = *middle + 1;
+        if (snapshot.epoch == 1) {
+            checked_birth = true;
+            // Two compressed 0.1 mm cells shift the old nodes slightly during transfer.
+            EXPECT_NEAR(snapshot.I[node] / before_birth, 1.0, 4e-4);
+            EXPECT_DOUBLE_EQ(snapshot.I[0], 0.0);
+        } else {
+            checked_final = true;
+            EXPECT_NEAR(snapshot.I[node] / (1.5 * seconds_per_ma * rate), 1.0, 3e-4);
+            // The top of the final layer is deposited at the final time.
+            EXPECT_DOUBLE_EQ(snapshot.I[0], 0.0);
+        }
+    });
+    EXPECT_TRUE(checked_birth);
+    EXPECT_TRUE(checked_final);
     std::filesystem::remove_all(directory);
 }

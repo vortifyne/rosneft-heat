@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 from pathlib import Path
+
+import pandas as pd
 
 from basin_data import BasinData
 
@@ -28,7 +31,6 @@ def main() -> None:
     arguments.output.mkdir(parents=True, exist_ok=True)
     layer_ids = {name: index + 1 for index, name in enumerate(data.layers)}
 
-    configuration_rows = []
     layer_rows = []
     boundary_rows = []
     for age in ages:
@@ -63,12 +65,14 @@ def main() -> None:
                 (f"{age:.15g}", "surface_temperature", f"{float(x):.15g}",
                  f"{float(value) + 273.15:.15g}")
             )
-        flow_x, flow_values = data.heat_flow(age)
-        for x, value in zip(flow_x, flow_values, strict=True):
-            boundary_rows.append(
-                (f"{age:.15g}", "basal_heat_flux", f"{float(x):.15g}",
-                 f"{1.0e-3 * float(value):.15g}")
-            )
+        flow = data.heat_flow(age)
+        if flow is not None:
+            flow_x, flow_values = flow
+            for x, value in zip(flow_x, flow_values, strict=True):
+                boundary_rows.append(
+                    (f"{age:.15g}", "basal_heat_flux", f"{float(x):.15g}",
+                     f"{1.0e-3 * float(value):.15g}")
+                )
 
     write_csv(
         arguments.output / "configurations.csv",
@@ -106,7 +110,25 @@ def main() -> None:
          for energy, weight in zip(kinetics["E_J"], kinetics["f"], strict=True)),
     )
 
-    print(f"prepared={arguments.output} configurations={len(ages)} layers={len(layer_ids)}")
+    observation_rows = []
+    for kind, filename in (("temperature", "TemperatureWellData.xlsx"),
+                           ("reflectance", "VitriniteWellData.xlsx")):
+        path = arguments.data_dir / filename
+        if not path.exists():
+            continue
+        frame = pd.read_excel(path)
+        for column in range(0, len(frame.columns), 2):
+            title = str(frame.columns[column])
+            x = float(re.search(r"\(([0-9.]+) m\)", title)[1])
+            well = title.split(" (")[0]
+            for z, value in frame.iloc[:, column:column + 2].dropna().itertuples(index=False, name=None):
+                observation_rows.append((kind, well, f"{x:.15g}", f"{z:.17g}",
+                                         f"{value:.17g}", f"{0.02 * abs(value):.17g}"))
+    if observation_rows:
+        write_csv(arguments.output / "observations.csv", ("kind", "well", "x", "z", "value", "error"),
+                  observation_rows)
+
+    print(f"prepared={arguments.output} configurations={len(ages)} layers={len(layer_ids)} observations={len(observation_rows)}")
 
 
 if __name__ == "__main__":

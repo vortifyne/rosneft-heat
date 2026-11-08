@@ -15,6 +15,11 @@ struct HeatBoundaryData {
     std::function<double(Point2D)> q_right{};
 };
 
+// Reconstruct interface temperatures from the two half-cell thermal resistances.
+void interpolate_horizontal_temperature(const ColGrid& grid, std::span<const double> T,
+                                        std::span<const double> lambda, const HeatBoundaryData& bc,
+                                        std::span<double> node_T);
+
 // sum(a[i] * T[cells[i]]) + b; at most four cells for MPFA and NMPFA.
 struct FluxStencil {
     std::array<std::size_t, 4> cells{};
@@ -29,6 +34,14 @@ void compute_internal_flux(const ColGrid& grid, const VerticalSubface& face,
                            MultipointFluxScheme scheme, std::span<const double> lambda,
                            std::span<const double> T, const HeatBoundaryData& bc,
                            FluxStencil& stencil);
+
+void compute_mpfa_flux(const ColGrid& grid, const VerticalSubface& face,
+                       std::span<const double> lambda, const HeatBoundaryData& bc,
+                       FluxStencil& stencil);
+
+void compute_nmpfa_flux(const ColGrid& grid, const VerticalSubface& face,
+                        std::span<const double> lambda, std::span<const double> T,
+                        const HeatBoundaryData& bc, FluxStencil& stencil);
 
 void compute_surface_flux(const ColGrid& grid, const VerticalBoundaryFace& face,
                           std::span<const double> lambda, const HeatBoundaryData& bc,

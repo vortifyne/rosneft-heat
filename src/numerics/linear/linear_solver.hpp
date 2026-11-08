@@ -2,11 +2,15 @@
 
 #include "numerics/algebra/sparse_matrix.hpp"
 #include "numerics/algebra/vector.hpp"
+#include "numerics/timing.hpp"
 
 struct LinearSolveRequest {
     double rtol = 1.0e-8;
     double atol = 1.0e-50;
     int maxiter = 1000;
+    // The caller marks boundaries; the solver does not compare matrix patterns.
+    bool new_pattern = true;
+    bool new_solve = true;
 };
 
 enum class LinearSolveStatus {
@@ -23,6 +27,7 @@ struct [[nodiscard]] LinearSolveResult {
     int iterations;
     // Original residual for UMFPACK; left-preconditioned residual for PETSc Krylov solvers.
     double r_norm;
+    LinearTimings timings{};
 };
 
 enum class LinearSolverType {
