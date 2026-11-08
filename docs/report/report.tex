@@ -10,10 +10,15 @@
 \usepackage{booktabs,dcolumn,multirow}
 \usepackage{placeins}
 \usepackage[font=small,labelfont=bf]{caption}
+\usepackage{totcount,zref-totpages}
 \usepackage{csquotes}
 \usepackage[backend=biber,style=numeric,sorting=none,maxbibnames=6]{biblatex}
 \usepackage[hidelinks,unicode,linktoc=all,bookmarksnumbered]{hyperref}
 \addbibresource{references.bib}
+\regtotcounter{figure}
+\regtotcounter{table}
+\newtotcounter{reportreferences}
+\AtEveryBibitem{\stepcounter{reportreferences}}
 \graphicspath{{figures/}}
 \setcounter{tocdepth}{3}
 \setlength{\emergencystretch}{2em}
@@ -28,29 +33,27 @@
   \end{figure}%
 }
 
-\title{Теплоперенос в осадочном бассейне:\\решение прямой и обратной задач}
-\author{}
-\date{}
-
 \begin{document}
-\maketitle
-\begin{center}
-  \textcolor{red!75!black}{Краткий черновик. Красным выделены тезисы для доработки.}
-\end{center}
+\input{inputs/00_titul}
+\input{inputs/00_referat}
+\clearpage
 \tableofcontents
 \clearpage
 
-\input{inputs/01_introduction}
-\input{inputs/02_problem}
+\input{inputs/00_introduction}
+\clearpage
+\input{inputs/01_problem}
 \FloatBarrier
-\input{inputs/03_numerical_algorithm}
+\input{inputs/02_numerical_algorithm}
 \FloatBarrier
-\input{inputs/04_implementation}
+\input{inputs/03_implementation}
 \FloatBarrier
-\input{inputs/05_verification}
+\input{inputs/04_verification}
 \FloatBarrier
-\input{inputs/06_applications}
+\input{inputs/05_applications}
 \FloatBarrier
-\input{inputs/07_conclusion}
+\clearpage
+\input{inputs/00_conclusion}
+\clearpage
 \printbibliography[heading=bibintoc,title={Список литературы}]
 \end{document}
