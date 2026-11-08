@@ -1,0 +1,58 @@
+% Сборка из корня: latexmk -pdf -cd -outdir=../../build/report docs/report/report.tex
+\documentclass[a4paper,11pt]{article}
+\usepackage[T2A]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english,russian]{babel}
+\usepackage[margin=25mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx,xcolor}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{placeins}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{csquotes}
+\usepackage[backend=biber,style=numeric,sorting=none,maxbibnames=6]{biblatex}
+\usepackage[hidelinks,unicode,linktoc=all,bookmarksnumbered]{hyperref}
+\addbibresource{references.bib}
+\graphicspath{{figures/}}
+\setlength{\emergencystretch}{2em}
+\newcommand{\Ro}{\mathrm{Ro}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\draft}[1]{\par{\color{red!75!black}#1}\par}
+\newcommand{\reportfigure}[3]{%
+  \begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\linewidth,height=.68\textheight,keepaspectratio]{#1}
+    \caption{#2}\label{#3}
+  \end{figure}%
+}
+
+\title{Теплоперенос в осадочном бассейне:\\решение прямой и обратной задач}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\begin{center}
+  \textcolor{red!75!black}{Краткий черновик. Красным выделены тезисы для доработки.}
+\end{center}
+\tableofcontents
+\clearpage
+
+\input{inputs/01_introduction}
+\input{inputs/02_problem}
+\FloatBarrier
+\input{inputs/03_mesh}
+\FloatBarrier
+\input{inputs/04_forward_method}
+\FloatBarrier
+\input{inputs/05_inverse_method}
+\input{inputs/06_verification}
+\FloatBarrier
+\input{inputs/07_results}
+\FloatBarrier
+\input{inputs/08_performance}
+\FloatBarrier
+\input{inputs/09_conclusion}
+\printbibliography[heading=bibintoc,title={Список литературы}]
+\end{document}

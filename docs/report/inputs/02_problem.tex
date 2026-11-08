@@ -1,0 +1,79 @@
+\section{Математическая постановка}
+\label{sec:problem}
+
+\draft{Основа модели --- постановка организаторов~\cite{problem2026} и принятые
+в бассейновом моделировании зависимости~\cite{hantschel2009}.
+Область $\Omega(t)=\{(x,z):0<x<W,\ z_{\mathrm{surf}}(x,t)<z<L(x,t)\}$
+задана конфигурациями на границах эпох. Ось $z$ направлена вниз;
+$t$ растёт от начала моделирования, геологический возраст $\tau$ уменьшается до нуля.
+На рис.~\ref{fig:geometry} показаны три конфигурации и расположение наблюдений.}
+
+\reportfigure{01_geometry_history.png}
+  {Геометрия обратного набора при возрасте 200, 100 и 0 млн лет.
+  Цвет обозначает литотип; на современной конфигурации показаны пять скважин и измерения T и Ro.}
+  {fig:geometry}
+
+\subsection{Теплоперенос и свойства среды}
+\draft{Температура удовлетворяет уравнению теплопереноса в движущемся материале.
+Скорость $\boldsymbol v$ определяется заданной геометрической историей.
+На внутренних контактах непрерывны температура и нормальный тепловой поток.}
+\begin{gather}
+ (\rho c)\left(\frac{\partial T}{\partial t}+\boldsymbol v\cdot\nabla T\right)
+   =\nabla\cdot(\lambda\nabla T)+A,
+ \label{eq:heat}\\
+ T\big|_{z=z_{\mathrm{surf}}}=T_{\mathrm{surf}},\qquad
+ \lambda\frac{\partial T}{\partial n}\bigg|_{z=L}=q_{\mathrm{basal}},\qquad
+ \frac{\partial T}{\partial x}\bigg|_{x=0,W}=0,\\
+ [T]=0,\qquad[\lambda\nabla T\cdot\boldsymbol n]=0.
+\end{gather}
+
+\draft{Начальное поле $T_0$ --- стационарное решение с начальными свойствами и
+граничными условиями. Эффективные свойства учитывают доли скелета и флюида;
+температура в формулах задаётся в К, $T_C=T-273{,}15$ --- в градусах Цельсия.}
+\begin{gather}
+ -\nabla\cdot\bigl(\lambda(x,z,0,T_0)\nabla T_0\bigr)=A(x,z,0),
+ \qquad T(x,z,0)=T_0(x,z),\\
+ \lambda=\lambda_s(T)^{1-\varphi}\lambda_f^{\varphi},\qquad
+ \rho c=(1-\varphi)\rho_s c_s(T)+\varphi\rho_f c_f,\qquad
+ A=(1-\varphi)A_s,\\
+ c_s(T)=c_{20}\left(0{,}953+2{,}29\cdot10^{-3}T_C
+              -2{,}835\cdot10^{-6}T_C^2+1{,}191\cdot10^{-9}T_C^3\right),\\
+ \lambda_s(T)=1{,}84+358(1{,}0227\lambda_{20}-1{,}882)
+                            \left(\frac1T-0{,}00068\right).
+\end{gather}
+\draft{Зависимости теплоёмкости и теплопроводности --- Waples и Sekiguchi
+соответственно~\cite{waples2004,sekiguchi1984}. В слое пористость линейна по
+относительной глубине $a=(z-z_{\mathrm{top}})/(z_{\mathrm{bot}}-z_{\mathrm{top}})$:
+$\varphi=(1-a)\varphi_{\mathrm{top}}+a\varphi_{\mathrm{bot}}$.
+Контакты и граничные значения пористости между конфигурациями интерполируются
+линейно по времени; разломные перестройки происходят на границах эпох.}
+
+\subsection{Зрелость витринита}
+\draft{Модель EASY\%Ro~\cite{sweeney1990} связывает зрелость с температурной
+историей материальной точки $\boldsymbol\xi(s)$ от момента её отложения
+$t_{\mathrm{dep}}$. Кинетические константы взяты из данных организаторов.
+Для материала начальной конфигурации принято $t_{\mathrm{dep}}=0$.}
+\begin{gather}
+ I_i(t)=\int_{t_{\mathrm{dep}}}^{t}
+ A_i\exp\!\left(-\frac{E_i}{R_gT(\boldsymbol\xi(s),s)}\right)\dd s,
+ \qquad I_i(t_{\mathrm{dep}})=0,\\
+ F=\sum_{i=1}^{N_R}f_i(1-e^{-I_i}),\qquad
+ \Ro=\exp(-1{,}6+3{,}7F)\quad[\%].
+\end{gather}
+
+\subsection{Обратная задача}
+\draft{Определяется только пространственно постоянный нижний поток $q(t)$,
+монотонно убывающий во времени, в пределах 50--100 мВт/м$^2$.
+Погрешности измерений приняты равными 2\% от заданных T в градусах Цельсия
+и Ro. Выбрана нормировка невязок по этим погрешностям; регуляризации нет.}
+\begin{gather}
+ r_j^T=\frac{T_{C,j}^{\mathrm{calc}}-T_{C,j}^{\mathrm{obs}}}
+                   {0{,}02|T_{C,j}^{\mathrm{obs}}|},\qquad
+ r_j^{\Ro}=\frac{\Ro_j^{\mathrm{calc}}-\Ro_j^{\mathrm{obs}}}
+                   {0{,}02|\Ro_j^{\mathrm{obs}}|},\\
+ \min J,\qquad J=J_T+J_{\Ro}
+       =\sum_j(r_j^T)^2+\sum_j(r_j^{\Ro})^2.
+ \label{eq:objective}
+\end{gather}
+\draft{Согласование с погрешностью означает $|r_j|\leq1$ для каждого наблюдения.
+Веса --- выбранная настройка метода; качество T и Ro также оценивается отдельно.}
