@@ -14,9 +14,13 @@ RUN apt-get update && apt-get install -y \
   automake libtool ca-certificates petsc-dev \
   && rm -rf /var/lib/apt/lists/*
 
-RUN CMAKE_VERSION=4.3.3 && \
-  curl -sSL https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz | \
-  tar --strip-components=1 -xz -C /usr/local
+RUN CMAKE_VERSION=3.31.5 && \
+  curl --fail --show-error --location --retry 5 --retry-delay 2 --retry-connrefused \
+    "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+    --output /tmp/cmake.tar.gz && \
+  tar --strip-components=1 -xzf /tmp/cmake.tar.gz -C /usr/local && \
+  rm /tmp/cmake.tar.gz && \
+  cmake --version
 
 RUN mkdir -p /var/cache/vcpkg/downloads && \
   git clone --depth 1 --branch 2026.06.24 https://github.com/microsoft/vcpkg.git /opt/vcpkg && \
