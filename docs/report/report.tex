@@ -12,7 +12,7 @@
 \usepackage[font=small,labelfont=bf]{caption}
 \usepackage{totcount,zref-totpages}
 \usepackage{csquotes}
-\usepackage[backend=biber,style=numeric,sorting=none,maxbibnames=6]{biblatex}
+\usepackage[backend=biber,style=numeric,sorting=none,giveninits=true,maxbibnames=6,minbibnames=3]{biblatex}
 \usepackage[hidelinks,unicode,linktoc=all,bookmarksnumbered]{hyperref}
 \addbibresource{references.bib}
 \numberwithin{equation}{section}
@@ -26,7 +26,6 @@
 \graphicspath{{figures/}}
 \setcounter{tocdepth}{3}
 \setlength{\emergencystretch}{2em}
-\newcommand{\draft}[1]{\par{\color{red!75!black}#1}\par}
 \newcommand{\reportfigure}[3]{%
   \begin{figure}[htbp]
     \stepcounter{reportfigures}
