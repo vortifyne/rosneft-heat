@@ -15,9 +15,13 @@
 \usepackage[backend=biber,style=numeric,sorting=none,maxbibnames=6]{biblatex}
 \usepackage[hidelinks,unicode,linktoc=all,bookmarksnumbered]{hyperref}
 \addbibresource{references.bib}
-\regtotcounter{figure}
+\numberwithin{equation}{section}
+\numberwithin{figure}{section}
+\newtotcounter{reportfigures}
 \regtotcounter{table}
 \newtotcounter{reportreferences}
+\newcounter{reportalgorithm}[section]
+\renewcommand{\thereportalgorithm}{\thesection.\arabic{reportalgorithm}}
 \AtEveryBibitem{\stepcounter{reportreferences}}
 \graphicspath{{figures/}}
 \setcounter{tocdepth}{3}
@@ -25,6 +29,7 @@
 \newcommand{\draft}[1]{\par{\color{red!75!black}#1}\par}
 \newcommand{\reportfigure}[3]{%
   \begin{figure}[htbp]
+    \stepcounter{reportfigures}
     \centering
     \includegraphics[width=\linewidth,height=.68\textheight,keepaspectratio]{#1}
     \caption{#2}\label{#3}
