@@ -45,8 +45,8 @@ void write_layer_fields(std::ostream& output, const BasinConfig& cfg,
                 return grid.cells[i].layer_id == layer.id;
             });
             const auto& cell = grid.cells[*first];
-            const auto top = *first + cell.column;
-            const auto bottom = *(last - 1) + cell.column + 1;
+            const auto top = cell.maturity_top;
+            const auto bottom = grid.cells[*(last - 1)].maturity_top + 1;
             x.push_back(cell.center().x);
             ro.push_back({snapshot.Ro[top], snapshot.Ro[bottom]});
         }
