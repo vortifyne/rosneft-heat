@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.20)
+project(tdma VERSION 1.0.0 LANGUAGES CXX)
+
+add_library(tdma INTERFACE)
+add_library(tdma::tdma ALIAS tdma)
+target_include_directories(tdma INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_compile_features(tdma INTERFACE cxx_std_20)
+
+option(TDMA_BUILD_EXAMPLES "Build the tdma examples" OFF)
+if(TDMA_BUILD_EXAMPLES)
+    foreach(example IN ITEMS quickstart pivoting heat_1d)
+        add_executable(tdma_${example} examples/${example}.cpp)
+        target_link_libraries(tdma_${example} PRIVATE tdma::tdma)
+    endforeach()
+endif()
