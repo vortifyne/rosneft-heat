@@ -14,6 +14,9 @@ public:
                Eigen::Ref<Eigen::VectorXd> z) override;
 
 private:
+    void solve_columns(const SparseMatrix::CsrNativeType& matrix,
+                       Eigen::Ref<Eigen::VectorXd> values);
+
     const ColGrid& grid_;
     tdma::PivotingSolver<double> column_solver_;
     tdma::PivotingSolver<double> coarse_solver_;

@@ -30,14 +30,8 @@ void TwoGridPC::setup(const SparseMatrix& A) {
     coarse_solver_.compute({lower, diagonal, upper});
 }
 
-void TwoGridPC::apply(const SparseMatrix& A, Eigen::Ref<const Eigen::VectorXd> v,
-                      Eigen::Ref<Eigen::VectorXd> z) {
-    const auto& matrix = A.native_csr();
-    if (v.size() != matrix.rows() || z.size() != v.size() ||
-        coarse_solver_.size() != grid_.columns.size()) {
-        throw std::invalid_argument("TwoGridPC requires setup and matching vectors");
-    }
-
+void TwoGridPC::solve_columns(const SparseMatrix::CsrNativeType& matrix,
+                              Eigen::Ref<Eigen::VectorXd> values) {
     std::vector<double> lower, diagonal, upper, rhs;
     for (const auto& cells : grid_.columns) {
         const auto n = cells.size();
@@ -50,7 +44,7 @@ void TwoGridPC::apply(const SparseMatrix& A, Eigen::Ref<const Eigen::VectorXd> v
         for (std::size_t i = 0; i < n; ++i) {
             const auto cell = cells[i];
             diagonal[i] = matrix.coeff(cell, cell);
-            rhs[i] = v[cell];
+            rhs[i] = values[cell];
             if (i + 1 < n) {
                 const auto next = cells[i + 1];
                 upper[i] = matrix.coeff(cell, next);
@@ -60,14 +54,30 @@ void TwoGridPC::apply(const SparseMatrix& A, Eigen::Ref<const Eigen::VectorXd> v
         column_solver_.compute({lower, diagonal, upper});
         column_solver_.solve(rhs, rhs);
         for (std::size_t i = 0; i < n; ++i)
-            z[cells[i]] = rhs[i];
+            values[cells[i]] = rhs[i];
+    }
+}
+
+void TwoGridPC::apply(const SparseMatrix& A, Eigen::Ref<const Eigen::VectorXd> v,
+                      Eigen::Ref<Eigen::VectorXd> z) {
+    const auto& matrix = A.native_csr();
+    if (v.size() != matrix.rows() || z.size() != v.size() ||
+        coarse_solver_.size() != grid_.columns.size()) {
+        throw std::invalid_argument("TwoGridPC requires setup and matching vectors");
     }
 
-    const Eigen::VectorXd residual = v - matrix * z;
+    z = v;
+    solve_columns(matrix, z);
+
+    Eigen::VectorXd residual = v - matrix * z;
     std::vector<double> coarse(grid_.columns.size());
     for (const auto& cell : grid_.cells)
         coarse[cell.column] += residual[cell.index];
     coarse_solver_.solve(coarse, coarse);
     for (const auto& cell : grid_.cells)
         z[cell.index] += coarse[cell.column];
+
+    residual = v - matrix * z;
+    solve_columns(matrix, residual);
+    z += residual;
 }
