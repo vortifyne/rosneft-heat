@@ -66,6 +66,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& system, Vecto
         b.native() = -r.native();
         linear_step.new_pattern = iteration == 0 || !fixed_pattern;
         linear_step.new_solve = iteration == 0;
+        dx.set_zero();
         start = Clock::now();
         const LinearSolveResult linear_result = linear_solver_->solve(A, b, dx, linear_step);
         timings.linear_s += elapsed_seconds(start);
