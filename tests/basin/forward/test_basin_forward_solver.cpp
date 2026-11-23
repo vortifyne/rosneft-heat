@@ -254,10 +254,10 @@ TEST(BasinForwardSolver, StartsFromStationaryTemperatureWithCurrentBasalFlux) {
                "1,basal_heat_flux,0,0.06\n1,basal_heat_flux,1000,0.06\n"
                "0,surface_temperature,0,285\n0,surface_temperature,1000,285\n"
                "0,basal_heat_flux,0,0.06\n0,basal_heat_flux,1000,0.06\n");
-    // This lambda20 makes Sekiguchi conductivity constant and equal to 1.84.
+    // At the common intersection of the Sekiguchi curves the conductivity is constant.
     write_file(directory / "lithotypes.csv",
                "code,name,solid_density,conductivity_20,specific_heat_20,heat_production\n"
-               "1,rock,2600,1.8402268504937909,900,0\n");
+               "1,rock,2600,1.8436,900,0\n");
     write_file(directory / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant\n"
                                            "1e13,190000,1,8.314\n");
     BasinForwardSolver solver(BasinInput::read(directory), {.dx = 500, .dz = 100});
@@ -269,7 +269,7 @@ TEST(BasinForwardSolver, StartsFromStationaryTemperatureWithCurrentBasalFlux) {
                 return;
             observed = true;
             for (const auto& cell : snapshot.grid.cells)
-                EXPECT_NEAR(snapshot.T[cell.index], 285.0 + q * cell.center().z / 1.84, 1e-7);
+                EXPECT_NEAR(snapshot.T[cell.index], 285.0 + q * cell.center().z / 1.8436, 1e-7);
             for (double integral : snapshot.I)
                 EXPECT_DOUBLE_EQ(integral, 0.0);
         });
@@ -293,7 +293,7 @@ TEST(BasinForwardSolver, StartsFromStationaryTemperatureWithCurrentBasalFlux) {
         EXPECT_EQ(layer, 1);
         EXPECT_TRUE(x == 0.0 || x == 1000.0);
         EXPECT_NEAR(top, 285.0 - 273.15, 1e-7);
-        EXPECT_NEAR(bottom, 285.0 - 273.15 + 0.09 * 1000.0 / 1.84, 1e-7);
+        EXPECT_NEAR(bottom, 285.0 - 273.15 + 0.09 * 1000.0 / 1.8436, 1e-7);
         EXPECT_NEAR(average, 0.5 * (top + bottom), 1e-12);
         ++rows;
     }
