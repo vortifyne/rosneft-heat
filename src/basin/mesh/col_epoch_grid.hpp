@@ -12,7 +12,7 @@ struct ColEpochGrid {
     std::vector<int> layer_ids;
     std::vector<std::vector<double>> z0; // Boundary depths [column][contact], m.
     std::vector<std::vector<double>> z1;
-    std::vector<std::vector<std::size_t>> rows; // [column][old layer]
+    std::vector<std::vector<std::size_t>> rows; // [column][layer], including the new layer.
     double dz_min = 0.0;
     std::optional<int> born_layer_id;
 

@@ -78,9 +78,9 @@ BasinInput BasinInput::read(const std::filesystem::path& directory) {
     });
 
     read_csv(directory / "layers.csv",
-             "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity",
+             "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity_top,porosity_bottom",
              [&](const auto& fields) {
-                 if (fields.size() != 8) {
+                 if (fields.size() != 9) {
                      throw std::runtime_error("Invalid layer profile row");
                  }
                  auto& cfg = find_configuration(result.configs_, std::stod(fields[0]));
@@ -95,14 +95,16 @@ BasinInput BasinInput::read(const std::filesystem::path& directory) {
                                            .top = {},
                                            .bottom = {},
                                            .lithotype = {},
-                                           .phi = {}});
+                                           .phi_top = {},
+                                           .phi_bottom = {}});
                      found = std::prev(cfg.layers.end());
                  }
                  found->x.push_back(std::stod(fields[3]));
                  found->top.push_back(std::stod(fields[4]));
                  found->bottom.push_back(std::stod(fields[5]));
                  found->lithotype.push_back(std::stoi(fields[6]));
-                 found->phi.push_back(std::stod(fields[7]));
+                 found->phi_top.push_back(std::stod(fields[7]));
+                 found->phi_bottom.push_back(std::stod(fields[8]));
              });
 
     read_csv(directory / "boundaries.csv", "age_ma,kind,x,value_si", [&](const auto& fields) {

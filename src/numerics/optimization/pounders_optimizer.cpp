@@ -69,6 +69,8 @@ void validate_request(const PoundersSolveRequest& request) {
     if (request.maxfev <= 0) {
         throw std::invalid_argument("Maximum function evaluation count must be positive");
     }
+    if (!std::isfinite(request.residual_tolerance) || request.residual_tolerance < 0.0)
+        throw std::invalid_argument("Residual tolerance must be finite and non-negative");
 }
 
 void validate_problem(const BoundedLeastSquaresProblem& problem, const Vector& x0) {
@@ -136,19 +138,28 @@ Vector copy_from_petsc(Vec source, Vector::Index size) {
 
 struct ResidualCallbackContext {
     const BoundedLeastSquaresProblem* problem;
+    const PoundersObserver* observer;
     std::exception_ptr exception;
+    int evaluations = 0;
+    double residual_tolerance = 0.0;
+    double objective = std::numeric_limits<double>::infinity();
+    Vector parameters{};
+    Vector residuals{};
+    bool within_errors = false;
 };
 
 PetscErrorCode evaluate_residual(Tao tao, Vec px, Vec pr, void* raw_context) {
-    static_cast<void>(tao);
     auto* context = static_cast<ResidualCallbackContext*>(raw_context);
     if (context->exception != nullptr) {
         return PETSC_ERR_USER;
     }
 
     try {
-        const Vector x = copy_from_petsc(px, context->problem->lower_bounds.size());
-        const Vector r = context->problem->residual_function(x);
+        Vector x = copy_from_petsc(px, context->problem->lower_bounds.size());
+        x.native() = x.native()
+                         .cwiseMax(context->problem->lower_bounds.native())
+                         .cwiseMin(context->problem->upper_bounds.native());
+        Vector r = context->problem->residual_function(x);
         if (r.size() != context->problem->residual_count) {
             throw std::runtime_error("Residual function returned a vector with an invalid size");
         }
@@ -156,11 +167,36 @@ PetscErrorCode evaluate_residual(Tao tao, Vec px, Vec pr, void* raw_context) {
             throw std::runtime_error("Residual function returned non-finite values");
         }
         copy_to_petsc(r, pr);
+        ++context->evaluations;
+        if (*context->observer) {
+            PetscInt iteration = 0;
+            check_petsc(TaoGetIterationNumber(tao, &iteration), "Failed to get POUNDERS iteration");
+            (*context->observer)(static_cast<int>(iteration), context->evaluations, x, r);
+        }
+        const double objective = r.squared_norm();
+        const bool within_errors =
+            context->residual_tolerance > 0.0 && r.infinity_norm() <= context->residual_tolerance;
+        if ((within_errors && !context->within_errors) ||
+            (within_errors == context->within_errors && objective < context->objective)) {
+            context->parameters = std::move(x);
+            context->residuals = std::move(r);
+            context->objective = objective;
+            context->within_errors = within_errors;
+        }
     } catch (...) {
         context->exception = std::current_exception();
         return PETSC_ERR_USER;
     }
     return PETSC_SUCCESS;
+}
+
+PetscErrorCode check_residual_tolerance(Tao tao, void* raw_context) {
+    const auto& context = *static_cast<ResidualCallbackContext*>(raw_context);
+    PetscFunctionBeginUser;
+    PetscCall(TaoDefaultConvergenceTest(tao, nullptr));
+    if (context.within_errors)
+        PetscCall(TaoSetConvergedReason(tao, TAO_CONVERGED_USER));
+    PetscFunctionReturn(PETSC_SUCCESS);
 }
 
 PoundersStatus to_status(TaoConvergedReason reason) {
@@ -206,8 +242,8 @@ int to_int(PetscInt value, const char* name) {
 } // namespace
 
 PoundersSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& problem,
-                                             const Vector& x0,
-                                             const PoundersSolveRequest& request) const {
+                                             const Vector& x0, const PoundersSolveRequest& request,
+                                             const PoundersObserver& observe) const {
     validate_problem(problem, x0);
     validate_request(request);
     ensure_petsc_is_active();
@@ -227,11 +263,20 @@ PoundersSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& p
                 "Failed to create sequential POUNDERS lower-bound vector");
     check_petsc(VecCreateSeq(PETSC_COMM_SELF, n, upper.out()),
                 "Failed to create sequential POUNDERS upper-bound vector");
-    copy_to_petsc(x0, px.get());
+    PetscReal delta = 0.1;
+    check_petsc(PetscOptionsGetReal(nullptr, nullptr, "-tao_pounders_delta", &delta, nullptr),
+                "Failed to read POUNDERS initial step");
+    Vector initial = x0;
+    initial.native() =
+        initial.native().cwiseMin((problem.upper_bounds.native().array() - delta).matrix());
+    copy_to_petsc(initial, px.get());
     copy_to_petsc(problem.lower_bounds, lower.get());
     copy_to_petsc(problem.upper_bounds, upper.get());
 
-    ResidualCallbackContext context{.problem = &problem, .exception = nullptr};
+    ResidualCallbackContext context{.problem = &problem,
+                                    .observer = &observe,
+                                    .exception = nullptr,
+                                    .residual_tolerance = request.residual_tolerance};
     TaoHandle tao;
     check_petsc(TaoCreate(PETSC_COMM_SELF, tao.out()), "Failed to create PETSc TAO solver");
     check_petsc(TaoSetType(tao.get(), TAOPOUNDERS), "Failed to select PETSc POUNDERS");
@@ -247,6 +292,9 @@ PoundersSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& p
     check_petsc(TaoSetMaximumFunctionEvaluations(tao.get(), request.maxfev),
                 "Failed to set POUNDERS function evaluation limit");
     check_petsc(TaoSetFromOptions(tao.get()), "Failed to apply PETSc TAO options");
+    if (request.residual_tolerance > 0.0)
+        check_petsc(TaoSetConvergenceTest(tao.get(), check_residual_tolerance, &context),
+                    "Failed to set residual convergence test");
 
     const PetscErrorCode solve_error = TaoSolve(tao.get());
     if (context.exception != nullptr) {
@@ -264,14 +312,11 @@ PoundersSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& p
     check_petsc(TaoGetCurrentFunctionEvaluations(tao.get(), &function_evaluations),
                 "Failed to get POUNDERS function evaluation count");
 
-    Vector x = copy_from_petsc(px.get(), x0.size());
-    Vector r_final = copy_from_petsc(pr.get(), problem.residual_count);
-    const double objective = r_final.squared_norm();
     return {
         .status = to_status(reason),
-        .parameters = std::move(x),
-        .residuals = std::move(r_final),
-        .objective = objective,
+        .parameters = std::move(context.parameters),
+        .residuals = std::move(context.residuals),
+        .objective = context.objective,
         .iterations = to_int(iterations, "POUNDERS iteration count"),
         .function_evaluations = to_int(function_evaluations, "POUNDERS function evaluation count"),
     };

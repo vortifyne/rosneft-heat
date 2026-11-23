@@ -13,6 +13,10 @@ public:
                         double t_next, double dt)
         : system_(system), previous_(previous), t_(t_next), alpha_(1.0 / dt) {}
 
+    bool has_fixed_matrix_pattern() const noexcept override {
+        return system_.get().has_fixed_matrix_pattern();
+    }
+
     void assemble_residual(const Vector& u, Vector& r) const override {
         const Vector du_dt = (u - previous_.get().u) * alpha_;
 

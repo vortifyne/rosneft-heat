@@ -74,7 +74,11 @@ void set_basin_forward_option(BasinForwardSettings& settings, std::string_view o
         settings.axis_rdp_tol = number(value);
     else if (option == "--min-height")
         settings.dz_min = number(value);
-    else if (option == "--linear-method")
+    else if (option == "--snapshots") {
+        if (value != "all" && value != "final")
+            throw std::invalid_argument("Expected snapshots all or final");
+        settings.intermediate_snapshots = value == "all";
+    } else if (option == "--linear-method")
         settings.linear_solver.method = parse(value, kMethods);
     else if (option == "--pc")
         settings.linear_solver.preconditioner = parse(value, kPreconditioners);
@@ -107,6 +111,7 @@ void write_basin_forward_settings(std::ostream& output, const BasinForwardSettin
     output << std::setprecision(17) << "dx=" << settings.dx << '\n'
            << "dz=" << settings.dz << '\n'
            << "dt_ma=" << settings.dt_ma << '\n'
+           << "snapshots=" << (settings.intermediate_snapshots ? "all" : "final") << '\n'
            << "rdp_tol=" << settings.rdp_tol << '\n'
            << "axis_rdp_tol=";
     if (settings.axis_rdp_tol)

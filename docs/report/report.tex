@@ -1,0 +1,61 @@
+% Сборка из корня: make report
+\documentclass[a4paper,11pt]{article}
+\usepackage[T2A]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english,russian]{babel}
+\usepackage[margin=25mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx,xcolor}
+\usepackage{microtype}
+\usepackage{booktabs,dcolumn,multirow}
+\usepackage{placeins}
+\usepackage[font=small,labelfont=bf]{caption}
+\usepackage{totcount,zref-totpages}
+\usepackage{csquotes}
+\usepackage[backend=biber,style=numeric,sorting=none,giveninits=true,maxbibnames=6,minbibnames=3]{biblatex}
+\usepackage[hidelinks,unicode,linktoc=all,bookmarksnumbered]{hyperref}
+\addbibresource{references.bib}
+\numberwithin{equation}{section}
+\numberwithin{figure}{section}
+\newtotcounter{reportfigures}
+\regtotcounter{table}
+\newtotcounter{reportreferences}
+\newcounter{reportalgorithm}[section]
+\renewcommand{\thereportalgorithm}{\thesection.\arabic{reportalgorithm}}
+\AtEveryBibitem{\stepcounter{reportreferences}}
+\graphicspath{{figures/}}
+\setcounter{tocdepth}{3}
+\setlength{\emergencystretch}{2em}
+\newcommand{\reportfigure}[3]{%
+  \begin{figure}[htbp]
+    \stepcounter{reportfigures}
+    \centering
+    \includegraphics[width=\linewidth,height=.68\textheight,keepaspectratio]{#1}
+    \caption{#2}\label{#3}
+  \end{figure}%
+}
+
+\begin{document}
+\input{inputs/00_titul}
+\input{inputs/00_referat}
+\clearpage
+\tableofcontents
+\clearpage
+
+\input{inputs/00_introduction}
+\clearpage
+\input{inputs/01_problem}
+\FloatBarrier
+\input{inputs/02_numerical_algorithm}
+\FloatBarrier
+\input{inputs/03_implementation}
+\FloatBarrier
+\input{inputs/04_verification}
+\FloatBarrier
+\input{inputs/05_applications}
+\FloatBarrier
+\clearpage
+\input{inputs/00_conclusion}
+\clearpage
+\printbibliography[heading=bibintoc,title={Список литературы}]
+\end{document}

@@ -59,6 +59,7 @@ heat_configure_target(basin_physics)
 add_library(basin_data STATIC
   src/basin/basin_problem.cpp
   src/basin/io/basin_input.cpp
+  src/basin/io/basin_parameters.cpp
   src/basin/geometry/basin_geometry.cpp
   src/basin/geometry/basin_geometry_rdp.cpp
   src/basin/mesh/col_epoch_grid.cpp
@@ -67,7 +68,7 @@ add_library(basin_data STATIC
   src/basin/io/basin_binary.cpp
 )
 heat_configure_target(basin_data)
-target_link_libraries(basin_data PUBLIC basin_physics)
+target_link_libraries(basin_data PUBLIC basin_physics Eigen3::Eigen)
 
 add_library(basin_heat_forward STATIC
   src/basin/forward/basin_forward_solver.cpp
@@ -81,10 +82,24 @@ add_library(basin_heat_forward STATIC
 heat_configure_target(basin_heat_forward)
 target_link_libraries(basin_heat_forward PUBLIC heat_numerics basin_data)
 
+add_library(basin_heat_inverse STATIC
+  src/basin/inverse/basin_heat_observation_data.cpp
+  src/basin/inverse/basin_heat_parameter_space.cpp
+  src/basin/inverse/basin_heat_residual_evaluator.cpp
+  src/basin/inverse/basin_heat_inverse_solver.cpp
+)
+heat_configure_target(basin_heat_inverse)
+target_link_libraries(basin_heat_inverse PUBLIC basin_heat_forward heat_opt)
+
 add_executable(basin_forward_app src/apps/basin_forward/main.cpp)
 set_target_properties(basin_forward_app PROPERTIES OUTPUT_NAME basin_forward_solver)
 heat_configure_target(basin_forward_app)
 target_link_libraries(basin_forward_app PRIVATE basin_heat_forward PkgConfig::PETSc MPI::MPI_CXX)
+
+add_executable(basin_inverse_app src/apps/basin_inverse/main.cpp)
+set_target_properties(basin_inverse_app PROPERTIES OUTPUT_NAME basin_inverse_solver)
+heat_configure_target(basin_inverse_app)
+target_link_libraries(basin_inverse_app PRIVATE basin_heat_inverse PkgConfig::PETSc MPI::MPI_CXX)
 
 if(HEAT_BUILD_MODEL)
   add_library(model_heat_forward STATIC
@@ -109,6 +124,7 @@ if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
   add_executable(heat_numerics_tests
+    tests/main.cpp
     tests/numerics/algebra/test_sparse_matrix.cpp
     tests/numerics/algebra/test_vector.cpp
     tests/numerics/linear/test_umfpack_linear_solver.cpp
@@ -122,11 +138,12 @@ if(BUILD_TESTING)
   target_include_directories(heat_numerics_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
   target_link_libraries(heat_numerics_tests PRIVATE
     heat_numerics heat_opt
-    GTest::gtest_main PkgConfig::PETSc MPI::MPI_CXX
+    GTest::gtest PkgConfig::PETSc MPI::MPI_CXX
   )
   gtest_discover_tests(heat_numerics_tests PROPERTIES LABELS numerics)
 
   add_executable(basin_heat_tests
+    tests/main.cpp
     tests/basin/geometry/test_basin_geometry.cpp
     tests/basin/mesh/test_col_epoch_grid.cpp
     tests/basin/mesh/test_col_field_transfer.cpp
@@ -140,17 +157,19 @@ if(BUILD_TESTING)
     tests/basin/io/test_basin_forward_options.cpp
     tests/basin/io/test_basin_statistics.cpp
     tests/basin/forward/test_basin_forward_solver.cpp
+    tests/basin/inverse/test_basin_heat_inverse.cpp
   )
   heat_configure_target(basin_heat_tests)
   target_include_directories(basin_heat_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
   target_link_libraries(basin_heat_tests PRIVATE
-    basin_heat_forward
-    GTest::gtest_main PkgConfig::PETSc MPI::MPI_CXX
+    basin_heat_inverse
+    GTest::gtest PkgConfig::PETSc MPI::MPI_CXX
   )
   gtest_discover_tests(basin_heat_tests PROPERTIES LABELS basin)
 
   if(HEAT_BUILD_MODEL)
     add_executable(model_heat_tests
+      tests/main.cpp
       tests/model/forward/test_model_heat_forward_solver.cpp
       tests/model/forward/test_model_heat_system.cpp
       tests/model/inverse/test_model_heat_inverse_recovery.cpp
@@ -162,7 +181,7 @@ if(BUILD_TESTING)
     heat_configure_target(model_heat_tests)
     target_include_directories(model_heat_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
     target_link_libraries(model_heat_tests PRIVATE
-      model_heat_inverse GTest::gtest_main PkgConfig::PETSc MPI::MPI_CXX
+      model_heat_inverse GTest::gtest PkgConfig::PETSc MPI::MPI_CXX
     )
     gtest_discover_tests(model_heat_tests PROPERTIES LABELS model)
   endif()

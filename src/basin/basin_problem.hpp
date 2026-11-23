@@ -17,11 +17,12 @@ struct BasinLayerProfile {
     std::vector<double> top;
     std::vector<double> bottom;
     std::vector<int> lithotype;
-    std::vector<double> phi; // Porosity [-].
+    std::vector<double> phi_top;    // Porosity at the layer top [-].
+    std::vector<double> phi_bottom; // Porosity at the layer bottom [-].
 
     [[nodiscard]] double top_at(double coordinate) const;
     [[nodiscard]] double bottom_at(double coordinate) const;
-    [[nodiscard]] double phi_at(double coordinate) const;
+    [[nodiscard]] double phi_at(double coordinate, double relative_depth) const;
     [[nodiscard]] int lithotype_at(double coordinate) const;
 };
 

@@ -40,11 +40,16 @@ TEST(BasinStatistics, ChildrenSumToParentsAndPercentagesUseProgramTime) {
     result.nonlinear_iterations = 3;
     result.linear_iterations = 12;
     result.timings = {.total_s = 80.0,
+                      .initial_s = 5.0,
                       .grid_s = 10.0,
                       .transfer_s = 5.0,
                       .nonlinear = {.total_s = 50.0,
                                     .assembly = {.residual_s = 20.0, .matrix_s = 10.0},
-                                    .linear_s = 15.0},
+                                    .linear_s = 15.0,
+                                    .linear = {.transfer_s = 1.0,
+                                               .setup_s = 4.0,
+                                               .solve_s = 8.0,
+                                               .matrix_builds = 1}},
                       .properties = {.residual_s = 4.0, .matrix_s = 2.0},
                       .easy_ro_s = 5.0,
                       .output_s = 5.0};

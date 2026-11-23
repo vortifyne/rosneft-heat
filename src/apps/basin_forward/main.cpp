@@ -1,6 +1,7 @@
 #include "basin/basin_snapshot.hpp"
 #include "basin/forward/basin_forward_solver.hpp"
 #include "basin/io/basin_forward_options.hpp"
+#include "basin/io/basin_parameters.hpp"
 #include "basin/io/basin_statistics.hpp"
 #include "numerics/timing.hpp"
 
@@ -13,14 +14,15 @@
 #include <stdexcept>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace {
 
 class PetscSession {
 public:
-    explicit PetscSession(double& seconds) : seconds_(seconds) {
+    PetscSession(int& argc, char**& argv, double& seconds) : seconds_(seconds) {
         const auto start = Clock::now();
-        if (PetscInitializeNoArguments() != PETSC_SUCCESS) {
+        if (PetscInitialize(&argc, &argv, nullptr, nullptr) != PETSC_SUCCESS) {
             throw std::runtime_error("Cannot initialize PETSc");
         }
         seconds_ += elapsed_seconds(start);
@@ -43,7 +45,7 @@ std::string_view value(int argc, const char* const argv[], int& index) {
 
 } // namespace
 
-int main(int argc, const char* const argv[]) {
+int main(int argc, char* argv[]) {
     const auto program_start = Clock::now();
     if (argc < 3) {
         std::cerr << "Usage: basin_forward_solver <input-dir> <output-dir> "
@@ -53,7 +55,8 @@ int main(int argc, const char* const argv[]) {
                      "[--scheme linear|nmpfa] "
                      "[--linear-method lu|gmres|bicgstab] [--pc ilu|ilu2|gamg|boomeramg] "
                      "[--pc-reuse none|step|epoch] [--linear-rtol tolerance] [--linear-atol "
-                     "tolerance] [--linear-maxiter n]\n";
+                     "tolerance] [--linear-maxiter n] [--parameters csv] "
+                     "[--snapshots all|final] [PETSc -options ...]\n";
         return EXIT_FAILURE;
     }
     try {
@@ -62,18 +65,30 @@ int main(int argc, const char* const argv[]) {
         BasinForwardResult result;
         const std::filesystem::path output_directory(argv[2]);
         {
-            PetscSession petsc(initialization_s);
             BasinForwardSettings settings;
-            for (int index = 3; index < argc; ++index) {
+            std::filesystem::path parameters_path;
+            int index = 3;
+            for (; index < argc && std::string_view(argv[index]).starts_with("--"); ++index) {
                 const std::string_view option = argv[index];
                 const std::string_view setting = value(argc, argv, index);
-                set_basin_forward_option(settings, option, setting);
+                if (option == "--parameters")
+                    parameters_path = setting;
+                else
+                    set_basin_forward_option(settings, option, setting);
             }
+            std::vector<char*> petsc_arguments{argv[0]};
+            petsc_arguments.insert(petsc_arguments.end(), argv + index, argv + argc);
+            int petsc_argc = static_cast<int>(petsc_arguments.size());
+            petsc_arguments.push_back(nullptr);
+            char** petsc_argv = petsc_arguments.data();
+            PetscSession petsc(petsc_argc, petsc_argv, initialization_s);
             const auto input_start = Clock::now();
             auto input = BasinInput::read(argv[1]);
             input_s = elapsed_seconds(input_start);
             const auto configs = input.configs();
             BasinForwardSolver solver(std::move(input), settings);
+            if (!parameters_path.empty())
+                solver.set_parameters(read_basin_parameters(parameters_path, solver.configs()));
             result = solver.solve(output_directory, [configs](const BasinSnapshot& snapshot) {
                 if (snapshot.kind == BasinSnapshot::Kind::after_event)
                     return;

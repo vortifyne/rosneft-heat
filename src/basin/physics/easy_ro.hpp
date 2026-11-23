@@ -16,10 +16,11 @@ public:
     explicit EasyRoModel(EasyRoParameters params);
 
     [[nodiscard]] std::size_t reaction_count() const noexcept;
-    [[nodiscard]] std::vector<double> initial_state(std::size_t cell_count) const;
+    [[nodiscard]] std::vector<double> initial_state(std::size_t point_count) const;
 
-    void advance(std::span<const double> T0, std::span<const double> T1, double dt,
-                 std::span<double> I) const;
+    // The primitive table covers 20 <= E / (Rg * T) < 200 at both temperatures.
+    void advance(std::span<const double> T0, std::span<const double> T1, double t_old, double t_new,
+                 std::span<const double> t_dep, std::span<double> I) const;
 
     void reflectance(std::span<const double> I, std::span<double> Ro) const;
 

@@ -1,5 +1,4 @@
 #include "model_heat_inverse_test_problem.hpp"
-#include "support/petsc_test_session.hpp"
 
 #include <Eigen/SVD>
 #include <array>
@@ -65,7 +64,6 @@ TEST(ModelHeatInverseRecoveryTest, HasIndependentNormalizedParameterSensitivitie
 }
 
 TEST(ModelHeatInverseRecoveryTest, RecoversHiddenParametersFromMultipleInitialGuesses) {
-    ensure_petsc_test_session();
     const ModelHeatObservationData observations = make_synthetic_observations(kHiddenParameters);
     const std::array<ModelHeatParameters, 5> initial_guesses{
         ModelHeatParameters{.surface_temperature = 6.0, .basal_heat_flux = 0.1},

@@ -53,17 +53,23 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& system, Vecto
         return finish(NonlinearSolveStatus::converged_residual_absolute, 0, r0_norm);
     }
 
+    SparseMatrix A(x.size(), x.size(), linear_solver_->required_storage_order());
+    Vector b(x.size());
+    Vector dx(x.size());
+    auto linear_step = linear_request;
+    const bool fixed_pattern = system.has_fixed_matrix_pattern();
     for (int iteration = 0; iteration < request.maxiter; ++iteration) {
-        SparseMatrix A(x.size(), x.size(), linear_solver_->required_storage_order());
         start = Clock::now();
         system.assemble_matrix(request.method, x, A);
         timings.assembly.matrix_s += elapsed_seconds(start);
 
-        const Vector b = -r;
-        Vector dx;
+        b.native() = -r.native();
+        linear_step.new_pattern = iteration == 0 || !fixed_pattern;
+        linear_step.new_solve = iteration == 0;
         start = Clock::now();
-        const LinearSolveResult linear_result = linear_solver_->solve(A, b, dx, linear_request);
+        const LinearSolveResult linear_result = linear_solver_->solve(A, b, dx, linear_step);
         timings.linear_s += elapsed_seconds(start);
+        timings.linear += linear_result.timings;
         linear_iterations += linear_result.iterations;
         last_linear_status = linear_result.status;
 

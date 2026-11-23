@@ -1,5 +1,4 @@
 #include "model_heat_inverse_test_problem.hpp"
-#include "support/petsc_test_session.hpp"
 
 #include <cmath>
 #include <gtest/gtest.h>
@@ -17,7 +16,6 @@ void expect_vector_near(const Vector& actual, const Vector& expected, double tol
 }
 
 TEST(ModelHeatInverseSolverTest, ConnectsModelEvaluatorToPoundersAndReturnsConsistentResult) {
-    ensure_petsc_test_session();
     const ModelHeatParameters hidden_parameters{
         .surface_temperature = 12.0,
         .basal_heat_flux = 0.3,
@@ -45,7 +43,6 @@ TEST(ModelHeatInverseSolverTest, ConnectsModelEvaluatorToPoundersAndReturnsConsi
 }
 
 TEST(ModelHeatInverseSolverTest, ReturnsBestPointAfterFunctionEvaluationLimit) {
-    ensure_petsc_test_session();
     const ModelHeatParameters hidden_parameters{
         .surface_temperature = 18.0,
         .basal_heat_flux = 0.8,
@@ -70,7 +67,6 @@ TEST(ModelHeatInverseSolverTest, ReturnsBestPointAfterFunctionEvaluationLimit) {
 }
 
 TEST(ModelHeatInverseSolverTest, ValidatesPhysicalInitialParameters) {
-    ensure_petsc_test_session();
     ModelHeatInverseSolver solver = make_inverse_solver(
         ModelHeatObservationData(Vector{10.0, 10.0, 10.0}, Vector{0.1, 0.1, 0.1}));
 
@@ -82,7 +78,6 @@ TEST(ModelHeatInverseSolverTest, ValidatesPhysicalInitialParameters) {
 }
 
 TEST(ModelHeatInverseSolverTest, PropagatesForwardFailureUntilPenaltyPolicyIsImplemented) {
-    ensure_petsc_test_session();
     ModelHeatForwardSettings failing_settings = make_settings();
     failing_settings.nonlinear.maxiter = 0;
     ModelHeatInverseSolver solver = make_inverse_solver(

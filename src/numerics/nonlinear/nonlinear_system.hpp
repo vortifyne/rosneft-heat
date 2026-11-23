@@ -9,6 +9,10 @@ class NonlinearSystem {
 public:
     virtual ~NonlinearSystem() = default;
 
+    virtual bool has_fixed_matrix_pattern() const noexcept {
+        return false;
+    }
+
     virtual void assemble_residual(const Vector& x, Vector& r) const = 0;
 
     void assemble_matrix(NonlinearMethod method, const Vector& x, SparseMatrix& A) const {
