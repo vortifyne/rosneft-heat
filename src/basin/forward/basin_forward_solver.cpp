@@ -2,6 +2,7 @@
 
 #include "basin/basin_snapshot.hpp"
 #include "basin/discretization/col_heat_system.hpp"
+#include "basin/discretization/two_grid_pc.hpp"
 #include "basin/geometry/basin_geometry_rdp.hpp"
 #include "basin/mesh/col_epoch_grid.hpp"
 #include "basin/mesh/col_field_transfer.hpp"
@@ -11,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -22,6 +24,13 @@ namespace {
 
 constexpr double kSecondsPerMa = 1.0e6 * 365.25 * 24.0 * 3600.0;
 constexpr FluidProperties kFluid{.lambda = 0.7, .rho = 1040.0, .c = 4184.0};
+
+void set_linear_solver(NonlinearSolver& solver, LinearSolverOptions options, const ColGrid& grid) {
+    if (options.preconditioner == PreconditionerType::two_grid)
+        solver.set_linear_solver(options, std::make_unique<TwoGridPC>(grid));
+    else
+        solver.set_linear_solver(options);
+}
 
 std::vector<double> lithotype_breakpoints(const BasinConfig& cfg0,
                                           const BasinConfig* cfg1 = nullptr) {
@@ -208,7 +217,7 @@ Vector BasinForwardSolver::solve_initial_temperature() const {
     ColHeatSystem system(initial_grid_, phi, lithotypes, kFluid, boundaries);
     system.set_flux_scheme(settings_.scheme);
     NonlinearSolver solver;
-    solver.set_linear_solver(settings_.linear_solver);
+    set_linear_solver(solver, settings_.linear_solver, initial_grid_);
     const auto result = solver.solve(system, T, settings_.nonlinear, settings_.linear);
     if (!result.converged())
         throw std::runtime_error("Initial stationary heat solve failed");
@@ -291,7 +300,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
     auto I = easy_ro.initial_state(epochs_.front().deposition_times.size());
     result.epochs.reserve(configs.size() - 1);
     TimeIntegrator integrator;
-    integrator.set_linear_solver(settings.linear_solver);
+    set_linear_solver(integrator.nonlinear_solver(), settings.linear_solver, grid);
     integrator.set_preconditioner_reuse(settings.pc_reuse);
     result.timings.grid_s += elapsed_seconds(grid_start);
 

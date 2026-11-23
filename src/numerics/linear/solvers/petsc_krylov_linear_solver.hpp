@@ -1,6 +1,6 @@
 #pragma once
 
-#include "numerics/linear/linear_solver.hpp"
+#include "numerics/linear/solvers/linear_solver.hpp"
 
 #include <memory>
 
@@ -8,7 +8,7 @@
 class PetscKrylovLinearSolver final : public LinearSolver {
 public:
     explicit PetscKrylovLinearSolver(LinearMethod method = LinearMethod::gmres,
-                                     Preconditioner preconditioner = Preconditioner::ilu2);
+                                     PreconditionerType preconditioner = PreconditionerType::ilu2);
     ~PetscKrylovLinearSolver() override;
 
     void set_preconditioner_reuse(bool reuse) noexcept override;
@@ -24,7 +24,7 @@ public:
 
 private:
     LinearMethod method_;
-    Preconditioner preconditioner_;
+    PreconditionerType preconditioner_;
     bool reuse_preconditioner_ = false;
     struct Impl;
     std::unique_ptr<Impl> impl_;

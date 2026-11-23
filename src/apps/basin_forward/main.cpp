@@ -53,7 +53,8 @@ int main(int argc, char* argv[]) {
                      "[--nonlinear-atol tolerance] [--nonlinear-maxiter n] [--min-height m] "
                      "[--rdp-tol m] [--axis-rdp-tol m] "
                      "[--scheme linear|nmpfa] "
-                     "[--linear-method lu|gmres|bicgstab] [--pc ilu|ilu2|gamg|boomeramg] "
+                     "[--linear-method lu|gmres|bicgstab|fgmres] "
+                     "[--pc none|two-grid|ilu|ilu2|gamg|boomeramg] "
                      "[--pc-reuse none|step|epoch] [--linear-rtol tolerance] [--linear-atol "
                      "tolerance] [--linear-maxiter n] [--parameters csv] "
                      "[--snapshots all|final] [PETSc -options ...]\n";

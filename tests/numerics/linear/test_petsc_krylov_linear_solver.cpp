@@ -1,4 +1,4 @@
-#include "numerics/linear/petsc_krylov_linear_solver.hpp"
+#include "numerics/linear/solvers/petsc_krylov_linear_solver.hpp"
 #include "numerics/nonlinear/nonlinear_solver.hpp"
 
 #include <gtest/gtest.h>
@@ -7,8 +7,8 @@
 
 TEST(PetscKrylovLinearSolver, SolvesCurrentMatrixForEveryMethodAndPreconditioner) {
     for (const auto method : {LinearMethod::gmres, LinearMethod::bicgstab}) {
-        for (const auto pc : {Preconditioner::ilu, Preconditioner::ilu2, Preconditioner::gamg,
-                              Preconditioner::boomeramg}) {
+        for (const auto pc : {PreconditionerType::ilu, PreconditionerType::ilu2,
+                              PreconditionerType::gamg, PreconditionerType::boomeramg}) {
             for (const bool reuse : {false, true}) {
                 SCOPED_TRACE(testing::Message() << "method=" << static_cast<int>(method) << " pc="
                                                 << static_cast<int>(pc) << " reuse=" << reuse);
@@ -41,8 +41,8 @@ TEST(PetscKrylovLinearSolver, SolvesCurrentMatrixForEveryMethodAndPreconditioner
 }
 
 TEST(PetscKrylovLinearSolver, ExplicitResetRebuildsPreconditionerForChangedCoefficients) {
-    for (const auto pc : {Preconditioner::ilu, Preconditioner::ilu2, Preconditioner::gamg,
-                          Preconditioner::boomeramg}) {
+    for (const auto pc : {PreconditionerType::ilu, PreconditionerType::ilu2,
+                          PreconditionerType::gamg, PreconditionerType::boomeramg}) {
         PetscKrylovLinearSolver solver(LinearMethod::gmres, pc);
         solver.set_preconditioner_reuse(true);
         const auto solve_diagonal = [&solver](double first, double second) {

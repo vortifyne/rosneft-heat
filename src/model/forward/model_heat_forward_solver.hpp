@@ -4,7 +4,7 @@
 #include "model/forward/model_heat_problem.hpp"
 #include "model/forward/model_heat_state.hpp"
 #include "model/forward/regular_grid.hpp"
-#include "numerics/linear/linear_solver.hpp"
+#include "numerics/linear/solvers/linear_solver.hpp"
 #include "numerics/nonlinear/nonlinear_solver.hpp"
 #include "numerics/time/time_integrator.hpp"
 

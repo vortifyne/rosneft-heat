@@ -1,4 +1,4 @@
-#include "numerics/linear/petsc_krylov_linear_solver.hpp"
+#include "numerics/linear/solvers/petsc_krylov_linear_solver.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -50,10 +50,13 @@ struct PetscKrylovLinearSolver::Impl {
     bool pc_ready = false;
 };
 
-PetscKrylovLinearSolver::PetscKrylovLinearSolver(LinearMethod method, Preconditioner preconditioner)
+PetscKrylovLinearSolver::PetscKrylovLinearSolver(LinearMethod method,
+                                                 PreconditionerType preconditioner)
     : LinearSolver(LinearSolverType::iterative), method_(method), preconditioner_(preconditioner) {
     if (method != LinearMethod::gmres && method != LinearMethod::bicgstab)
         throw std::invalid_argument("PETSc requires an iterative method");
+    if (preconditioner == PreconditionerType::two_grid)
+        throw std::invalid_argument("TwoGridPC requires FGMRES");
 }
 
 PetscKrylovLinearSolver::~PetscKrylovLinearSolver() = default;
@@ -107,15 +110,20 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
         PC pc = nullptr;
         check(KSPGetPC(ksp, &pc));
         switch (preconditioner_) {
-        case Preconditioner::ilu:
-        case Preconditioner::ilu2:
-            check(PCSetType(pc, PCILU));
-            check(PCFactorSetLevels(pc, preconditioner_ == Preconditioner::ilu ? 0 : 2));
+        case PreconditionerType::none:
+            check(PCSetType(pc, PCNONE));
             break;
-        case Preconditioner::gamg:
+        case PreconditionerType::two_grid:
+            throw std::invalid_argument("TwoGridPC requires FGMRES");
+        case PreconditionerType::ilu:
+        case PreconditionerType::ilu2:
+            check(PCSetType(pc, PCILU));
+            check(PCFactorSetLevels(pc, preconditioner_ == PreconditionerType::ilu ? 0 : 2));
+            break;
+        case PreconditionerType::gamg:
             check(PCSetType(pc, PCGAMG));
             break;
-        case Preconditioner::boomeramg:
+        case PreconditionerType::boomeramg:
             check(PCSetType(pc, PCHYPRE));
             check(PCHYPRESetType(pc, "boomeramg"));
             break;

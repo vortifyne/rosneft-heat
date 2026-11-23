@@ -1,10 +1,15 @@
 #pragma once
 
-#include "numerics/linear/linear_solver.hpp"
+#include "numerics/linear/pc/preconditioner.hpp"
+#include "numerics/linear/solvers/linear_solver.hpp"
+
+#include <memory>
+#include <utility>
 
 class FGMRES final : public LinearSolver {
 public:
-    FGMRES() noexcept : LinearSolver(LinearSolverType::iterative) {}
+    explicit FGMRES(std::unique_ptr<Preconditioner> pc = nullptr) noexcept
+        : LinearSolver(LinearSolverType::iterative), pc_(std::move(pc)) {}
 
     SparseStorageOrder required_storage_order() const noexcept override {
         return SparseStorageOrder::csr;
@@ -14,6 +19,5 @@ public:
                             const LinearSolveRequest& request) override;
 
 private:
-    // apply_preconditioner
-    // set_preconditioner
+    std::unique_ptr<Preconditioner> pc_;
 };

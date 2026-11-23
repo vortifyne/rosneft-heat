@@ -1,5 +1,5 @@
 #include "model/forward/model_heat_system.hpp"
-#include "numerics/linear/umfpack_linear_solver.hpp"
+#include "numerics/linear/solvers/umfpack_linear_solver.hpp"
 
 #include <algorithm>
 #include <cmath>
