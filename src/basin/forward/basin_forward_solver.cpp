@@ -236,15 +236,9 @@ const ColGrid& BasinForwardSolver::final_grid() const noexcept {
 
 void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
                                                  std::span<double> node_T) const {
-    temperature_nodes(final_grid_, input_.configs().size() - 1, T, node_T);
-}
-
-void BasinForwardSolver::temperature_nodes(const ColGrid& grid, std::size_t configuration,
-                                           std::span<const double> T,
-                                           std::span<double> node_T) const {
-    const auto& cfg = input_.configs()[configuration];
+    const auto& cfg = input_.configs().back();
     std::vector<double> lambda(T.size());
-    for_each_layer_cell(grid, [&](const ColCell& cell, double depth) {
+    for_each_layer_cell(final_grid_, [&](const ColCell& cell, double depth) {
         const auto& layer = cfg.layer(cell.layer_id);
         const double x = cell.center().x;
         lambda[cell.index] = thermal_properties(T[cell.index], layer.phi_at(x, depth),
@@ -253,10 +247,10 @@ void BasinForwardSolver::temperature_nodes(const ColGrid& grid, std::size_t conf
     });
     auto boundaries = bc(cfg, cfg, 0.0);
     if (!parameters_.empty()) {
-        const double q = parameters_[static_cast<Vector::Index>(configuration)];
+        const double q = parameters_[parameters_.size() - 1];
         boundaries.q_basal = [q](Point2D) { return q; };
     }
-    interpolate_horizontal_temperature(grid, T, lambda, boundaries, node_T);
+    interpolate_horizontal_temperature(final_grid_, T, lambda, boundaries, node_T);
 }
 
 BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const {

@@ -293,7 +293,8 @@ TEST(BasinForwardSolver, StartsFromStationaryTemperatureWithCurrentBasalFlux) {
         EXPECT_EQ(layer, 1);
         EXPECT_TRUE(x == 0.0 || x == 1000.0);
         EXPECT_NEAR(top, 285.0 - 273.15, 1e-7);
-        EXPECT_NEAR(bottom, 285.0 - 273.15 + 0.09 * 1000.0 / 1.8436, 1e-7);
+        // Below the deepest cell center the exported profile is extended as a constant.
+        EXPECT_NEAR(bottom, 285.0 - 273.15 + 0.09 * 950.0 / 1.8436, 1e-7);
         EXPECT_NEAR(average, 0.5 * (top + bottom), 1e-12);
         ++rows;
     }
