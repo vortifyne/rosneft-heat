@@ -38,6 +38,7 @@ add_library(heat_numerics STATIC
   src/numerics/linear/fgmres.cpp
   src/numerics/linear/umfpack_linear_solver.cpp
   src/numerics/linear/petsc_krylov_linear_solver.cpp
+  src/numerics/linear/petsc_preconditioner.cpp
   src/numerics/nonlinear/nonlinear_solver.cpp
   src/numerics/time/bdf1.cpp
   src/numerics/time/time_integrator.cpp

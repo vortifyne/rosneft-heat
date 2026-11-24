@@ -2,6 +2,7 @@
 
 #include "numerics/linear/fgmres.hpp"
 #include "numerics/linear/petsc_krylov_linear_solver.hpp"
+#include "numerics/linear/petsc_preconditioner.hpp"
 #include "numerics/linear/umfpack_linear_solver.hpp"
 
 #include <cmath>
@@ -110,9 +111,13 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& system, Vecto
 std::unique_ptr<LinearSolver> NonlinearSolver::make_linear_solver(LinearSolverOptions options) {
     switch (options.method) {
     case LinearMethod::fgmres:
-        if (options.preconditioner != PreconditionerType::none)
-            throw std::invalid_argument("FGMRES requires --pc none");
-        return std::make_unique<FGMRES>();
+        if (options.preconditioner == PreconditionerType::none)
+            return std::make_unique<FGMRES>();
+        if (options.preconditioner == PreconditionerType::ilu ||
+            options.preconditioner == PreconditionerType::ilu2)
+            return std::make_unique<FGMRES>(std::make_unique<PetscPreconditioner>(
+                options.preconditioner == PreconditionerType::ilu2 ? 2 : 0));
+        throw std::invalid_argument("FGMRES supports --pc none, ilu or ilu2");
     case LinearMethod::lu:
         return std::make_unique<UmfpackLinearSolver>();
     case LinearMethod::gmres:

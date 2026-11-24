@@ -23,7 +23,7 @@ tools/run_basin_from_xlsx.sh path/to/input result
 | `--min-height` | Минимальная высота ячейки, м | 0.05 |
 | `--scheme` | Схема: `linear` (MPFA), `nmpfa` | `linear` |
 | `--linear-method` | Решатель: `gmres`, `bicgstab`, `lu` (UMFPACK), `fgmres` | `gmres` |
-| `--pc` | Для собственного FGMRES укажите `none`. Для PETSc доступны `ilu`, `ilu2`, `gamg`, `boomeramg`, `none` | `ilu2` |
+| `--pc` | Для собственного FGMRES доступны `none`, `ilu`, `ilu2`. Для решателей PETSc также доступны `gamg` и `boomeramg` | `ilu2` |
 | `--pc-reuse` | Повторное использование предобуславливателя: `none`, `step`, `epoch` | `none` |
 | `--linear-rtol`, `--linear-atol` | Относительный и абсолютный допуски линейного решателя | `1e-8`, `1e-50` |
 | `--linear-maxiter` | Лимит линейных итераций | 1000 |
@@ -32,7 +32,9 @@ tools/run_basin_from_xlsx.sh path/to/input result
 | `--snapshots` | Снимки полей: `all` или только `final` | `all` |
 | `--parameters` | CSV с историей потока, например `inverse_result/parameters.csv` | Поток из XLSX |
 
-В режиме `--linear-method fgmres --pc none` длина рестарта равна 30.
+В режиме `--linear-method fgmres` длина рестарта равна 30. При выборе ILU
+факторизация строится для каждой линейной системы. Уровень заполнения можно
+переопределить, например `--linear-method fgmres --pc ilu -pc_factor_levels 2`.
 
 Дополнительные опции PETSc ставятся в конце, например `-ksp_gmres_restart 200`
 (по умолчанию рестарт через 100 векторов).
