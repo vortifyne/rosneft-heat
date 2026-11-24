@@ -1,21 +1,20 @@
 #include "numerics/nonlinear/nonlinear_solver.hpp"
 
-#include "numerics/linear/solvers/fgmres.hpp"
-#include "numerics/linear/solvers/petsc_krylov_linear_solver.hpp"
-#include "numerics/linear/solvers/umfpack_linear_solver.hpp"
+#include "numerics/linear/fgmres.hpp"
+#include "numerics/linear/petsc_krylov_linear_solver.hpp"
+#include "numerics/linear/umfpack_linear_solver.hpp"
 
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <utility>
 
-NonlinearSolver::NonlinearSolver() : linear_solver_(make_linear_solver(linear_options_, nullptr)) {}
+NonlinearSolver::NonlinearSolver() : linear_solver_(make_linear_solver(linear_options_)) {}
 
-void NonlinearSolver::set_linear_solver(LinearSolverOptions options,
-                                        std::unique_ptr<Preconditioner> pc) {
-    if (!pc && options == linear_options_)
+void NonlinearSolver::set_linear_solver(LinearSolverOptions options) {
+    if (options == linear_options_)
         return;
-    linear_solver_ = make_linear_solver(options, std::move(pc));
+    linear_solver_ = make_linear_solver(options);
     linear_options_ = options;
 }
 
@@ -108,19 +107,12 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& system, Vecto
     return finish(NonlinearSolveStatus::maxiter, request.maxiter, r.norm());
 }
 
-std::unique_ptr<LinearSolver>
-NonlinearSolver::make_linear_solver(LinearSolverOptions options,
-                                    std::unique_ptr<Preconditioner> pc) {
-    const bool two_grid = options.preconditioner == PreconditionerType::two_grid;
-    if (two_grid && (options.method != LinearMethod::fgmres || !pc))
-        throw std::invalid_argument("TwoGridPC requires FGMRES and a column grid");
-    if (pc && !two_grid)
-        throw std::invalid_argument("A supplied preconditioner requires --pc two-grid");
+std::unique_ptr<LinearSolver> NonlinearSolver::make_linear_solver(LinearSolverOptions options) {
     switch (options.method) {
     case LinearMethod::fgmres:
-        if (!two_grid && options.preconditioner != PreconditionerType::none)
-            throw std::invalid_argument("FGMRES requires --pc none or --pc two-grid");
-        return std::make_unique<FGMRES>(std::move(pc));
+        if (options.preconditioner != PreconditionerType::none)
+            throw std::invalid_argument("FGMRES requires --pc none");
+        return std::make_unique<FGMRES>();
     case LinearMethod::lu:
         return std::make_unique<UmfpackLinearSolver>();
     case LinearMethod::gmres:

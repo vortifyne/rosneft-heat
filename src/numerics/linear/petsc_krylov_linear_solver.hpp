@@ -1,6 +1,6 @@
 #pragma once
 
-#include "numerics/linear/solvers/linear_solver.hpp"
+#include "numerics/linear/linear_solver.hpp"
 
 #include <memory>
 

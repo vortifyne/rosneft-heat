@@ -1,4 +1,4 @@
-#include "numerics/linear/solvers/fgmres.hpp"
+#include "numerics/linear/fgmres.hpp"
 
 #include <Eigen/QR>
 #include <algorithm>

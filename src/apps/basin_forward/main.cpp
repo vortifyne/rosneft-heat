@@ -54,7 +54,7 @@ int main(int argc, char* argv[]) {
                      "[--rdp-tol m] [--axis-rdp-tol m] "
                      "[--scheme linear|nmpfa] "
                      "[--linear-method lu|gmres|bicgstab|fgmres] "
-                     "[--pc none|two-grid|ilu|ilu2|gamg|boomeramg] "
+                     "[--pc none|ilu|ilu2|gamg|boomeramg] "
                      "[--pc-reuse none|step|epoch] [--linear-rtol tolerance] [--linear-atol "
                      "tolerance] [--linear-maxiter n] [--parameters csv] "
                      "[--snapshots all|final] [PETSc -options ...]\n";

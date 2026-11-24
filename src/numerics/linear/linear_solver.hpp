@@ -47,7 +47,6 @@ enum class PreconditionerType {
     gamg,
     boomeramg,
     none,
-    two_grid
 };
 
 struct LinearSolverOptions {

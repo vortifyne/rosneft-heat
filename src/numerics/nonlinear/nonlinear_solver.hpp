@@ -1,7 +1,6 @@
 #pragma once
 
-#include "numerics/linear/pc/preconditioner.hpp"
-#include "numerics/linear/solvers/linear_solver.hpp"
+#include "numerics/linear/linear_solver.hpp"
 #include "numerics/nonlinear/nonlinear_method.hpp"
 #include "numerics/nonlinear/nonlinear_system.hpp"
 #include "numerics/timing.hpp"
@@ -42,8 +41,7 @@ class NonlinearSolver {
 public:
     NonlinearSolver();
 
-    void set_linear_solver(LinearSolverOptions options,
-                           std::unique_ptr<Preconditioner> pc = nullptr);
+    void set_linear_solver(LinearSolverOptions options);
 
     LinearSolver& linear_solver() noexcept {
         return *linear_solver_;
@@ -66,8 +64,7 @@ public:
                                const LinearSolveRequest& linear_request);
 
 private:
-    static std::unique_ptr<LinearSolver> make_linear_solver(LinearSolverOptions options,
-                                                            std::unique_ptr<Preconditioner> pc);
+    static std::unique_ptr<LinearSolver> make_linear_solver(LinearSolverOptions options);
 
     LinearSolverOptions linear_options_{};
     std::unique_ptr<LinearSolver> linear_solver_;

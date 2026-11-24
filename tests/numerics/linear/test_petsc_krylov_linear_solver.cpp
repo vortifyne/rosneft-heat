@@ -1,4 +1,4 @@
-#include "numerics/linear/solvers/petsc_krylov_linear_solver.hpp"
+#include "numerics/linear/petsc_krylov_linear_solver.hpp"
 #include "numerics/nonlinear/nonlinear_solver.hpp"
 
 #include <gtest/gtest.h>

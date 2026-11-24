@@ -16,9 +16,9 @@ constexpr std::array kMethods{
     MethodName{"gmres", LinearMethod::gmres}, MethodName{"bicgstab", LinearMethod::bicgstab}};
 using PcName = std::pair<std::string_view, PreconditionerType>;
 constexpr std::array kPreconditioners{
-    PcName{"none", PreconditionerType::none}, PcName{"two-grid", PreconditionerType::two_grid},
-    PcName{"ilu", PreconditionerType::ilu},   PcName{"ilu2", PreconditionerType::ilu2},
-    PcName{"gamg", PreconditionerType::gamg}, PcName{"boomeramg", PreconditionerType::boomeramg}};
+    PcName{"none", PreconditionerType::none}, PcName{"ilu", PreconditionerType::ilu},
+    PcName{"ilu2", PreconditionerType::ilu2}, PcName{"gamg", PreconditionerType::gamg},
+    PcName{"boomeramg", PreconditionerType::boomeramg}};
 using ReuseName = std::pair<std::string_view, PcReuse>;
 constexpr std::array kReuse{ReuseName{"none", PcReuse::none}, ReuseName{"step", PcReuse::step},
                             ReuseName{"epoch", PcReuse::manual}};

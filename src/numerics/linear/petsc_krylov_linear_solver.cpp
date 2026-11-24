@@ -1,4 +1,4 @@
-#include "numerics/linear/solvers/petsc_krylov_linear_solver.hpp"
+#include "numerics/linear/petsc_krylov_linear_solver.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -55,8 +55,6 @@ PetscKrylovLinearSolver::PetscKrylovLinearSolver(LinearMethod method,
     : LinearSolver(LinearSolverType::iterative), method_(method), preconditioner_(preconditioner) {
     if (method != LinearMethod::gmres && method != LinearMethod::bicgstab)
         throw std::invalid_argument("PETSc requires an iterative method");
-    if (preconditioner == PreconditionerType::two_grid)
-        throw std::invalid_argument("TwoGridPC requires FGMRES");
 }
 
 PetscKrylovLinearSolver::~PetscKrylovLinearSolver() = default;
@@ -113,8 +111,6 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
         case PreconditionerType::none:
             check(PCSetType(pc, PCNONE));
             break;
-        case PreconditionerType::two_grid:
-            throw std::invalid_argument("TwoGridPC requires FGMRES");
         case PreconditionerType::ilu:
         case PreconditionerType::ilu2:
             check(PCSetType(pc, PCILU));

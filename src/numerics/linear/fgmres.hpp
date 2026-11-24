@@ -1,7 +1,7 @@
 #pragma once
 
-#include "numerics/linear/pc/preconditioner.hpp"
-#include "numerics/linear/solvers/linear_solver.hpp"
+#include "numerics/linear/linear_solver.hpp"
+#include "numerics/linear/preconditioner.hpp"
 
 #include <memory>
 #include <utility>

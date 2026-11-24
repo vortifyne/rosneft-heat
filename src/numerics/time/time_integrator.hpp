@@ -1,6 +1,6 @@
 #pragma once
 
-#include "numerics/linear/solvers/linear_solver.hpp"
+#include "numerics/linear/linear_solver.hpp"
 #include "numerics/nonlinear/nonlinear_solver.hpp"
 #include "numerics/time/pc_reuse.hpp"
 #include "numerics/time/time_history.hpp"

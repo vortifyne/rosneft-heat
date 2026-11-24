@@ -3,7 +3,7 @@
 #include "basin/mesh/col_grid.hpp"
 #include "basin/mesh/column_test_utils.hpp"
 #include "basin/postprocessing/energy_rates.hpp"
-#include "numerics/linear/solvers/umfpack_linear_solver.hpp"
+#include "numerics/linear/umfpack_linear_solver.hpp"
 #include "numerics/nonlinear/nonlinear_solver.hpp"
 
 #include <algorithm>

@@ -1,4 +1,4 @@
-#include "numerics/linear/solvers/umfpack_linear_solver.hpp"
+#include "numerics/linear/umfpack_linear_solver.hpp"
 
 #include <Eigen/Core>
 #include <Eigen/UmfPackSupport>
