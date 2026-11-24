@@ -23,7 +23,6 @@ CHOICES = {'linear-method': ('gmres', 'bicgstab', 'lu'),
 REQUIRED = ('Depth.xlsx', 'Lithology.xlsx', 'Porosity.xlsx', 'Tsurf.xlsx',
             'Heat_Flow_Basal.xlsx', 'lithotype_properties.xlsx')
 _STOP_GRACE_S = 3.0
-_HEARTBEAT_S = 15.0
 
 
 def root_dir() -> Path:
@@ -95,11 +94,11 @@ def create_run_directory(source: Path, output: Path, run_name: str | None = None
     if output == root_dir() or root_dir() in output.parents:
         raise ValueError('Choose an output directory outside the application installation')
     if run_name is None:
-        run_name = 'run-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
+        run_name = datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
     if not run_name.strip() or run_name in ('.', '..') or Path(run_name).name != run_name:
         raise ValueError('Enter a single result folder name.')
     output.mkdir(parents=True, exist_ok=True)
-    directory = output / run_name
+    directory = output / f'{source.name}_run-{run_name}'
     try:
         directory.mkdir()
     except FileExistsError:
@@ -196,8 +195,6 @@ class Cancelled(Exception):
 
 
 class Pipeline:
-    report_idle = True
-
     def __init__(self, emit=lambda line: None):
         self.emit = emit
         self.cancelled = threading.Event()
@@ -251,7 +248,7 @@ class Pipeline:
                 write(pending.rstrip())
                 pending = ''
 
-        started = last_output = last_heartbeat = time.monotonic()
+        started = time.monotonic()
         stopped = forced = exited = None
         timed_out = eof = False
         try:
@@ -287,17 +284,12 @@ class Pipeline:
                             send(signal.SIGKILL)
                             write('Warning: child output pipe remained open after process exit; closed')
                             break
-                    if self.report_idle and now - last_output >= _HEARTBEAT_S and now - last_heartbeat >= _HEARTBEAT_S:
-                        write(f'Process {process.pid} is running; elapsed {now - started:.0f} s; '
-                              f'no output for {now - last_output:.0f} s')
-                        last_heartbeat = now
                     for key, _ in selector.select(timeout=0.1):
                         try:
                             data = os.read(key.fd, 65536)
                         except BlockingIOError:
                             continue
                         if data:
-                            last_output = time.monotonic()
                             consume(data)
                         else:
                             selector.unregister(key.fileobj)

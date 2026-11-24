@@ -77,8 +77,6 @@ def check_results(source, directory):
 
 
 class Pipeline(ForwardPipeline):
-    report_idle = False
-
     def run(self, source, output, options, run_name=None):
         source, output = Path(source).resolve(), Path(output).resolve()
         options = validate_options(options)

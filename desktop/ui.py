@@ -22,6 +22,8 @@ STYLE = '''
 QWidget#window { background: transparent; }
 QWidget { background: #111111; color: #dddddd; font-family: "DejaVu Sans"; font-size: 12px; }
 QFrame#shell { border: 2px solid #cccccc; border-radius: 20px; }
+QFrame#shell[expanded="true"] { border-radius: 0; }
+QToolTip { background: #242424; color: #dddddd; border: 1px solid #bbbbbb; padding: 5px; }
 QFrame#title { border: none; border-bottom: 1px solid #bbbbbb; background: transparent; }
 QLabel#brand { font-size: 21px; background: transparent; }
 QPushButton { border: 1px solid #cccccc; border-radius: 9px; padding: 8px 16px; background: #111111; }
@@ -254,7 +256,7 @@ class ModePage(QtWidgets.QWidget):
         fields.addRow('Input data', self.source_choice)
         self.run_name = QtWidgets.QLineEdit()
         self.run_name.setPlaceholderText('Automatic name')
-        fields.addRow('Result folder name', self.run_name)
+        fields.addRow('Result name suffix', self.run_name)
         main_layout.addLayout(fields)
         self.pick_button = QtWidgets.QPushButton('Pick a folder with data')
         self.start_button = QtWidgets.QPushButton('Start')
@@ -331,15 +333,19 @@ class ModePage(QtWidgets.QWidget):
         directory = Path(directory).resolve()
         if self.running:
             return
+        if directory in self.sources:
+            anchor = self.pick_button
+            QtWidgets.QToolTip.showText(anchor.mapToGlobal(anchor.rect().topLeft()),
+                                        f'Folder already in the tree: {directory.name}', anchor)
+            return
         if not directory.is_dir():
             self.append_log(f'Folder does not exist: {directory}'); return
-        if directory not in self.sources:
-            root = QtWidgets.QTreeWidgetItem([directory.name]); root.setData(0, QtCore.Qt.UserRole, str(directory))
-            root.setToolTip(0, str(directory))
-            self.tree.addTopLevelItem(root); root.setExpanded(False)
-            self.sources[directory] = root
-        root = self.sources[directory]
-        root.takeChildren()
+        root = QtWidgets.QTreeWidgetItem([directory.name])
+        root.setData(0, QtCore.Qt.UserRole, str(directory))
+        root.setToolTip(0, str(directory))
+        self.tree.addTopLevelItem(root)
+        root.setExpanded(False)
+        self.sources[directory] = root
         names = list(pipeline.REQUIRED)
         if self.inverse:
             names = [name for name in names if name != 'Heat_Flow_Basal.xlsx']
@@ -513,9 +519,39 @@ class TitleBar(QtWidgets.QFrame):
         self.maximize()
 
 
-class InvisibleGrip(QtWidgets.QSizeGrip):
-    def paintEvent(self, event):
-        pass
+class ResizeHandle(QtWidgets.QWidget):
+    def __init__(self, window, edges, cursor):
+        super().__init__(window)
+        self.setStyleSheet("background: transparent;")
+        self.edges = edges
+        self.setCursor(cursor)
+        self.origin = None
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            window = self.window()
+            if not window.windowHandle().startSystemResize(self.edges):
+                self.origin = event.globalPos()
+                self.initial = window.geometry()
+
+    def mouseMoveEvent(self, event):
+        if self.origin is None or not event.buttons() & QtCore.Qt.LeftButton:
+            return
+        window = self.window()
+        delta = event.globalPos() - self.origin
+        rect = QtCore.QRect(self.initial)
+        if self.edges & QtCore.Qt.LeftEdge:
+            rect.setLeft(min(rect.left() + delta.x(), rect.right() + 1 - window.minimumWidth()))
+        if self.edges & QtCore.Qt.RightEdge:
+            rect.setWidth(max(window.minimumWidth(), rect.width() + delta.x()))
+        if self.edges & QtCore.Qt.TopEdge:
+            rect.setTop(min(rect.top() + delta.y(), rect.bottom() + 1 - window.minimumHeight()))
+        if self.edges & QtCore.Qt.BottomEdge:
+            rect.setHeight(max(window.minimumHeight(), rect.height() + delta.y()))
+        window.setGeometry(rect)
+
+    def mouseReleaseEvent(self, event):
+        self.origin = None
 
 
 class Window(QtWidgets.QWidget):
@@ -528,8 +564,8 @@ class Window(QtWidgets.QWidget):
         self.pages = {}
         self.results = {}
         outside = QtWidgets.QVBoxLayout(self); outside.setContentsMargins(0, 0, 0, 0)
-        shell = QtWidgets.QFrame(); shell.setObjectName('shell'); outside.addWidget(shell)
-        inside = QtWidgets.QVBoxLayout(shell); inside.setContentsMargins(1, 1, 1, 1); inside.setSpacing(0)
+        self.shell = QtWidgets.QFrame(); self.shell.setObjectName('shell'); outside.addWidget(self.shell)
+        inside = QtWidgets.QVBoxLayout(self.shell); inside.setContentsMargins(1, 1, 1, 1); inside.setSpacing(0)
         self.title_bar = TitleBar(self)
         inside.addWidget(self.title_bar)
         self.stack = QtWidgets.QStackedWidget(); inside.addWidget(self.stack, 1)
@@ -539,17 +575,56 @@ class Window(QtWidgets.QWidget):
             button = QtWidgets.QPushButton(text); button.setObjectName('homeAction'); button.setFixedHeight(72)
             button.clicked.connect(lambda _=False, mode=mode:self.open_page(mode)); home_layout.addWidget(button)
         home_layout.addStretch(); self.stack.addWidget(self.home)
-        self.grip = InvisibleGrip(self); self.grip.setFixedSize(14, 14)
+        qt = QtCore.Qt
+        self.handles = []
+        for edges, cursor in (
+                (qt.LeftEdge, qt.SizeHorCursor), (qt.RightEdge, qt.SizeHorCursor),
+                (qt.TopEdge, qt.SizeVerCursor), (qt.BottomEdge, qt.SizeVerCursor),
+                (qt.TopEdge | qt.LeftEdge, qt.SizeFDiagCursor),
+                (qt.BottomEdge | qt.RightEdge, qt.SizeFDiagCursor),
+                (qt.TopEdge | qt.RightEdge, qt.SizeBDiagCursor),
+                (qt.BottomEdge | qt.LeftEdge, qt.SizeBDiagCursor)):
+            self.handles.append(ResizeHandle(self, edges, cursor))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self.update_frame()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QtCore.QEvent.WindowStateChange:
+            self.update_frame()
+
+    def update_frame(self):
+        expanded = self.isMaximized() or self.isFullScreen()
+        if self.shell.property('expanded') != expanded:
+            self.shell.setProperty('expanded', expanded)
+            self.shell.style().unpolish(self.shell)
+            self.shell.style().polish(self.shell)
+            self.shell.update()
+        qt = QtCore.Qt
+        for handle in self.handles:
+            handle.setVisible(not expanded)
+            if expanded:
+                continue
+            edges = handle.edges
+            horizontal = edges & (qt.LeftEdge | qt.RightEdge)
+            vertical = edges & (qt.TopEdge | qt.BottomEdge)
+            thickness = 16 if horizontal and vertical else 6
+            width = thickness if horizontal else self.width()
+            height = thickness if vertical else self.height()
+            x = self.width() - width if edges & qt.RightEdge else 0
+            y = self.height() - height if edges & qt.BottomEdge else 0
+            handle.setGeometry(x, y, width, height)
+            handle.raise_()
         QtCore.QTimer.singleShot(0, self.apply_masks)
-        if hasattr(self, 'grip'):
-            self.grip.move(self.width()-16, self.height()-16)
-            self.grip.raise_()
 
     def apply_masks(self):
-        radius = 0 if self.isMaximized() else 20
+        if self.isMaximized() or self.isFullScreen():
+            self.clearMask()
+            self.stack.clearMask()
+            return
+        radius = 20
         outer = QtGui.QPainterPath()
         outer.addRoundedRect(QtCore.QRectF(self.rect()), radius, radius)
         self.setMask(QtGui.QRegion(outer.toFillPolygon().toPolygon()))
@@ -577,7 +652,8 @@ class Window(QtWidgets.QWidget):
                 for path, label in self.results.items():
                     self.pages[mode].choice.add_folder(path, label)
         self.setMinimumSize(850, 680) if mode != 'viewer' else self.setMinimumSize(680, 680)
-        self.resize(1100, 840) if mode != 'viewer' else self.resize(800, 900)
+        if not (self.isMaximized() or self.isFullScreen()):
+            self.resize(1100, 840) if mode != 'viewer' else self.resize(800, 900)
         self.set_heading(MODE_NAMES[mode], True)
         self.stack.setCurrentWidget(self.pages[mode])
         if mode == 'viewer':
@@ -585,7 +661,9 @@ class Window(QtWidgets.QWidget):
 
     def show_home(self):
         self.set_heading('Basin Solver', False)
-        self.stack.setCurrentWidget(self.home); self.setMinimumSize(540, 540); self.resize(600, 600)
+        self.stack.setCurrentWidget(self.home); self.setMinimumSize(540, 540)
+        if not (self.isMaximized() or self.isFullScreen()):
+            self.resize(600, 600)
 
     def closeEvent(self, event):
         if any(isinstance(page, ModePage) and page.running for page in self.pages.values()):

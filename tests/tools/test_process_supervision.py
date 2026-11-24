@@ -14,16 +14,17 @@ from pipeline import Cancelled, Pipeline
 
 
 class ProcessSupervisionTest(unittest.TestCase):
-    def test_inverse_suppresses_idle_but_keeps_solver_output(self):
+    def test_both_solvers_only_emit_process_output_after_command(self):
         from inverse_pipeline import Pipeline as InversePipeline
         code = "import time; print('Iteration 0',flush=True); time.sleep(.2); print('Finished')"
-        with patch('pipeline._HEARTBEAT_S', .03):
-            normal, inverse = [], []
-            Pipeline()._execute([sys.executable, '-c', code], normal.append)
-            InversePipeline()._execute([sys.executable, '-c', code], inverse.append)
-        self.assertTrue(any('no output for' in line for line in normal))
-        self.assertFalse(any('no output for' in line for line in inverse))
-        self.assertEqual(inverse[1:], ['Iteration 0', 'Finished'])
+        for engine in (Pipeline, InversePipeline):
+            with self.subTest(engine=engine):
+                lines = []
+                # Cover a long quiet interval without slowing the suite down.
+                with patch('pipeline.time', wraps=time) as clock:
+                    clock.monotonic.side_effect = lambda: time.monotonic() * 200
+                    engine()._execute([sys.executable, '-c', code], lines.append)
+                self.assertEqual(lines[1:], ['Iteration 0', 'Finished'])
 
     def test_inverse_still_enforces_mpi_startup_timeout(self):
         from inverse_pipeline import Pipeline as InversePipeline

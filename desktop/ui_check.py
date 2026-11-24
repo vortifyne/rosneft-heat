@@ -75,7 +75,7 @@ def attach(window, arguments):
                 if page[0].running:return
                 assert json.loads((page[0].runner.directory/'status.json').read_text())['status']=='cancelled'
                 report['forward_stop_checked']=True
-                assert page[0].runner.directory.name == page[0].run_name.text()
+                assert page[0].runner.directory.name == f'{forward_data.name}_run-{page[0].run_name.text()}'
                 page[0].add_result(forward_result)
                 page[0].tabs.setCurrentIndex(1);phase[0]='forward-view'
             elif state=='forward-view':
