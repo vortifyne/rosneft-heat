@@ -89,21 +89,25 @@ BasinHeatParameterSpace epoch_flux_space(std::span<const BasinConfig> configs) {
     return BasinHeatParameterSpace(std::move(ages), std::move(flux));
 }
 
+std::function<double(Point2D)> basal_flux(const BasinConfig& cfg0, const BasinConfig& cfg1,
+                                          double theta, const BasinHeatParameterSpace* space,
+                                          double age_ma) {
+    if (space)
+        return [q = space->at(age_ma)](Point2D) { return q; };
+    return [&cfg0, &cfg1, theta](Point2D point) {
+        return std::lerp(cfg0.q_basal.at(point.x), cfg1.q_basal.at(point.x), theta);
+    };
+}
+
 HeatBoundaryData bc(const BasinConfig& cfg0, const BasinConfig& cfg1, double theta,
                     const BasinHeatParameterSpace* space, double age_ma) {
-    HeatBoundaryData boundaries{
+    return {
         .T_surf =
             [&cfg0, &cfg1, theta](Point2D point) {
                 return std::lerp(cfg0.T_surf.at(point.x), cfg1.T_surf.at(point.x), theta);
             },
-        .q_basal =
-            [&cfg0, &cfg1, theta](Point2D point) {
-                return std::lerp(cfg0.q_basal.at(point.x), cfg1.q_basal.at(point.x), theta);
-            },
+        .q_basal = basal_flux(cfg0, cfg1, theta, space, age_ma),
     };
-    if (space)
-        boundaries.q_basal = [q = space->at(age_ma)](Point2D) { return q; };
-    return boundaries;
 }
 
 void for_each_layer_cell(const ColGrid& grid, const auto& visit) {
@@ -376,8 +380,12 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
                 .epoch = epoch_index, .age_begin_ma = age, .age_end_ma = end_age};
             grid = epoch.mesh.at(theta);
             update_porosity(theta);
-            ColHeatSystem system(grid, phi, lithotypes, kFluid,
-                                 bc(cfg0, cfg1, theta, flux, end_age));
+            const auto end_bc = bc(cfg0, cfg1, theta, flux, end_age);
+            auto step_bc = end_bc;
+            // Steps end at flux knots, so the midpoint gives the exact mean basal flux.
+            step_bc.q_basal = basal_flux(cfg0, cfg1, std::midpoint(t / duration, theta), flux,
+                                         std::midpoint(age, end_age));
+            ColHeatSystem system(grid, phi, lithotypes, kFluid, std::move(step_bc));
             system.set_flux_scheme(settings.scheme);
             integrator.set_timestep(dt);
             step_stats.timings.grid_s += elapsed_seconds(grid_start);
@@ -401,7 +409,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             }
             const Vector& T1 = integrator.current_snapshot().u;
             const auto easy_ro_start = Clock::now();
-            system.interpolate_horizontal_temperature(T1, node_T1);
+            system.interpolate_horizontal_temperature(T1, end_bc, node_T1);
             easy_ro.advance(node_T0, node_T1, epoch_begin + t, epoch_begin + t_next,
                             epoch.deposition_times, I);
             node_T0.swap(node_T1);
