@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Basin Solver
+Comment=Forward, inverse and data visualization
+Exec=AppRun
+Icon=basin-solver
+Terminal=false
+Categories=Science;Education;

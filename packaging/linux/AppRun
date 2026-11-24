@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+app_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export BASIN_APP_MODE=unified
+unset QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
+export BASIN_APPDIR="$app_dir"
+export OPAL_PREFIX="$app_dir/usr"
+export OPAL_BINDIR="$app_dir/usr/bin"
+export OPAL_LIBDIR="$app_dir/usr/lib"
+export OPAL_DATADIR="$app_dir/usr/share"
+export OPAL_PKGDATADIR="$app_dir/usr/share/openmpi"
+export OPAL_SYSCONFDIR="$app_dir/usr/etc/openmpi"
+export OMPI_MCA_mca_base_component_path="$app_dir/usr/lib/openmpi"
+export PMIX_MCA_mca_base_component_path="$app_dir/usr/lib/pmix"
+export PMIX_INSTALL_PREFIX="$app_dir/usr"
+export OMPI_MCA_btl=self
+export OMPI_MCA_pml=ob1
+export OMPI_MCA_plm=isolated
+# This application never MPI_Comm_spawn's other ranks. Unlike plm=isolated,
+# this ESS option prevents the singleton path from forking an orted/HNP.
+export OMPI_MCA_ess_singleton_isolated=1
+# CPU-only solver: never dlopen host hwloc GPU/GL plugins or probe X displays.
+# On Ubuntu the bundled hwloc's compiled plugin directory matches the host's.
+export HWLOC_PLUGINS_PATH="$app_dir/usr/lib/hwloc"
+export HWLOC_COMPONENTS=linux,stop
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export LD_LIBRARY_PATH="$app_dir/usr/lib"
+exec "$app_dir/usr/lib/ld-linux-x86-64.so.2" --inhibit-cache \
+    --library-path "$app_dir/usr/lib" "$app_dir/usr/bin/basin_solver" "$@"
