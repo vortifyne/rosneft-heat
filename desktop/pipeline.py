@@ -1,6 +1,7 @@
 """Native XLSX -> existing C++ -> XLSX pipeline, shared by desktop and CLI."""
 from __future__ import annotations
 
+from run_profile import RunProfile
 from datetime import datetime
 import codecs
 import json
@@ -164,8 +165,7 @@ def validate_input(directory: Path, inverse=False) -> None:
     if not np.isfinite(properties.iloc[:, [0, 2, 3, 5, 9]].to_numpy(float)).all():
         raise ValueError('lithotype_properties.xlsx: material properties must be finite')
     codes = set(properties.iloc[:, 0].astype(int))
-    # The organizer's reader deliberately casts the Aver column to int.
-    # Real workbooks contain half-integer averages; preserve that convention.
+
     if not lithology_codes <= codes:
         raise ValueError('Lithology.xlsx contains unknown lithotype codes')
     if inverse:
@@ -330,11 +330,17 @@ class Pipeline:
             def execute(command, **kwargs):
                 return self._execute(command, write, **kwargs)
 
+            profile = RunProfile()
+
+            def stage(key, message):
+                profile.stage(key)
+                write('STAGE: ' + message)
+
             status = 'error'
             try:
-                write('STAGE: Validating Excel workbooks')
+                stage('validate', 'Validating Excel workbooks')
                 execute([*self_command(), '--validate', str(source)])
-                write('STAGE: Preparing input data')
+                stage('prepare', 'Preparing input data')
                 execute([*self_command(), '--prepare', str(source), str(directory / 'input')])
                 defaults = read_defaults()
                 settings = dict(defaults, **options)
@@ -343,13 +349,17 @@ class Pipeline:
                 for key, value in settings.items():
                     if value != 'none':
                         arguments.extend(['--' + key, value])
-                write('STAGE: Calculating temperature and EASY%Ro')
+                stage('solve', 'Calculating temperature and EASY%Ro')
                 execute([*solver_command(), str(directory / 'input'), str(directory), *arguments],
                         initialization_timeout=60)
-                write('STAGE: Exporting Excel results')
+                stage('export', 'Exporting Excel results')
                 execute([*self_command(), '--export', str(source), str(directory)])
-                write('STAGE: Checking results')
+                stage('check', 'Checking results')
                 execute([*self_command(), '--check-results', str(source), str(directory)])
+                try:
+                    profile.save(directory)
+                except (OSError, ValueError) as error:
+                    write(f'Performance report unavailable: {error}')
                 status = 'success'
                 write('SUCCESS: Calculation completed')
                 return directory

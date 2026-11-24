@@ -1,4 +1,5 @@
 """Desktop orchestration for the existing basin inverse solver and its plots."""
+from run_profile import RunProfile
 from datetime import datetime
 import json
 import math
@@ -90,24 +91,34 @@ class Pipeline(ForwardPipeline):
                 log.write(line + '\n')
                 self.emit(line)
 
+            profile = RunProfile()
+
+            def stage(key, message):
+                profile.stage(key)
+                write('STAGE: ' + message)
+
             status = 'error'
             try:
-                write('STAGE: Validating Excel workbooks')
+                stage('validate', 'Validating Excel workbooks')
                 self._execute([*self_command(), '--inverse', '--validate', str(source)], write)
-                write('STAGE: Preparing input data')
+                stage('prepare', 'Preparing input data')
                 self._execute([*self_command(), '--inverse', '--prepare', str(source), str(directory / 'input')], write)
                 settings = dict(read_defaults(), **options)
                 settings['snapshots'] = 'final'
                 (directory / 'configuration.json').write_text(json.dumps(settings, indent=2))
                 arguments = [item for key, value in settings.items() if value != 'none'
                              for item in ('--' + key, value)]
-                write('STAGE: Recovering basal heat flux')
+                stage('solve', 'Recovering basal heat flux')
                 self._execute([*solver_command(inverse=True), str(directory / 'input'), str(directory), '--save-forward', *arguments],
                               write, initialization_timeout=60)
-                write('STAGE: Exporting Excel results')
+                stage('export', 'Exporting Excel results')
                 self._execute([*self_command(), '--inverse', '--export', str(source), str(directory)], write)
-                write('STAGE: Checking results')
+                stage('check', 'Checking results')
                 self._execute([*self_command(), '--inverse', '--check-results', str(source), str(directory)], write)
+                try:
+                    profile.save(directory, inverse=True)
+                except (OSError, ValueError) as error:
+                    write(f'Performance report unavailable: {error}')
                 status = 'success'
                 write('SUCCESS: Inverse calculation completed; see summary.txt for termination reason')
                 return directory

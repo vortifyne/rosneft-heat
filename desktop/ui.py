@@ -12,6 +12,7 @@ import pyqtgraph as pg
 import pipeline
 import inverse_pipeline
 from directory_picker import portal_directory
+from profile_view import ProfileButton
 
 BG = '#111111'
 pg.setConfigOptions(background=BG, foreground='#dddddd', useOpenGL=False)
@@ -199,6 +200,7 @@ class ModePage(QtWidgets.QWidget):
         self.inverse = inverse
         self.engine = inverse_pipeline if inverse else pipeline
         self.sources = {}
+        self.latest_results = {}
 
         self.runner = None
         self.running = False
@@ -261,9 +263,10 @@ class ModePage(QtWidgets.QWidget):
         self.pick_button = QtWidgets.QPushButton('Pick a folder with data')
         self.start_button = QtWidgets.QPushButton('Start')
         self.stop_button = QtWidgets.QPushButton('Stop'); self.stop_button.setEnabled(False)
+        self.performance = ProfileButton()
         actions = QtWidgets.QHBoxLayout()
         main_layout.addLayout(actions)
-        for button in (self.pick_button, self.start_button, self.stop_button):
+        for button in (self.pick_button, self.start_button, self.stop_button, self.performance):
             actions.addWidget(button)
         self.start_button.setEnabled(False)
         self.pick_button.clicked.connect(self.pick_folder)
@@ -273,7 +276,12 @@ class ModePage(QtWidgets.QWidget):
         visual_layout.setContentsMargins(18, 4, 18, 14)
         self.result_choice = FolderChoice('Load input data or complete a calculation')
         result_form = QtWidgets.QFormLayout()
-        result_form.addRow('Viewing', self.result_choice)
+        self.result_performance = ProfileButton()
+        selection = QtWidgets.QHBoxLayout()
+        selection.addWidget(self.result_choice, 1)
+        selection.addWidget(self.result_performance)
+        result_form.addRow('Viewing', selection)
+        self.result_choice.currentIndexChanged.connect(lambda _: self.result_performance.select(self.result_choice.currentData()))
         visual_layout.addLayout(result_form)
         self.result_choice.currentIndexChanged.connect(self.tab_changed)
         self.tabs.currentChanged.connect(self.tab_changed)
@@ -365,6 +373,7 @@ class ModePage(QtWidgets.QWidget):
         return Path(path) if path else None
 
     def source_changed(self):
+        self.performance.select(self.latest_results.get(self.active))
         self.tree.setCurrentItem(self.sources.get(self.active))
         self.start_button.setEnabled(self.active is not None and not self.running)
 
@@ -375,6 +384,8 @@ class ModePage(QtWidgets.QWidget):
             self.source_choice.setCurrentIndex(self.source_choice.findData(item.data(0, QtCore.Qt.UserRole)))
 
     def add_result(self, result):
+        self.latest_results[self.active] = result
+        self.performance.select(result)
         self.result_choice.add_folder(result)
         self.window.record_result(result, 'Inverse' if self.inverse else 'Forward')
 
@@ -453,7 +464,12 @@ class StandalonePage(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self); layout.setContentsMargins(18, 28, 18, 18); layout.setSpacing(24)
         self.choice = FolderChoice('Choose a folder or complete a calculation')
         form = QtWidgets.QFormLayout()
-        form.addRow('Viewing', self.choice)
+        self.performance = ProfileButton()
+        selection = QtWidgets.QHBoxLayout()
+        selection.addWidget(self.choice, 1)
+        selection.addWidget(self.performance)
+        form.addRow('Viewing', selection)
+        self.choice.currentIndexChanged.connect(lambda _: self.performance.select(self.choice.currentData()))
         layout.addLayout(form)
         self.choice.currentIndexChanged.connect(self.load_selected)
         frame = QtWidgets.QFrame(); frame.setObjectName('panel')
