@@ -30,8 +30,7 @@ double fraction(double value, double first, double second) {
 
 BasinHeatResidualEvaluator::BasinHeatResidualEvaluator(BasinForwardSolver forward,
                                                        BasinHeatObservationData observations)
-    : forward_(std::move(forward)), observations_(std::move(observations)),
-      parameter_space_(static_cast<Vector::Index>(forward_.configs().size())) {
+    : forward_(std::move(forward)), observations_(std::move(observations)) {
     forward_.set_intermediate_snapshots(false);
     const auto& grid = forward_.final_grid();
     std::vector<std::size_t> columns(grid.columns.size());
@@ -78,7 +77,7 @@ BasinHeatResidualEvaluator::BasinHeatResidualEvaluator(BasinForwardSolver forwar
 }
 
 const BasinHeatParameterSpace& BasinHeatResidualEvaluator::parameter_space() const noexcept {
-    return parameter_space_;
+    return forward_.parameter_space();
 }
 
 const BasinHeatObservationData& BasinHeatResidualEvaluator::observations() const noexcept {
@@ -90,7 +89,7 @@ BasinForwardSolver& BasinHeatResidualEvaluator::forward_solver() noexcept {
 }
 
 Vector BasinHeatResidualEvaluator::evaluate(const Vector& normalized) {
-    forward_.set_parameters(parameter_space_.to_physical(normalized));
+    forward_.set_parameters(parameter_space().to_physical(normalized));
     Vector calculated(observations_.size());
     std::vector<double> node_T(forward_.final_grid().cells.size() +
                                forward_.final_grid().columns.size());

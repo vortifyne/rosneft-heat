@@ -84,11 +84,15 @@ int main(int argc, char* argv[]) {
             const std::filesystem::path input(argv[1]), output(argv[2]);
             std::filesystem::create_directories(output);
             BasinForwardSolver forward(BasinInput::read(input), settings);
-            request.initial_parameters =
-                Vector(static_cast<Vector::Index>(forward.configs().size()));
-            request.initial_parameters.set_constant(initial_flux * 1e-3);
-            if (!initial_path.empty())
-                request.initial_parameters = read_basin_parameters(initial_path, forward.configs());
+            if (initial_path.empty()) {
+                Vector initial(static_cast<Vector::Index>(forward.configs().size()));
+                initial.set_constant(initial_flux / 1000.0);
+                forward.set_parameters(initial);
+            } else {
+                forward.set_parameters(read_basin_parameters(initial_path));
+            }
+            request.initial_parameters = forward.parameter_space().values();
+            write_basin_parameters(output / "initial_parameters.csv", forward.parameter_space());
             BasinHeatInverseSolver solver(BasinHeatResidualEvaluator(
                 std::move(forward), BasinHeatObservationData::read(input / "observations.csv")));
             const auto points = solver.residual_evaluator().observations().points();
@@ -121,11 +125,7 @@ int main(int argc, char* argv[]) {
                         "reflectance_in_tolerance,reflectance_count,elapsed_s\n"
                      << std::setprecision(17);
             const Vector parameters = solver.solve(request, [&](int iteration, int evaluation,
-                                                                const Vector& q, const Vector& r) {
-                if (evaluation == 1)
-                    write_basin_parameters(output / "initial_parameters.csv",
-                                           solver.residual_evaluator().forward_solver().configs(),
-                                           q);
+                                                                const Vector&, const Vector& r) {
                 const double elapsed = elapsed_seconds(start);
                 const auto [temperature_inside, reflectance_inside] = count_within_errors(r);
                 progress << iteration << ',' << evaluation << ',' << r.squared_norm() << ','
@@ -145,7 +145,8 @@ int main(int argc, char* argv[]) {
                 count_within_errors(result.residuals);
             auto& evaluator = solver.residual_evaluator();
             auto& final_forward = evaluator.forward_solver();
-            write_basin_parameters(output / "parameters.csv", final_forward.configs(), parameters);
+            final_forward.set_parameters(parameters);
+            write_basin_parameters(output / "parameters.csv", final_forward.parameter_space());
             std::ofstream comparison(output / "observations.csv");
             comparison << "kind,well,x,z,observed,calculated,error,normalized_residual\n"
                        << std::setprecision(17);
@@ -179,7 +180,6 @@ int main(int argc, char* argv[]) {
                       << "; T=" << temperature_inside << '/' << temperature_count
                       << "; Ro=" << reflectance_inside << '/' << reflectance_count << '\n';
             if (save_forward) {
-                final_forward.set_parameters(parameters);
                 final_forward.set_intermediate_snapshots(settings.intermediate_snapshots);
                 (void)final_forward.solve(output / "forward");
             }
