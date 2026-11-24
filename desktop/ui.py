@@ -15,6 +15,7 @@ from directory_picker import portal_directory
 
 BG = '#111111'
 pg.setConfigOptions(background=BG, foreground='#dddddd', useOpenGL=False)
+MODE_NAMES = {'forward': 'Forward solver', 'inverse': 'Inverse solver', 'viewer': 'Visualization'}
 FORWARD = pipeline.EDITABLE
 INVERSE = inverse_pipeline.INVERSE_PARAMETERS
 STYLE = '''
@@ -29,9 +30,10 @@ QPushButton:checked { background: #262626; }
 QPushButton:disabled { color: #696969; border-color: #555555; }
 QPushButton#windowControl { border: none; padding: 0; font-size: 21px; border-radius: 0; background: transparent; }
 QPushButton#homeAction { border-radius: 16px; font-size: 23px; }
-QFrame#sidebar { border: none; border-right: 1px solid #bbbbbb; }
+QSplitter::handle { background: #525252; }
+QSplitter::handle:hover { background: #aaaaaa; }
 QFrame#panel { border: 1px solid #bbbbbb; border-radius: 18px; }
-QFrame#logPanel { border: none; border-top: 1px solid #bbbbbb; }
+
 QLabel#treeTitle, QLabel#logTitle { font-size: 21px; }
 QTreeWidget { border: none; outline: none; background: #111111; }
 QTreeWidget::item { padding: 6px 2px; }
@@ -41,8 +43,6 @@ QTabBar::tab { border: 1px solid #cccccc; border-radius: 6px; padding: 5px 18px;
 QTabBar::tab:selected { background: #242424; }
 QTableWidget { background: #111111; border: none; gridline-color: #aaaaaa; selection-background-color: #292929; }
 QTableWidget QLineEdit { border: none; background: #111111; padding: 5px 8px; }
-QComboBox { border: 1px solid #777777; border-radius: 4px; padding: 3px 7px; }
-QComboBox::drop-down { border: none; width: 18px; }
 QPlainTextEdit { border: none; background: #111111; font-family: "DejaVu Sans Mono"; font-size: 10px; }
 QScrollBar:vertical { background: #111111; width: 10px; }
 QScrollBar::handle:vertical { background: #777777; min-height: 20px; }
@@ -78,6 +78,36 @@ class FolderTree(QtWidgets.QTreeWidget):
         if item is not None and item.parent() is None and event.pos().x() >= self.visualItemRect(item).left():
             item.setExpanded(not item.isExpanded())
         super().mousePressEvent(event)
+
+
+class FolderChoice(QtWidgets.QComboBox):
+    def __init__(self, placeholder):
+        super().__init__()
+        self.setPlaceholderText(placeholder)
+        self.setSizeAdjustPolicy(self.AdjustToMinimumContentsLengthWithIcon)
+        self.setMinimumContentsLength(15)
+        self.setFixedHeight(30)
+        self.setEnabled(False)
+        self.currentIndexChanged.connect(lambda i: self.setToolTip(self.itemData(i) or ''))
+
+    def add_folder(self, directory, label=None, *, select=True):
+        path = str(directory)
+        index = self.findData(path)
+        if index < 0:
+            label = label or directory.name
+            label_role = QtCore.Qt.UserRole + 1
+            other = self.findData(label, label_role)
+            text = label
+            if other >= 0:
+                self.setItemText(other, f'{label} — {Path(self.itemData(other)).parent}')
+                text = f'{label} — {directory.parent}'
+            index = self.count()
+            self.addItem(text, path)
+            self.setItemData(index, label, label_role)
+            self.setItemData(index, path, QtCore.Qt.ToolTipRole)
+        self.setEnabled(True)
+        if select or self.currentIndex() < 0:
+            self.setCurrentIndex(index)
 
 
 class ViewerHost(QtWidgets.QWidget):
@@ -167,8 +197,7 @@ class ModePage(QtWidgets.QWidget):
         self.inverse = inverse
         self.engine = inverse_pipeline if inverse else pipeline
         self.sources = {}
-        self.results = {}
-        self.active = None
+
         self.runner = None
         self.running = False
         self.task = None
@@ -176,27 +205,33 @@ class ModePage(QtWidgets.QWidget):
         self.defaults = self.engine.read_defaults()
         body = QtWidgets.QHBoxLayout(self)
         body.setContentsMargins(0, 0, 0, 0); body.setSpacing(0)
-        sidebar = QtWidgets.QFrame(); sidebar.setObjectName('sidebar'); sidebar.setFixedWidth(220)
+        columns = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        body.addWidget(columns)
+        columns.setChildrenCollapsible(False)
+        columns.setHandleWidth(6)
+        sidebar = QtWidgets.QFrame()
+        sidebar.setMinimumWidth(100)
         sidebar_layout = QtWidgets.QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(12, 10, 8, 10)
         title = QtWidgets.QLabel('Tree'); title.setObjectName('treeTitle')
         sidebar_layout.addWidget(title)
         self.tree = FolderTree(); self.tree.setHeaderHidden(True); self.tree.setExpandsOnDoubleClick(False)
         self.tree.setIndentation(18)
-        self.tree.itemClicked.connect(self.select_item)
+        self.tree.currentItemChanged.connect(self.select_item)
         sidebar_layout.addWidget(self.tree)
-        body.addWidget(sidebar)
-        right = QtWidgets.QWidget(); right_layout = QtWidgets.QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0); right_layout.setSpacing(0)
+        columns.addWidget(sidebar)
+        right = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        right.setChildrenCollapsible(False)
+        right.setHandleWidth(6)
+        columns.addWidget(right)
+        columns.setStretchFactor(1, 1)
+        columns.setSizes([220, 880])
         self.tabs = QtWidgets.QTabWidget()
-        self.tabs.currentChanged.connect(self.tab_changed)
         self.main = QtWidgets.QWidget(); self.visual = QtWidgets.QWidget()
         self.tabs.addTab(self.main, 'main'); self.tabs.addTab(self.visual, 'visualize')
-        right_layout.addWidget(self.tabs, 1)
+        right.addWidget(self.tabs)
         main_layout = QtWidgets.QVBoxLayout(self.main)
-        main_layout.setContentsMargins(18, 4, 18, 14); main_layout.setSpacing(18)
-        table_frame = QtWidgets.QFrame(); table_frame.setObjectName('panel')
-        table_layout = QtWidgets.QVBoxLayout(table_frame); table_layout.setContentsMargins(4, 7, 4, 7)
+        main_layout.setContentsMargins(18, 4, 18, 14); main_layout.setSpacing(8)
         self.table = QtWidgets.QTableWidget(len(self.engine.EDITABLE), 2)
         self.table.horizontalHeader().hide(); self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
@@ -212,17 +247,34 @@ class ModePage(QtWidgets.QWidget):
                 editor = QtWidgets.QLineEdit(self.format_value(self.defaults[key]))
             self.table.setCellWidget(row, 1, editor)
             self.editors[key] = editor
-        table_layout.addWidget(self.table); main_layout.addWidget(table_frame, 1)
+        main_layout.addWidget(self.table, 1)
+        fields = QtWidgets.QFormLayout()
+        self.source_choice = FolderChoice('Load a data folder first')
+        self.source_choice.currentIndexChanged.connect(self.source_changed)
+        fields.addRow('Input data', self.source_choice)
+        self.run_name = QtWidgets.QLineEdit()
+        self.run_name.setPlaceholderText('Automatic name')
+        fields.addRow('Result folder name', self.run_name)
+        main_layout.addLayout(fields)
         self.pick_button = QtWidgets.QPushButton('Pick a folder with data')
         self.start_button = QtWidgets.QPushButton('Start')
         self.stop_button = QtWidgets.QPushButton('Stop'); self.stop_button.setEnabled(False)
+        actions = QtWidgets.QHBoxLayout()
+        main_layout.addLayout(actions)
         for button in (self.pick_button, self.start_button, self.stop_button):
-            button.setFixedSize(240, 46); main_layout.addWidget(button, 0, QtCore.Qt.AlignHCenter)
+            actions.addWidget(button)
+        self.start_button.setEnabled(False)
         self.pick_button.clicked.connect(self.pick_folder)
         self.start_button.clicked.connect(self.start)
         self.stop_button.clicked.connect(self.stop)
         visual_layout = QtWidgets.QVBoxLayout(self.visual)
         visual_layout.setContentsMargins(18, 4, 18, 14)
+        self.result_choice = FolderChoice('Load input data or complete a calculation')
+        result_form = QtWidgets.QFormLayout()
+        result_form.addRow('Viewing', self.result_choice)
+        visual_layout.addLayout(result_form)
+        self.result_choice.currentIndexChanged.connect(self.tab_changed)
+        self.tabs.currentChanged.connect(self.tab_changed)
         visual_frame = QtWidgets.QFrame(); visual_frame.setObjectName('panel')
         visual_layout.addWidget(visual_frame)
         visual_inner = QtWidgets.QVBoxLayout(visual_frame); visual_inner.setContentsMargins(12, 12, 12, 12)
@@ -250,13 +302,15 @@ class ModePage(QtWidgets.QWidget):
             self.advanced_button.clicked.connect(lambda: self.views.setCurrentIndex(1))
         else:
             visual_inner.addWidget(self.viewer, 1)
-        log_frame = QtWidgets.QFrame(); log_frame.setObjectName('logPanel'); log_frame.setFixedHeight(145)
+        log_frame = QtWidgets.QFrame(); log_frame.setObjectName('logPanel')
         log_layout = QtWidgets.QHBoxLayout(log_frame); log_layout.setContentsMargins(10, 8, 8, 8)
         log_title = QtWidgets.QLabel('LOG:'); log_title.setObjectName('logTitle'); log_title.setAlignment(QtCore.Qt.AlignTop)
         log_layout.addWidget(log_title)
         self.log = QtWidgets.QPlainTextEdit(); self.log.setReadOnly(True); self.log.setMaximumBlockCount(5000)
         self.log.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap); log_layout.addWidget(self.log, 1)
-        right_layout.addWidget(log_frame); body.addWidget(right, 1)
+        right.addWidget(log_frame)
+        right.setStretchFactor(0, 1)
+        right.setSizes([650, 145])
 
     @staticmethod
     def format_value(value):
@@ -295,18 +349,28 @@ class ModePage(QtWidgets.QWidget):
         for name in names:
             if (directory / name).is_file():
                 child = QtWidgets.QTreeWidgetItem([name]); child.setToolTip(0, str(directory/name)); root.addChild(child)
-        self.active = directory
-        self.tree.setCurrentItem(self.sources[directory])
+        self.source_choice.add_folder(directory)
+        self.result_choice.add_folder(directory, f'Input preview · {directory.name}', select=False)
         self.append_log(f'Loaded folder: {directory}')
-        if self.tabs.currentWidget() is self.visual:
-            self.tab_changed()
 
-    def select_item(self, item, _column):
-        if not self.running:
+    @property
+    def active(self):
+        path = self.source_choice.currentData()
+        return Path(path) if path else None
+
+    def source_changed(self):
+        self.tree.setCurrentItem(self.sources.get(self.active))
+        self.start_button.setEnabled(self.active is not None and not self.running)
+
+    def select_item(self, item, _previous):
+        if item is not None and not self.running:
             while item.parent() is not None:
                 item = item.parent()
-            self.active = Path(item.data(0, QtCore.Qt.UserRole))
-            self.tab_changed()
+            self.source_choice.setCurrentIndex(self.source_choice.findData(item.data(0, QtCore.Qt.UserRole)))
+
+    def add_result(self, result):
+        self.result_choice.add_folder(result)
+        self.window.record_result(result, 'Inverse' if self.inverse else 'Forward')
 
     def pick_folder(self):
         if self.picker_task or self.running:
@@ -325,14 +389,17 @@ class ModePage(QtWidgets.QWidget):
         QtCore.QThreadPool.globalInstance().start(self.picker_task)
 
     def tab_changed(self, *_):
-        if self.tabs.currentWidget() is self.visual and self.active:
-            result = self.results.get(self.active)
-            self.viewer.load(result or self.active, preferred='Temperature' if result else None)
+        directory = self.result_choice.currentData()
+        if self.tabs.currentWidget() is self.visual and directory:
+            preferred = None if Path(directory) in self.sources else 'Temperature'
+            self.viewer.load(directory, preferred=preferred)
 
     def set_running(self, running):
         self.running = running
         self.table.setEnabled(not running); self.tree.setEnabled(not running)
         self.pick_button.setEnabled(not running); self.start_button.setEnabled(not running)
+        self.source_choice.setEnabled(not running and self.source_choice.count() > 0)
+        self.run_name.setEnabled(not running)
         self.stop_button.setEnabled(running)
 
     def start(self):
@@ -345,19 +412,18 @@ class ModePage(QtWidgets.QWidget):
         except Exception as error:
             self.append_log(str(error)); return
         source = self.active
-        # The sketches contain one folder picker; result runs live next to inputs.
+        run_name = self.run_name.text().strip() or None
         output = source.parent / 'results' / source.name
-        if not os.access(source.parent, os.W_OK):
+        if pipeline.root_dir() in output.parents or not os.access(source.parent, os.W_OK):
             output = Path(QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DocumentsLocation)) / 'Basin Solver Results' / source.name
         self.runner = self.engine.Pipeline(self.append_log)
         self.set_running(True)
         self.append_log(f'Starting {source.name}')
-        self.task = Task(lambda emit, _: self._run(source, output, options, emit))
+        self.task = Task(lambda emit, _: self._run(source, output, options, run_name, emit))
         def complete(result):
-            self.results[source] = result; self.set_running(False); self.task = None
+            self.set_running(False); self.task = None
+            self.add_result(result)
             self.append_log(f'Result: {result}')
-            if self.tabs.currentWidget() is self.visual:
-                self.tab_changed()
         def failed(error):
             self.set_running(False); self.task = None
             self.append_log('Stopped' if isinstance(error, pipeline.Cancelled) else f'ERROR: {error}')
@@ -365,9 +431,9 @@ class ModePage(QtWidgets.QWidget):
         self.task.signals.log.connect(self.append_log)
         QtCore.QThreadPool.globalInstance().start(self.task)
 
-    def _run(self, source, output, options, emit):
+    def _run(self, source, output, options, run_name, emit):
         self.runner.emit = emit
-        return self.runner.run(source, output, options)
+        return self.runner.run(source, output, options, run_name)
 
     def stop(self):
         if self.running and self.stop_button.isEnabled():
@@ -379,12 +445,21 @@ class StandalonePage(QtWidgets.QWidget):
         super().__init__()
         self.window = window; self.task = None
         layout = QtWidgets.QVBoxLayout(self); layout.setContentsMargins(18, 28, 18, 18); layout.setSpacing(24)
+        self.choice = FolderChoice('Choose a folder or complete a calculation')
+        form = QtWidgets.QFormLayout()
+        form.addRow('Viewing', self.choice)
+        layout.addLayout(form)
+        self.choice.currentIndexChanged.connect(self.load_selected)
         frame = QtWidgets.QFrame(); frame.setObjectName('panel')
         inner = QtWidgets.QVBoxLayout(frame); inner.setContentsMargins(12, 12, 12, 12)
         self.viewer = ViewerHost(); inner.addWidget(self.viewer)
         layout.addWidget(frame, 1)
         self.button = QtWidgets.QPushButton('Choose a folder\nwith data'); self.button.setFixedSize(170, 52)
         self.button.clicked.connect(self.pick_folder); layout.addWidget(self.button, 0, QtCore.Qt.AlignLeft)
+
+    def load_selected(self):
+        if self.isVisible() and self.choice.currentData():
+            self.viewer.load(self.choice.currentData())
 
     def pick_folder(self):
         if self.task:
@@ -395,7 +470,8 @@ class StandalonePage(QtWidgets.QWidget):
         def done(path):
             self.task = None; self.button.setEnabled(True)
             if path:
-                self.viewer.load(path)
+                self.choice.add_folder(Path(path).resolve())
+                self.load_selected()
         def failed(error):
             done(None); self.viewer.clear(); self.viewer.layout.addWidget(QtWidgets.QLabel(str(error)))
         self.task.signals.result.connect(done); self.task.signals.error.connect(failed)
@@ -407,10 +483,15 @@ class TitleBar(QtWidgets.QFrame):
         super().__init__(); self.setObjectName('title'); self.window = window; self.drag = None
         self.setFixedHeight(43)
         layout = QtWidgets.QHBoxLayout(self); layout.setContentsMargins(12, 0, 10, 0)
-        layout.addSpacing(90); layout.addStretch()
-        brand = QtWidgets.QLabel('Basin Solver'); brand.setObjectName('brand'); layout.addWidget(brand)
+        self.back = QtWidgets.QPushButton('←  Main menu')
+        back_policy = self.back.sizePolicy()
+        back_policy.setRetainSizeWhenHidden(True)
+        self.back.setSizePolicy(back_policy)
+        self.back.clicked.connect(window.show_home)
+        layout.addWidget(self.back); self.back.hide(); layout.addStretch()
+        self.brand = QtWidgets.QLabel('Basin Solver'); self.brand.setObjectName('brand'); layout.addWidget(self.brand)
         layout.addStretch()
-        for label, action in [('−',window.showMinimized),('□',self.maximize),('×',window.request_close)]:
+        for label, action in [('−',window.showMinimized),('□',self.maximize),('×',window.close)]:
             button = QtWidgets.QPushButton(label); button.setObjectName('windowControl'); button.setFixedSize(28, 30)
             button.clicked.connect(action); layout.addWidget(button)
 
@@ -445,14 +526,16 @@ class Window(QtWidgets.QWidget):
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.resize(600, 600); self.setMinimumSize(540, 540)
         self.pages = {}
+        self.results = {}
         outside = QtWidgets.QVBoxLayout(self); outside.setContentsMargins(0, 0, 0, 0)
         shell = QtWidgets.QFrame(); shell.setObjectName('shell'); outside.addWidget(shell)
         inside = QtWidgets.QVBoxLayout(shell); inside.setContentsMargins(1, 1, 1, 1); inside.setSpacing(0)
-        inside.addWidget(TitleBar(self))
+        self.title_bar = TitleBar(self)
+        inside.addWidget(self.title_bar)
         self.stack = QtWidgets.QStackedWidget(); inside.addWidget(self.stack, 1)
         self.home = QtWidgets.QWidget(); home_layout = QtWidgets.QVBoxLayout(self.home)
         home_layout.setContentsMargins(96, 63, 96, 55); home_layout.setSpacing(58)
-        for text, mode in [('Forward solver','forward'),('Inverse solver','inverse'),('Visualize data','viewer')]:
+        for mode, text in MODE_NAMES.items():
             button = QtWidgets.QPushButton(text); button.setObjectName('homeAction'); button.setFixedHeight(72)
             button.clicked.connect(lambda _=False, mode=mode:self.open_page(mode)); home_layout.addWidget(button)
         home_layout.addStretch(); self.stack.addWidget(self.home)
@@ -475,29 +558,34 @@ class Window(QtWidgets.QWidget):
         origin = self.stack.mapTo(self, QtCore.QPoint(0,0))
         self.stack.setMask(QtGui.QRegion(inner.toFillPolygon().toPolygon()).translated(-origin.x(),-origin.y()))
 
+    def record_result(self, path, mode):
+        label = f'{mode} · {path.name}'
+        self.results[path] = label
+        if 'viewer' in self.pages:
+            self.pages['viewer'].choice.add_folder(path, label, select=False)
+
+    def set_heading(self, text, back):
+        self.title_bar.brand.setText(text)
+        self.title_bar.back.setVisible(back)
+        self.setWindowTitle(text)
+
     def open_page(self, mode):
         if mode not in self.pages:
             self.pages[mode] = StandalonePage(self) if mode == 'viewer' else ModePage(self, inverse=mode=='inverse')
             self.stack.addWidget(self.pages[mode])
+            if mode == 'viewer':
+                for path, label in self.results.items():
+                    self.pages[mode].choice.add_folder(path, label)
         self.setMinimumSize(850, 680) if mode != 'viewer' else self.setMinimumSize(680, 680)
         self.resize(1100, 840) if mode != 'viewer' else self.resize(800, 900)
+        self.set_heading(MODE_NAMES[mode], True)
         self.stack.setCurrentWidget(self.pages[mode])
+        if mode == 'viewer':
+            self.pages[mode].load_selected()
 
     def show_home(self):
+        self.set_heading('Basin Solver', False)
         self.stack.setCurrentWidget(self.home); self.setMinimumSize(540, 540); self.resize(600, 600)
-
-    def request_close(self):
-        page = self.stack.currentWidget()
-        if page is self.home:
-            self.close()
-        elif isinstance(page, ModePage) and page.running:
-            page.stop()
-            QtCore.QTimer.singleShot(100, self.request_close)
-        else:
-            picker = page.picker_task if isinstance(page, ModePage) else page.task
-            if picker:
-                picker.cancelled.set()
-            self.show_home()
 
     def closeEvent(self, event):
         if any(isinstance(page, ModePage) and page.running for page in self.pages.values()):

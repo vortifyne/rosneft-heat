@@ -3,9 +3,8 @@ from datetime import datetime
 import json
 import math
 from pathlib import Path
-import uuid
 
-from pipeline import Pipeline as ForwardPipeline, Cancelled, root_dir, self_command, solver_command
+from pipeline import Pipeline as ForwardPipeline, Cancelled, create_run_directory, self_command, solver_command
 from pipeline import read_defaults as native_defaults, validate_input as common_validate_input
 from pipeline import check_results as check_field_results
 from pipeline import EDITABLE as FORWARD_PARAMETERS, CHOICES, validate_options as validate_forward_options
@@ -80,18 +79,12 @@ def check_results(source, directory):
 class Pipeline(ForwardPipeline):
     report_idle = False
 
-    def run(self, source, output, options):
+    def run(self, source, output, options, run_name=None):
         source, output = Path(source).resolve(), Path(output).resolve()
         options = validate_options(options)
         if not source.is_dir():
             raise ValueError(f'Input directory does not exist: {source}')
-        if output == source or source in output.parents:
-            raise ValueError('Choose an output directory outside the input directory')
-        if output == root_dir() or root_dir() in output.parents:
-            raise ValueError('Choose an output directory outside the application installation')
-        output.mkdir(parents=True, exist_ok=True)
-        directory = output / ('run-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6])
-        directory.mkdir()
+        directory = create_run_directory(source, output, run_name)
         self.directory = directory
         with (directory / 'run.log').open('w', encoding='utf-8', buffering=1) as log:
             def write(message):
@@ -106,8 +99,6 @@ class Pipeline(ForwardPipeline):
                 write('STAGE: Preparing input data')
                 self._execute([*self_command(), '--inverse', '--prepare', str(source), str(directory / 'input')], write)
                 settings = dict(read_defaults(), **options)
-                # The inverse GUI shows the final fields for the recovered q(t).
-                # Native fields.csv still covers every original configuration age.
                 settings['snapshots'] = 'final'
                 (directory / 'configuration.json').write_text(json.dumps(settings, indent=2))
                 arguments = [item for key, value in settings.items() if value != 'none'

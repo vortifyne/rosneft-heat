@@ -36,8 +36,16 @@ def attach(window, arguments):
                 logged_phase[0]=state
             if state=='home':
                 save('home.png');window.open_page('forward');page[0]=window.pages['forward']
+                assert window.title_bar.brand.text() == 'Forward solver'
+                page[0].add_directory(inverse_data)
                 page[0].add_directory(forward_data)
-                item=page[0].tree.topLevelItem(0)
+                assert page[0].source_choice.count() == 2
+                page[0].source_choice.setCurrentIndex(0)
+                assert page[0].active == inverse_data.resolve()
+                page[0].source_choice.setCurrentIndex(1)
+                assert page[0].tree.currentItem() is page[0].sources[forward_data.resolve()]
+                page[0].run_name.setText('forward-ui-' + str(time.time_ns()))
+                item=page[0].tree.currentItem()
                 assert item.childCount()==6 and not item.isExpanded()
                 rect=page[0].tree.visualItemRect(item)
                 QtTest.QTest.mouseClick(page[0].tree.viewport(),QtCore.Qt.LeftButton,pos=rect.center())
@@ -46,7 +54,6 @@ def attach(window, arguments):
                 save('forward-main.png')
                 if '--portal' in arguments:
                     page[0].pick_button.click()
-                    page[0].active = None
                     def accept_portal():
                         import subprocess
                         subprocess.run(['xdotool','search','--onlyvisible','--name','Pick a folder with data',
@@ -68,7 +75,8 @@ def attach(window, arguments):
                 if page[0].running:return
                 assert json.loads((page[0].runner.directory/'status.json').read_text())['status']=='cancelled'
                 report['forward_stop_checked']=True
-                page[0].results[forward_data.resolve()]=forward_result
+                assert page[0].runner.directory.name == page[0].run_name.text()
+                page[0].add_result(forward_result)
                 page[0].tabs.setCurrentIndex(1);phase[0]='forward-view'
             elif state=='forward-view':
                 if page[0].viewer.task is not None:return
@@ -81,7 +89,8 @@ def attach(window, arguments):
                 assert len(viewer.plot_widget.items())>0
                 save('forward-visualize.png')
                 report['forward_viewer_properties']=viewer.properties
-                window.show_home();window.open_page('inverse');page[0]=window.pages['inverse']
+                window.title_bar.back.click();assert window.stack.currentWidget() is window.home
+                window.open_page('inverse');page[0]=window.pages['inverse']
                 page[0].add_directory(inverse_data)
                 assert page[0].tree.topLevelItem(0).childCount()>=7
                 assert len(page[0].editors)==16
@@ -93,7 +102,7 @@ def attach(window, arguments):
                 if page[0].running:return
                 assert json.loads((page[0].runner.directory/'status.json').read_text())['status']=='cancelled'
                 report['inverse_stop_checked']=True
-                page[0].results[inverse_data.resolve()]=inverse_result
+                page[0].add_result(inverse_result)
                 page[0].tabs.setCurrentIndex(1);phase[0]='inverse-view'
             elif state=='inverse-view':
                 if page[0].viewer.task is not None:return
@@ -111,8 +120,11 @@ def attach(window, arguments):
                 save('inverse-advanced.png')
                 report['advanced_inert_empty_axes']=True
                 page[0].simple_button.click();assert page[0].views.currentIndex()==0
-                window.show_home();window.open_page('viewer');page[0]=window.pages['viewer']
-                page[0].viewer.load(forward_result);phase[0]='standalone'
+                window.title_bar.back.click();window.open_page('viewer');page[0]=window.pages['viewer']
+                assert window.title_bar.brand.text() == 'Visualization'
+                assert page[0].choice.count() == 2
+                page[0].choice.setCurrentIndex(page[0].choice.findData(str(forward_result)))
+                phase[0]='standalone'
             elif state=='standalone':
                 if page[0].viewer.task is not None:return
                 assert page[0].viewer.viewer is not None

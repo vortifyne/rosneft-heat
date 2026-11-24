@@ -89,6 +89,24 @@ def validate_options(options: dict[str, str]) -> dict[str, str]:
     return checked
 
 
+def create_run_directory(source: Path, output: Path, run_name: str | None = None) -> Path:
+    if output == source or source in output.parents:
+        raise ValueError('Choose an output directory outside the input directory')
+    if output == root_dir() or root_dir() in output.parents:
+        raise ValueError('Choose an output directory outside the application installation')
+    if run_name is None:
+        run_name = 'run-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
+    if not run_name.strip() or run_name in ('.', '..') or Path(run_name).name != run_name:
+        raise ValueError('Enter a single result folder name.')
+    output.mkdir(parents=True, exist_ok=True)
+    directory = output / run_name
+    try:
+        directory.mkdir()
+    except FileExistsError:
+        raise ValueError(f'Result folder already exists: {directory}. Choose another name.') from None
+    return directory
+
+
 def validate_input(directory: Path, inverse=False) -> None:
     """Validate workbook structures before invoking the existing converter."""
     import numpy as np
@@ -304,18 +322,12 @@ class Pipeline:
             with self.lock:
                 self.process = None
 
-    def run(self, source: Path, output: Path, options: dict[str, str]) -> Path:
+    def run(self, source: Path, output: Path, options: dict[str, str], run_name: str | None = None) -> Path:
         source, output = source.resolve(), output.resolve()
         options = validate_options(options)
         if not source.is_dir():
             raise ValueError(f'Input directory does not exist: {source}')
-        if output == source or source in output.parents:
-            raise ValueError('Choose an output directory outside the input directory')
-        if output == root_dir() or root_dir() in output.parents:
-            raise ValueError('Choose an output directory outside the application installation')
-        output.mkdir(parents=True, exist_ok=True)
-        directory = output / ('run-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6])
-        directory.mkdir()
+        directory = create_run_directory(source, output, run_name)
         self.directory = directory
         with (directory / 'run.log').open('w', encoding='utf-8', buffering=1) as log:
             def write(message):
