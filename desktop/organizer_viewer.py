@@ -1,26 +1,42 @@
-# Ported from the organizer-provided basin_viewer.py; rendering algorithms retained.
 """
-Визуализатор 2D-разреза бассейна.
+Визуализатор 2D-разреза бассейна (Backstrip Boys team's optimization).
 
 Зависимости: PyQt5, pyqtgraph, pandas, numpy, openpyxl
+Backstrip Boys team note: matplotlib will add on the first run of Burial Plot instead of using everywhere.
 """
 
 import sys
 import os
-import numpy as np
-import pandas as pd
+import time
+from collections import OrderedDict
 
+import numpy as np
 from PyQt5 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
+from pyqtgraph.functions import arrayToQPath
 
-try:
-    import matplotlib
-    matplotlib.use('Qt5Agg')
-    import matplotlib.pyplot as plt
-    from matplotlib.colors import LinearSegmentedColormap
-    HAS_MPL = True
-except ImportError:
-    HAS_MPL = False
+
+# -----------------------------------------------------------------------
+# Backstip boys optimization
+# Constants
+# -----------------------------------------------------------------------
+
+N_SUB = 3                      # sub-bands per cell in Top->Bot mode
+LUT_SIZE = 4096                # colour quantisation levels
+CACHE_MAX_FRAMES = 24
+CACHE_MAX_QUADS = 4_000_000    # rough memory cap for cached frames
+PREFETCH_MAX_BUILD_S = 0.4     # skip neighbour prefetch if a build is slower
+
+_CMAP_STOPS = [
+    (0.0,   (  0,   0, 180)),
+    (0.15,  (  0,  80, 220)),
+    (0.30,  (  0, 180, 220)),
+    (0.45,  (  0, 200, 150)),
+    (0.55,  ( 50, 210,  50)),
+    (0.70,  (150, 220,  30)),
+    (0.85,  (220, 220,   0)),
+    (1.0,   (255, 255,  50)),
+]
 
 
 # -----------------------------------------------------------------------
@@ -31,21 +47,12 @@ def get_app_dir():
     """
     Возвращает папку, в которой лежит exe (если приложение собрано
     PyInstaller-ом) или сам .py файл (при запуске обычным python).
-
-    Никаких абсолютных путей в коде — только эта функция решает,
-    где искать данные.
     """
     if getattr(sys, 'frozen', False):
-        # Запущено как exe, собранный PyInstaller-ом
         return os.path.dirname(sys.executable)
-    else:
-        # Запущено как обычный .py скрипт
-        return os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.abspath(__file__))
 
 
-# Обязательные столбцы у файла-«свойства» (Porosity, Lithology, Depth, ...).
-# Если xlsx их не содержит (например, lithotype_properties.xlsx — это
-# совсем другая таблица), файл пропускается, а не ломает программу.
 _REQUIRED_COLUMNS = {
     'X', 'Time_Ma', 'Z_Top [m]', 'Z_Bot [m]', 'Z_Aver [m]',
 }
@@ -56,121 +63,319 @@ def _sheet_matches_schema(df):
     cols = set(df.columns)
     if not _REQUIRED_COLUMNS.issubset(cols):
         return False
-    # Плюс должны быть Top/Bot/Aver с единицами измерения в квадратных скобках
     has_top = any(c.startswith('Top') and '[' in c for c in df.columns)
     has_bot = any(c.startswith('Bot') and '[' in c for c in df.columns)
     has_aver = any(c.startswith('Aver') and '[' in c for c in df.columns)
     return has_top and has_bot and has_aver
 
 
+def layer_sort_key(name):
+    parts = name.replace('Layer_', '').split('_')
+    return tuple(int(p) for p in parts)
+
+
 # -----------------------------------------------------------------------
-# Графический элемент: один слой как набор цветных четырёхугольников
+# Backstip boys optimization
+# Numeric core (no Qt): all per-frame work is vectorised over the whole
+# frame instead of looping over layers / cells in Python
 # -----------------------------------------------------------------------
 
-class LayerMeshItem(pg.GraphicsObject):
-    """
-    Рисует один слой разреза: полоса между Z_Top и Z_Bot,
-    закрашенная по значению свойства через colormap.
-    Использует QPicture для кэширования — перерисовка мгновенная.
+def upper_bound(x, st, en, v):
+    """For every segment [st, en) of ascending x: count of items <= v.
+    Vectorised bisection over all segments at once."""
+    lo = st.copy()
+    hi = en.copy()
+    if st.size == 0:
+        return lo - st
+    steps = int((en - st).max()).bit_length() + 1
+    for _ in range(steps):
+        act = lo < hi
+        if not act.any():
+            break
+        mid = (lo + hi) >> 1
+        right = act & (x[np.where(act, mid, 0)] <= v)
+        lo = np.where(right, mid + 1, lo)
+        hi = np.where(act & ~right, mid, hi)
+    return lo - st
 
-    mode='aver':   один цвет на ячейку (значение Aver)
-    mode='interp': вертикальная интерполяция Top→Bot (n_sub подъячеек)
-    """
 
-    def __init__(self, x, z_top, z_bot, vals_top, vals_bot, vals_aver,
-                 cmap, vmin, vmax, mode='aver', n_sub=3):
-        super().__init__()
-        self._picture = QtGui.QPicture()
-        self._brect = QtCore.QRectF()
-        self._generate(x, z_top, z_bot, vals_top, vals_bot, vals_aver,
-                       cmap, vmin, vmax, mode, n_sub)
+def nearest_rows(x, st, en, v):
+    """Per segment: nearest node to v (ties go left), left node, next node,
+    and whether v lies inside the segment's x range."""
+    cnt = upper_bound(x, st, en, v)
+    n = en - st
+    left = np.clip(cnt - 1, 0, n - 1)
+    nxt = np.minimum(left + 1, n - 1)
+    xl = x[st + left]
+    xr = x[st + nxt]
+    near = np.where((left >= n - 1) | (v - xl <= xr - v), left, left + 1)
+    inside = (v >= x[st]) & (v <= x[en - 1])
+    return st + near, st + left, st + nxt, inside
 
-    def _generate(self, x, z_top, z_bot, vals_top, vals_bot, vals_aver,
-                  cmap, vmin, vmax, mode, n_sub):
-        n = len(x)
-        if n < 2:
+
+class FrameView:
+    """Segments (one per layer) of a single time step: views into PropData."""
+
+    def __init__(self, pd, a, b):
+        self.pd = pd
+        self.st = pd.seg_start[a:b]
+        self.en = pd.seg_end[a:b]
+        self.layer = pd.seg_layer[a:b]
+        self.r0 = int(self.st[0])
+        self.r1 = int(self.en[-1])
+        self.dict_rank = pd.dict_rank[self.layer]
+
+
+class PropData:
+    """All layers of one property packed into flat float64 arrays sorted by
+    (time step, layer), so that any frame is a contiguous slice."""
+
+    def __init__(self, layers):
+        names = list(layers.keys())
+        dict_pos = {n: i for i, n in enumerate(names)}
+        self.names = sorted(names, key=layer_sort_key, reverse=True)
+        self.dict_rank = np.array([dict_pos[n] for n in self.names],
+                                  dtype=np.int64)
+
+        chunks = []
+        lens = []
+        for n in self.names:
+            a = layers[n].iloc[:, [0, 1, 2, 3, 5, 6, 7]].to_numpy(
+                dtype=np.float64, na_value=np.nan)
+            chunks.append(a)
+            lens.append(a.shape[0])
+        if chunks:
+            allv = np.concatenate(chunks)
+            lay = np.repeat(np.arange(len(chunks)), lens)
+        else:
+            allv = np.empty((0, 7))
+            lay = np.empty(0, dtype=np.int64)
+
+        ok = ~np.isnan(allv[:, 1])
+        if not ok.all():
+            allv = allv[ok]
+            lay = lay[ok]
+
+        ts = np.unique(allv[:, 1])
+        T = ts.size
+        self.n_frames = T
+        self.times_desc = ts[::-1].copy()
+        self.times = self.times_desc.tolist()
+        self.frame_cache = {}
+
+        if T == 0:
+            self.x = self.zt = self.zb = self.vt = self.vb = self.va = \
+                np.empty(0)
+            self.seg_start = self.seg_end = self.seg_time = \
+                self.seg_layer = np.empty(0, dtype=np.int64)
+            self.pair_ok = np.empty(0, dtype=bool)
+            self.ptr = np.zeros(1, dtype=np.int64)
+            self.z_min, self.z_max = 0.0, 1.0
+            self.v_min, self.v_max = 0.0, 1.0
             return
 
-        painter = QtGui.QPainter(self._picture)
-        painter.setRenderHint(QtGui.QPainter.Antialiasing, False)
+        frame = (T - 1) - np.searchsorted(ts, allv[:, 1])
+        order = np.lexsort((lay, frame))
+        allv = allv[order]
+        lay = lay[order]
+        frame = frame[order]
+        R = allv.shape[0]
 
-        rng = vmax - vmin if vmax > vmin else 1.0
+        col = np.ascontiguousarray
+        self.x = col(allv[:, 0])
+        self.zt = col(allv[:, 2])
+        self.zb = col(allv[:, 3])
+        self.vt = col(allv[:, 4])
+        self.vb = col(allv[:, 5])
+        self.va = col(allv[:, 6])
 
-        for i in range(n - 1):
-            if mode == 'interp' and n_sub > 1:
-                # Интерполяция Top→Bot: n_sub горизонтальных полосок
-                vt_l, vb_l = vals_top[i], vals_bot[i]
-                vt_r, vb_r = vals_top[i + 1], vals_bot[i + 1]
+        chg = np.flatnonzero((frame[1:] != frame[:-1])
+                             | (lay[1:] != lay[:-1])) + 1
+        self.seg_start = np.concatenate(([0], chg)).astype(np.int64)
+        self.seg_end = np.concatenate((chg, [R])).astype(np.int64)
+        self.seg_time = frame[self.seg_start]
+        self.seg_layer = lay[self.seg_start]
+        self.ptr = np.searchsorted(self.seg_time, np.arange(T + 1))
 
-                for s in range(n_sub):
-                    f0 = s / n_sub
-                    f1 = (s + 1) / n_sub
+        # pair_ok[i]: rows i and i+1 belong to the same layer and time step
+        self.pair_ok = np.ones(max(R - 1, 0), dtype=bool)
+        self.pair_ok[self.seg_end[:-1] - 1] = False
 
-                    # Z координаты подъячейки
-                    z0_l = z_top[i] + f0 * (z_bot[i] - z_top[i])
-                    z1_l = z_top[i] + f1 * (z_bot[i] - z_top[i])
-                    z0_r = z_top[i+1] + f0 * (z_bot[i+1] - z_top[i+1])
-                    z1_r = z_top[i+1] + f1 * (z_bot[i+1] - z_top[i+1])
+        z_min = min(np.nanmin(self.zt), np.nanmin(self.zb))
+        z_max = max(np.nanmax(self.zt), np.nanmax(self.zb))
+        margin = (z_max - z_min) * 0.03
+        self.z_min = float(z_min - margin)
+        self.z_max = float(z_max + margin)
+        self.v_min = float(np.nanmin(self.va))
+        self.v_max = float(np.nanmax(self.va))
 
-                    # Значение — среднее по подъячейке
-                    fm = (f0 + f1) / 2.0
-                    val = (vt_l + fm * (vb_l - vt_l)
-                           + vt_r + fm * (vb_r - vt_r)) / 2.0
+    def frame(self, k):
+        fr = self.frame_cache.get(k)
+        if fr is None:
+            fr = FrameView(self, self.ptr[k], self.ptr[k + 1])
+            self.frame_cache[k] = fr
+        return fr
 
-                    t = np.clip((val - vmin) / rng, 0.0, 1.0)
-                    rgba = cmap.map(t, mode='byte')
-                    color = QtGui.QColor(int(rgba[0]), int(rgba[1]),
-                                         int(rgba[2]), int(rgba[3]))
-                    painter.setBrush(color)
-                    painter.setPen(pg.mkPen(color, width=0.5,
-                                            cosmetic=False))
 
-                    poly = QtGui.QPolygonF([
-                        QtCore.QPointF(x[i],   z0_l),
-                        QtCore.QPointF(x[i+1], z0_r),
-                        QtCore.QPointF(x[i+1], z1_r),
-                        QtCore.QPointF(x[i],   z1_l),
-                    ])
-                    painter.drawPolygon(poly)
-            else:
-                # Режим Aver: один цвет на ячейку
-                val = vals_aver[i]
-                t = np.clip((val - vmin) / rng, 0.0, 1.0)
-                rgba = cmap.map(t, mode='byte')
-                color = QtGui.QColor(int(rgba[0]), int(rgba[1]),
-                                     int(rgba[2]), int(rgba[3]))
-                painter.setBrush(color)
-                painter.setPen(pg.mkPen(color, width=0.5,
-                                        cosmetic=False))
+def build_quads(pd, fr, mode, n_sub=N_SUB):
+    """All cells of a frame as (M,4) x / z arrays plus one value per quad."""
+    i0 = np.flatnonzero(pd.pair_ok[fr.r0:fr.r1 - 1]) + fr.r0
+    if i0.size == 0:
+        return None
+    i1 = i0 + 1
+    xl, xr = pd.x[i0], pd.x[i1]
+    ztl, ztr = pd.zt[i0], pd.zt[i1]
+    zbl, zbr = pd.zb[i0], pd.zb[i1]
 
-                poly = QtGui.QPolygonF([
-                    QtCore.QPointF(x[i],     z_top[i]),
-                    QtCore.QPointF(x[i + 1], z_top[i + 1]),
-                    QtCore.QPointF(x[i + 1], z_bot[i + 1]),
-                    QtCore.QPointF(x[i],     z_bot[i]),
-                ])
-                painter.drawPolygon(poly)
+    if mode == 'interp' and n_sub > 1:
+        f = np.arange(n_sub + 1) / n_sub
+        f0 = f[:-1][None, :]
+        f1 = f[1:][None, :]
+        fm = (f0 + f1) / 2.0
+        dl = (zbl - ztl)[:, None]
+        dr = (zbr - ztr)[:, None]
+        z0l = ztl[:, None] + f0 * dl
+        z1l = ztl[:, None] + f1 * dl
+        z0r = ztr[:, None] + f0 * dr
+        z1r = ztr[:, None] + f1 * dr
+        vtl, vbl = pd.vt[i0][:, None], pd.vb[i0][:, None]
+        vtr, vbr = pd.vt[i1][:, None], pd.vb[i1][:, None]
+        val = (vtl + fm * (vbl - vtl) + vtr + fm * (vbr - vtr)) / 2.0
+        pz = np.stack([z0l, z0r, z1r, z1l], axis=-1).reshape(-1, 4)
+        px = np.repeat(np.stack([xl, xr, xr, xl], axis=-1), n_sub, axis=0)
+        val = val.reshape(-1)
+    else:
+        px = np.stack([xl, xr, xr, xl], axis=-1)
+        pz = np.stack([ztl, ztr, zbr, zbl], axis=-1)
+        val = pd.va[i0]
+    return px, pz, val
 
-        painter.end()
 
-        x_min, x_max = x.min(), x.max()
-        z_all_min = min(z_top.min(), z_bot.min())
-        z_all_max = max(z_top.max(), z_bot.max())
-        self._brect = QtCore.QRectF(
-            x_min, z_all_min,
-            x_max - x_min, z_all_max - z_all_min,
-        )
+def burial_field(pd, sx, n_z=300):
+    """Burial plot data at X = sx, vectorised over all layers and times."""
+    if pd.seg_start.size == 0:
+        return None
+    rows, _, _, inside = nearest_rows(pd.x, pd.seg_start, pd.seg_end, sx)
+    sel = np.flatnonzero(inside)
+    if sel.size == 0:
+        return None
+    r = rows[sel]
+    seg_t = pd.times_desc[pd.seg_time[sel]]
+    seg_l = pd.seg_layer[sel]
+    zt, zb, vt, vb = pd.zt[r], pd.zb[r], pd.vt[r], pd.vb[r]
+
+    z_min_g = float(min(np.nanmin(zt), np.nanmin(zb)))
+    z_max_g = float(max(np.nanmax(zt), np.nanmax(zb)))
+    depth_grid = np.linspace(z_min_g, z_max_g, n_z)
+
+    ages = pd.times_desc[::-1]
+    age_fine = np.arange(ages.min(), ages.max() + 0.5, 1.0)
+    age_fine = np.unique(np.concatenate([age_fine, ages]))
+    field = np.full((age_fine.size, n_z), np.nan)
+
+    order = np.lexsort((seg_t, seg_l))
+    cuts = np.flatnonzero(np.diff(seg_l[order])) + 1
+    dg = depth_grid[None, :]
+    lines = []
+
+    for g in np.split(order, cuts):
+        t = seg_t[g]
+        ztp, zbp, vtp, vbp = zt[g], zb[g], vt[g], vb[g]
+
+        in_rng = (age_fine >= t[0]) & (age_fine <= t[-1])
+        rows_f = np.flatnonzero(in_rng)
+        ti = age_fine[in_rng]
+        z0 = np.interp(ti, t, ztp)
+        z1 = np.interp(ti, t, zbp)
+        v0 = np.interp(ti, t, vtp)
+        v1 = np.interp(ti, t, vbp)
+
+        ins = (dg >= z0[:, None]) & (dg <= z1[:, None])
+        th = (z1 - z0)[:, None]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            vals = v0[:, None] + (dg - z0[:, None]) / th * (v1 - v0)[:, None]
+        vals = np.where(th > 0, vals, v0[:, None])
+        blk = field[rows_f]
+        blk[ins] = vals[ins]
+        field[rows_f] = blk
+
+        tf = np.linspace(t[0], t[-1], 200)
+        lines.append(np.column_stack([tf, np.interp(tf, t, ztp)]))
+        lines.append(np.column_stack([tf, np.interp(tf, t, zbp)]))
+
+    return age_fine, depth_grid, field, lines, z_min_g, z_max_g
+
+
+def _import_mpl():
+    try:
+        import matplotlib
+        matplotlib.use('Qt5Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import LinearSegmentedColormap
+        from matplotlib.collections import LineCollection
+    except ImportError:
+        return None
+    return plt, LinearSegmentedColormap, LineCollection
+
+
+# -----------------------------------------------------------------------
+# Графические элементы
+# -----------------------------------------------------------------------
+
+class FrameMeshItem(pg.GraphicsObject):
+    """Whole section of one time step: QPainterPaths grouped by colour.
+    Paths are kept as-is (no QPicture serialisation)."""
+
+    def __init__(self, parts, brect):
+        super().__init__()
+        self._parts = parts
+        self._brect = brect
 
     def paint(self, painter, *args):
-        painter.drawPicture(0, 0, self._picture)
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, False)
+        for path, pen, brush in self._parts:
+            painter.setPen(pen)
+            painter.setBrush(brush)
+            painter.drawPath(path)
+        painter.restore()
 
     def boundingRect(self):
         return self._brect
 
 
-# -----------------------------------------------------------------------
-# Виджет цветовой шкалы (colorbar)
-# -----------------------------------------------------------------------
+class HLinesItem(pg.GraphicsObject):
+    """Many horizontal lines spanning the visible area, in one item."""
+
+    def __init__(self, pen):
+        super().__init__()
+        self._pen = pen
+        self._zs = np.empty(0)
+
+    def set_zs(self, zs):
+        self._zs = zs
+        self.update()
+
+    def boundingRect(self):
+        r = self.viewRect()
+        return QtCore.QRectF() if r is None else r
+
+    def viewTransformChanged(self):
+        super().viewTransformChanged()
+        self.prepareGeometryChange()
+
+    def dataBounds(self, ax, frac=1.0, orthoRange=None):
+        return (None, None)
+
+    def paint(self, painter, *args):
+        r = self.viewRect()
+        if r is None or self._zs.size == 0:
+            return
+        painter.setPen(self._pen)
+        x0, x1 = r.left(), r.right()
+        for z in self._zs.tolist():
+            painter.drawLine(QtCore.QPointF(x0, z), QtCore.QPointF(x1, z))
+
 
 class ColorBarWidget(QtWidgets.QWidget):
     """Вертикальная цветовая шкала с подписями min/max."""
@@ -182,6 +387,8 @@ class ColorBarWidget(QtWidgets.QWidget):
         self.vmin = 0.0
         self.vmax = 1.0
         self.unit = ''
+        self._bar = None
+        self._bar_key = None
 
     def set_range(self, vmin, vmax, unit, cmap):
         self.vmin = vmin
@@ -190,35 +397,45 @@ class ColorBarWidget(QtWidgets.QWidget):
         self.cmap = cmap
         self.update()
 
+    def _bar_pixmap(self, bar_w, bar_h):
+        key = (id(self.cmap), bar_w, bar_h)
+        if self._bar_key != key:
+            t = 1.0 - np.arange(bar_h) / bar_h
+            rgba = np.asarray(self.cmap.map(t, mode='byte'))
+            pm = QtGui.QPixmap(bar_w + 1, bar_h)
+            p = QtGui.QPainter(pm)
+            for iy in range(bar_h):
+                c = rgba[iy]
+                p.setPen(QtGui.QColor(int(c[0]), int(c[1]),
+                                      int(c[2]), int(c[3])))
+                p.drawLine(0, iy, bar_w, iy)
+            p.end()
+            self._bar = pm
+            self._bar_key = key
+        return self._bar
+
     def paintEvent(self, event):
         if self.cmap is None:
             return
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
 
-        w = self.width()
         h = self.height()
         bar_x = 10
         bar_w = 25
         bar_top = 30
         bar_bot = h - 30
         bar_h = bar_bot - bar_top
+        if bar_h <= 0:
+            painter.end()
+            return
 
-        # Рисуем градиент
-        for iy in range(bar_h):
-            t = 1.0 - iy / bar_h  # сверху max, снизу min
-            rgba = self.cmap.map(t, mode='byte')
-            color = QtGui.QColor(int(rgba[0]), int(rgba[1]),
-                                 int(rgba[2]), int(rgba[3]))
-            painter.setPen(color)
-            painter.drawLine(bar_x, bar_top + iy, bar_x + bar_w, bar_top + iy)
+        painter.drawPixmap(bar_x, bar_top, self._bar_pixmap(bar_w, bar_h))
 
-        # Рамка
         painter.setPen(QtGui.QColor(180, 180, 180))
         painter.setBrush(QtCore.Qt.NoBrush)
         painter.drawRect(bar_x, bar_top, bar_w, bar_h)
 
-        # Подписи
         painter.setPen(QtGui.QColor(220, 220, 220))
         font = painter.font()
         font.setPointSize(9)
@@ -228,7 +445,6 @@ class ColorBarWidget(QtWidgets.QWidget):
         painter.drawText(txt_x, bar_top + 12, f'{self.vmax:.4g}')
         painter.drawText(txt_x, bar_bot, f'{self.vmin:.4g}')
 
-        # Промежуточные отметки
         n_ticks = 4
         for i in range(1, n_ticks):
             frac = i / n_ticks
@@ -237,16 +453,11 @@ class ColorBarWidget(QtWidgets.QWidget):
             painter.drawLine(bar_x + bar_w - 3, yy, bar_x + bar_w, yy)
             painter.drawText(txt_x, yy + 4, f'{val:.4g}')
 
-        # Единицы
         if self.unit:
             painter.drawText(bar_x, bar_top - 8, self.unit)
 
         painter.end()
 
-
-# -----------------------------------------------------------------------
-# Главное окно
-# -----------------------------------------------------------------------
 
 class FlowLayout(QtWidgets.QLayout):
     """Let the original viewer controls wrap inside the portrait viewer screen."""
@@ -309,6 +520,20 @@ class FlowLayout(QtWidgets.QLayout):
         return y + height - rectangle.y()
 
 
+def _fix_y_range(widget, lo, hi):
+    """setYRange only if the view is not already there."""
+    vb = widget.getViewBox()
+    cur = widget.viewRange()[1]
+    tol = 1e-9 * max(1.0, abs(lo), abs(hi))
+    if (vb.autoRangeEnabled()[1] or abs(cur[0] - lo) > tol
+            or abs(cur[1] - hi) > tol):
+        widget.setYRange(lo, hi, padding=0)
+
+
+# -----------------------------------------------------------------------
+# Главное окно
+# -----------------------------------------------------------------------
+
 class BasinViewer(QtWidgets.QWidget):
 
     def __init__(self, directory=None, loaded=None, parent=None):
@@ -316,15 +541,28 @@ class BasinViewer(QtWidgets.QWidget):
         self.setWindowTitle('2D Basin Viewer')
         self.resize(1200, 700)
 
-        # Состояние
-        # Папка с данными — всегда рядом с exe/скриптом, нигде не хардкожена
         self.xlsx_dir = str(directory) if directory is not None else get_app_dir()
         self.data = {}          # prop_name -> {layer_name -> DataFrame}
-        self.properties = []    # список имён свойств
-        self.units = {}         # prop_name -> unit string
+        self.properties = []
+        self.units = {}
         self.time_index = 0
         self.current_times = []
-        self._active_layers = {}  # текущие слои на экране (для hover)
+
+        self._pdata = {}                # prop -> PropData
+        self._frame = None              # FrameView on screen (hover/profile)
+        self._shown = []                # items of the current frame
+        self._cache = OrderedDict()     # (prop, k, mode) -> (items, cost)
+        self._cache_cost = 0
+        self._last_build_s = 0.0
+        self._draw_token = 0
+        self._current_unit = ''
+        self._prof_unit = None
+        self._cross_visible = False
+        self._last_hover_text = None
+
+        self._cmap = pg.ColorMap([c[0] for c in _CMAP_STOPS],
+                                 [c[1] for c in _CMAP_STOPS])
+        self._build_color_lut()
 
         if loaded is None:
             self._load_data()
@@ -353,6 +591,13 @@ class BasinViewer(QtWidgets.QWidget):
             f'(как Porosity.xlsx, Lithology.xlsx и т.п.).'
         )
 
+    def _get_pdata(self, prop):
+        pd_ = self._pdata.get(prop)
+        if pd_ is None:
+            pd_ = PropData(self.data[prop])
+            self._pdata[prop] = pd_
+        return pd_
+
     # -------------------------------------------------------------------
     # UI
     # -------------------------------------------------------------------
@@ -360,7 +605,6 @@ class BasinViewer(QtWidgets.QWidget):
     def _init_ui(self):
         central = self
 
-        # ----- Верхняя панель -----
         toolbar = FlowLayout()
 
         toolbar.addWidget(QtWidgets.QLabel('Свойство:'))
@@ -393,7 +637,6 @@ class BasinViewer(QtWidgets.QWidget):
 
         toolbar.addStretch()
 
-        # Режим профиля
         toolbar.addWidget(QtWidgets.QLabel('Профиль:'))
         self.profile_mode = QtWidgets.QComboBox()
         self.profile_mode.addItems(['Aver', 'Top→Bot'])
@@ -403,7 +646,6 @@ class BasinViewer(QtWidgets.QWidget):
 
         toolbar.addSpacing(8)
 
-        # Кнопка Burial Plot
         self.btn_burial = QtWidgets.QPushButton('Burial Plot')
         self.btn_burial.clicked.connect(self._show_burial_plot)
         toolbar.addWidget(self.btn_burial)
@@ -421,34 +663,34 @@ class BasinViewer(QtWidgets.QWidget):
         self.plot_widget.invertY(True)
         self.plot_widget.setAspectLocked(False)
         self.plot_widget.showGrid(x=True, y=True, alpha=0.2)
-        # Отключаем автопреобразование единиц (м → км)
         for axis_name in ('bottom', 'left'):
-            ax = self.plot_widget.getAxis(axis_name)
-            ax.enableAutoSIPrefix(False)
+            self.plot_widget.getAxis(axis_name).enableAutoSIPrefix(False)
 
-        # Перекрестие
+        # Crosshair and slice line stay in the scene; z-values keep them
+        # above the (re-added) section items
         self._vline = pg.InfiniteLine(angle=90, pen=pg.mkPen('y', width=1,
                                       style=QtCore.Qt.DashLine))
         self._hline = pg.InfiniteLine(angle=0, pen=pg.mkPen('y', width=1,
                                       style=QtCore.Qt.DashLine))
         self._vline.setVisible(False)
         self._hline.setVisible(False)
+        self._vline.setZValue(10)
+        self._hline.setZValue(10)
         self.plot_widget.addItem(self._vline, ignoreBounds=True)
         self.plot_widget.addItem(self._hline, ignoreBounds=True)
 
-        # Подключаем мышь
         self.plot_widget.scene().sigMouseMoved.connect(self._on_mouse_moved)
 
-        # ----- Линия среза (перетаскиваемая) -----
         self._slice_line = pg.InfiniteLine(
             angle=90, movable=True,
             pen=pg.mkPen(color=(255, 80, 80), width=2),
             hoverPen=pg.mkPen(color=(255, 120, 120), width=3),
         )
+        self._slice_line.setZValue(11)
         self._slice_line.sigPositionChanged.connect(self._update_profile)
         self.plot_widget.addItem(self._slice_line, ignoreBounds=True)
 
-        # ----- 1D профиль (правая панель) -----
+        # ----- 1D профиль -----
         self.profile_widget = pg.PlotWidget()
         self.profile_widget.setLabel('bottom', 'Value')
         self.profile_widget.setLabel('left', 'Depth, m')
@@ -459,17 +701,21 @@ class BasinViewer(QtWidgets.QWidget):
         for axis_name in ('bottom', 'left'):
             self.profile_widget.getAxis(axis_name).enableAutoSIPrefix(False)
 
-        # ----- Info label (внизу) -----
+        # Persistent items: updated with setData instead of clear()+plot()
+        self._prof_curve = pg.PlotCurveItem(
+            pen=pg.mkPen(color=(100, 200, 255), width=2))
+        self._prof_lines = HLinesItem(pg.mkPen((80, 80, 80), width=0.5))
+        self.profile_widget.addItem(self._prof_curve)
+        self.profile_widget.addItem(self._prof_lines, ignoreBounds=True)
+
         self.info_label = QtWidgets.QLabel('')
         self.info_label.setStyleSheet(
             'color: #cccccc; font-family: Consolas, monospace; font-size: 11px;'
             'padding: 3px 6px;'
         )
 
-        # ----- Colorbar -----
         self.colorbar = ColorBarWidget()
 
-        # ----- Компоновка -----
         plot_row = QtWidgets.QHBoxLayout()
         plot_row.addWidget(self.plot_widget, 1)
         plot_row.addWidget(self.colorbar)
@@ -485,26 +731,18 @@ class BasinViewer(QtWidgets.QWidget):
     # -------------------------------------------------------------------
 
     def _gather_times(self, prop_name):
-        """Собирает все уникальные временные шаги для свойства.
-        Сортировка от старого к молодому (200 Ma → 0 Ma),
-        чтобы ▶ шёл «вперёд по времени» к настоящему.
-        """
-        times = set()
-        for df in self.data[prop_name].values():
-            times.update(df.iloc[:, 1].unique())
-        return sorted(times, reverse=True)
+        """Уникальные временные шаги, от старого к молодому."""
+        return self._get_pdata(prop_name).times
 
     def _on_property_changed(self):
         prop = self.properties[self.prop_combo.currentIndex()]
 
-        # Запоминаем текущее время, чтобы не сбрасывать
         old_time = (self.current_times[self.time_index]
                     if self.current_times else None)
 
         self.current_times = self._gather_times(prop)
         self._compute_fixed_ranges(prop)
 
-        # Ищем ближайший доступный временной шаг
         if old_time is not None and self.current_times:
             diffs = [abs(t - old_time) for t in self.current_times]
             self.time_index = diffs.index(min(diffs))
@@ -536,28 +774,14 @@ class BasinViewer(QtWidgets.QWidget):
             self.time_label.setText(f'{t:g} Ma')
 
     def _compute_fixed_ranges(self, prop_name):
-        """Вычисляет глобальные диапазоны глубин и значений
-        по ВСЕМ временным шагам — чтобы шкалы не прыгали."""
-        z_min_global = float('inf')
-        z_max_global = float('-inf')
-        v_min_global = float('inf')
-        v_max_global = float('-inf')
-        for df in self.data[prop_name].values():
-            z_top = df.iloc[:, 2].values
-            z_bot = df.iloc[:, 3].values
-            vals = df.iloc[:, 7].values
-            z_min_global = min(z_min_global, np.nanmin(z_top), np.nanmin(z_bot))
-            z_max_global = max(z_max_global, np.nanmax(z_top), np.nanmax(z_bot))
-            v_min_global = min(v_min_global, np.nanmin(vals))
-            v_max_global = max(v_max_global, np.nanmax(vals))
-        margin = (z_max_global - z_min_global) * 0.03
-        self._fixed_z_min = z_min_global - margin
-        self._fixed_z_max = z_max_global + margin
-        self._fixed_v_min = float(v_min_global)
-        self._fixed_v_max = float(v_max_global)
+        """Глобальные диапазоны глубин и значений по ВСЕМ временным шагам."""
+        pd_ = self._get_pdata(prop_name)
+        self._fixed_z_min = pd_.z_min
+        self._fixed_z_max = pd_.z_max
+        self._fixed_v_min = pd_.v_min
+        self._fixed_v_max = pd_.v_max
 
     def _on_display_mode_changed(self):
-        """Перерисовка разреза и профиля при смене режима Aver/Top→Bot."""
         self._draw()
 
     # -------------------------------------------------------------------
@@ -565,109 +789,193 @@ class BasinViewer(QtWidgets.QWidget):
     # -------------------------------------------------------------------
 
     def _get_colormap(self):
-        colors = [
-            (0.0,   (  0,   0, 180)),
-            (0.15,  (  0,  80, 220)),
-            (0.30,  (  0, 180, 220)),
-            (0.45,  (  0, 200, 150)),
-            (0.55,  ( 50, 210,  50)),
-            (0.70,  (150, 220,  30)),
-            (0.85,  (220, 220,   0)),
-            (1.0,   (255, 255,  50)),
-        ]
-        return pg.ColorMap([c[0] for c in colors], [c[1] for c in colors])
+        return self._cmap
+
+    def _build_color_lut(self):
+        """Quantised colour table: LUT index -> compact id of a distinct
+        colour (a few hundred at most), plus the RGBA of every id."""
+        t = np.linspace(0.0, 1.0, LUT_SIZE)
+        rgba = np.asarray(self._cmap.map(t, mode='byte'), dtype=np.uint32)
+        if rgba.shape[1] == 3:
+            rgba = np.concatenate(
+                [rgba, np.full((rgba.shape[0], 1), 255, np.uint32)], axis=1)
+        packed = ((rgba[:, 0] << 24) | (rgba[:, 1] << 16)
+                  | (rgba[:, 2] << 8) | rgba[:, 3])
+        uniq, inv = np.unique(packed, return_inverse=True)
+        self._lut_cid = inv.reshape(-1).astype(np.uint16)
+        self._lut_k = int(uniq.size)
+        self._lut_rgba = np.stack(
+            [(uniq >> 24) & 255, (uniq >> 16) & 255,
+             (uniq >> 8) & 255, uniq & 255], axis=1).astype(np.int64)
 
     # -------------------------------------------------------------------
     # Отрисовка разреза
     # -------------------------------------------------------------------
 
+    def _build_mesh(self, pd_, quads):
+        px, pz, val = quads
+        m = val.shape[0]
+
+        vmin, vmax = pd_.v_min, pd_.v_max
+        rng = vmax - vmin if vmax > vmin else 1.0
+        t = np.clip((val - vmin) / rng, 0.0, 1.0)
+        li = (np.nan_to_num(t) * (LUT_SIZE - 1) + 0.5).astype(np.int32)
+        cid = self._lut_cid[li]
+
+        order = np.argsort(cid, kind='stable')
+        counts = np.bincount(cid, minlength=self._lut_k)
+        bounds = np.concatenate(([0], np.cumsum(counts)))
+
+        # closed quad + NaN separator -> one sub-path per quad
+        xo = np.empty((m, 6))
+        zo = np.empty((m, 6))
+        xo[:, :4] = px[order]
+        zo[:, :4] = pz[order]
+        xo[:, 4] = xo[:, 0]
+        zo[:, 4] = zo[:, 0]
+        xo[:, 5] = np.nan
+        zo[:, 5] = np.nan
+
+        parts = []
+        for k in np.flatnonzero(counts):
+            a, b = bounds[k], bounds[k + 1]
+            path = arrayToQPath(xo[a:b].ravel(), zo[a:b].ravel(),
+                                connect='finite')
+            c = self._lut_rgba[k]
+            color = QtGui.QColor(int(c[0]), int(c[1]), int(c[2]), int(c[3]))
+            pen = QtGui.QPen(color)
+            pen.setWidthF(0.5)
+            pen.setCosmetic(False)
+            parts.append((path, pen, QtGui.QBrush(color)))
+
+        brect = QtCore.QRectF()
+        with np.errstate(all='ignore'):
+            x_min, x_max = np.nanmin(px), np.nanmax(px)
+            z_min, z_max = np.nanmin(pz), np.nanmax(pz)
+        if np.isfinite([x_min, x_max, z_min, z_max]).all():
+            brect = QtCore.QRectF(float(x_min), float(z_min),
+                                  float(x_max - x_min), float(z_max - z_min))
+        return FrameMeshItem(parts, brect)
+
+    def _build_boundaries(self, pd_, fr):
+        """Layer top/bottom lines of the frame as one NaN-separated curve."""
+        st, en = fr.st, fr.en
+        n = (en - st).tolist()
+        firsts = (pd_.zt[st].tolist(), pd_.zb[st].tolist())
+        lasts = (pd_.zt[en - 1].tolist(), pd_.zb[en - 1].tolist())
+        z_arrs = (pd_.zt, pd_.zb)
+        st_l = st.tolist()
+        en_l = en.tolist()
+
+        seen = set()
+        xs = []
+        zs = []
+        gap = np.array([np.nan])
+        for s in range(len(st_l)):
+            for w in (0, 1):
+                key = (firsts[w][s], lasts[w][s], n[s])
+                if key in seen:
+                    continue
+                seen.add(key)
+                xs.append(pd_.x[st_l[s]:en_l[s]])
+                zs.append(z_arrs[w][st_l[s]:en_l[s]])
+                xs.append(gap)
+                zs.append(gap)
+        if not xs:
+            return None
+        curve = pg.PlotCurveItem(
+            np.concatenate(xs), np.concatenate(zs),
+            pen=pg.mkPen(color=(40, 40, 40, 180), width=1.5),
+            connect='finite')
+        curve.setZValue(1)
+        return curve
+
+    def _build_frame(self, pd_, k, mode):
+        t0 = time.perf_counter()
+        fr = pd_.frame(k)
+        items = []
+        cost = 0
+        quads = build_quads(pd_, fr, mode)
+        if quads is not None:
+            cost = quads[2].shape[0]
+            items.append(self._build_mesh(pd_, quads))
+        curve = self._build_boundaries(pd_, fr)
+        if curve is not None:
+            items.append(curve)
+        self._last_build_s = time.perf_counter() - t0
+        return items, cost
+
+    def _frame_items(self, prop, k, mode):
+        key = (prop, k, mode)
+        ent = self._cache.get(key)
+        if ent is not None:
+            self._cache.move_to_end(key)
+            return ent[0]
+        items, cost = self._build_frame(self._get_pdata(prop), k, mode)
+        self._cache[key] = (items, cost)
+        self._cache_cost += cost
+        while len(self._cache) > 1 and (
+                len(self._cache) > CACHE_MAX_FRAMES
+                or self._cache_cost > CACHE_MAX_QUADS):
+            _, (_, c) = self._cache.popitem(last=False)
+            self._cache_cost -= c
+        return items
+
+    def _remove_shown(self):
+        for it in self._shown:
+            self.plot_widget.removeItem(it)
+        self._shown = []
+
     def _draw(self):
-        self.plot_widget.clear()
+        self._remove_shown()
+        self._draw_token += 1
 
         if not self.current_times:
             return
 
         prop = self.properties[self.prop_combo.currentIndex()]
-        time = self.current_times[self.time_index]
+        k = self.time_index
         unit = self.units.get(prop, '')
-        layers_data = self.data[prop]
+        pd_ = self._get_pdata(prop)
+        mode = 'interp' if self.profile_mode.currentIndex() == 1 else 'aver'
 
-        # Собираем слои, существующие в данный момент времени
-        active_layers = {}
-        for layer_name, df in layers_data.items():
-            mask = df.iloc[:, 1] == time
-            sub = df.loc[mask]
-            if len(sub) > 0:
-                active_layers[layer_name] = sub
+        items = self._frame_items(prop, k, mode)
+        for it in items:
+            self.plot_widget.addItem(it)
+        self._shown = list(items)
 
-        if not active_layers:
-            return
-
-        # Фиксированный диапазон значений (по всем временным шагам)
-        vmin, vmax = self._fixed_v_min, self._fixed_v_max
-
-        cmap = self._get_colormap()
-
-        # Сортируем слои: сначала глубокие (большие номера)
-        def layer_sort_key(name):
-            parts = name.replace('Layer_', '').split('_')
-            return tuple(int(p) for p in parts)
-
-        sorted_layers = sorted(
-            active_layers.items(), key=lambda kv: layer_sort_key(kv[0]),
-            reverse=True,  # глубокие первыми (рисуются под верхними)
-        )
-
-        for layer_name, sub in sorted_layers:
-            x = sub.iloc[:, 0].values.astype(np.float64)
-            z_top = sub.iloc[:, 2].values.astype(np.float64)
-            z_bot = sub.iloc[:, 3].values.astype(np.float64)
-            vals_top = sub.iloc[:, 5].values.astype(np.float64)
-            vals_bot = sub.iloc[:, 6].values.astype(np.float64)
-            vals_aver = sub.iloc[:, 7].values.astype(np.float64)
-
-            draw_mode = 'interp' if self.profile_mode.currentIndex() == 1 else 'aver'
-            item = LayerMeshItem(x, z_top, z_bot,
-                                 vals_top, vals_bot, vals_aver,
-                                 cmap, vmin, vmax,
-                                 mode=draw_mode, n_sub=3)
-            self.plot_widget.addItem(item)
-
-        # Границы между слоями — тонкие линии поверх заливки
-        boundary_pen = pg.mkPen(color=(40, 40, 40, 180), width=1.5)
-        drawn_boundaries = set()
-        for layer_name, sub in sorted_layers:
-            x = sub.iloc[:, 0].values.astype(np.float64)
-            z_top = sub.iloc[:, 2].values.astype(np.float64)
-            z_bot = sub.iloc[:, 3].values.astype(np.float64)
-
-            # Рисуем кровлю (top) и подошву (bot), дедупликация по hash
-            for z_arr in (z_top, z_bot):
-                key = (z_arr[0], z_arr[-1], len(z_arr))
-                if key not in drawn_boundaries:
-                    drawn_boundaries.add(key)
-                    curve = pg.PlotCurveItem(x, z_arr, pen=boundary_pen)
-                    self.plot_widget.addItem(curve)
-
-        # Сохраняем для hover
-        self._active_layers = active_layers
+        self._frame = pd_.frame(k)
         self._current_unit = unit
 
-        # Перекрестие и линия среза (добавляем после clear)
-        self.plot_widget.addItem(self._vline, ignoreBounds=True)
-        self.plot_widget.addItem(self._hline, ignoreBounds=True)
-        self.plot_widget.addItem(self._slice_line, ignoreBounds=True)
+        self.colorbar.set_range(pd_.v_min, pd_.v_max, unit, self._cmap)
 
-        # Обновляем colorbar
-        self.colorbar.set_range(vmin, vmax, unit, cmap)
-
-        # Фиксированная шкала глубин, автомасштаб по X
-        self.plot_widget.setYRange(self._fixed_z_min, self._fixed_z_max,
-                                   padding=0)
+        _fix_y_range(self.plot_widget, self._fixed_z_min, self._fixed_z_max)
         self.plot_widget.enableAutoRange(axis='x')
 
-        # Обновляем 1D профиль
         self._update_profile()
+        self._schedule_prefetch(prop, k, mode)
+
+    def _schedule_prefetch(self, prop, k, mode):
+        if self._last_build_s > PREFETCH_MAX_BUILD_S:
+            return
+        cands = [kk for kk in (k + 1, k - 1)
+                 if 0 <= kk < len(self.current_times)]
+        token = self._draw_token
+        QtCore.QTimer.singleShot(
+            0, lambda: self._prefetch(token, prop, mode, cands))
+
+    def _prefetch(self, token, prop, mode, cands):
+        """Build neighbouring frames while idle so that stepping is instant."""
+        if token != self._draw_token:
+            return
+        while cands:
+            kk = cands.pop(0)
+            if (prop, kk, mode) not in self._cache:
+                self._frame_items(prop, kk, mode)
+                break
+        if cands and self._last_build_s <= PREFETCH_MAX_BUILD_S:
+            QtCore.QTimer.singleShot(
+                0, lambda: self._prefetch(token, prop, mode, cands))
 
     # -------------------------------------------------------------------
     # 1D профиль по линии среза
@@ -675,98 +983,83 @@ class BasinViewer(QtWidgets.QWidget):
 
     def _update_profile(self, _=None):
         """Строит вертикальный профиль свойства при фиксированном X."""
-        self.profile_widget.clear()
-
-        if not self._active_layers:
+        fr = self._frame
+        if fr is None:
+            self._prof_curve.setData(np.empty(0), np.empty(0))
+            self._prof_lines.set_zs(np.empty(0))
             return
 
-        sx = self._slice_line.value()
-        unit = getattr(self, '_current_unit', '')
-        mode = self.profile_mode.currentIndex()  # 0=Aver, 1=Top→Bot
-        self.profile_widget.setLabel('bottom', f'Value [{unit}]')
+        pd_ = fr.pd
+        sx = float(self._slice_line.value())
+        unit = self._current_unit
+        if unit != self._prof_unit:
+            self.profile_widget.setLabel('bottom', f'Value [{unit}]')
+            self._prof_unit = unit
 
-        def layer_sort_key(name):
-            parts = name.replace('Layer_', '').split('_')
-            return tuple(int(p) for p in parts)
+        near, _, _, inside = nearest_rows(pd_.x, fr.st, fr.en, sx)
+        rr = near[inside]
+        zt = pd_.zt[rr]
+        zb = pd_.zb[rr]
+        if self.profile_mode.currentIndex() == 0:
+            v0 = v1 = pd_.va[rr]
+        else:
+            v0 = pd_.vt[rr]
+            v1 = pd_.vb[rr]
 
-        for layer_name, sub in sorted(
-            self._active_layers.items(), key=lambda kv: layer_sort_key(kv[0])
-        ):
-            x = sub.iloc[:, 0].values
-            z_top = sub.iloc[:, 2].values
-            z_bot = sub.iloc[:, 3].values
-            vals_top = sub.iloc[:, 5].values
-            vals_bot = sub.iloc[:, 6].values
-            vals_aver = sub.iloc[:, 7].values
+        xs = np.empty(2 * rr.size)
+        ys = np.empty(2 * rr.size)
+        xs[0::2] = v0
+        xs[1::2] = v1
+        ys[0::2] = zt
+        ys[1::2] = zb
+        self._prof_curve.setData(xs, ys, connect='pairs')
 
-            if sx < x[0] or sx > x[-1]:
-                continue
+        zz = np.concatenate((zt, zb))
+        if zz.size:
+            _, first = np.unique(np.round(zz, 1), return_index=True)
+            zz = zz[first]
+        self._prof_lines.set_zs(zz)
 
-            idx = np.searchsorted(x, sx, side='right') - 1
-            idx = np.clip(idx, 0, len(x) - 1)
-            nearest = idx if (idx >= len(x) - 1 or
-                              sx - x[idx] <= x[min(idx+1, len(x)-1)] - sx
-                              ) else idx + 1
-
-            zt = z_top[nearest]
-            zb = z_bot[nearest]
-
-            if mode == 0:
-                # Aver: постоянное значение от z_top до z_bot
-                val = vals_aver[nearest]
-                self.profile_widget.plot(
-                    [val, val], [zt, zb],
-                    pen=pg.mkPen(color=(100, 200, 255), width=2),
-                )
-            else:
-                # Top→Bot: линейная интерполяция
-                vt = vals_top[nearest]
-                vb = vals_bot[nearest]
-                self.profile_widget.plot(
-                    [vt, vb], [zt, zb],
-                    pen=pg.mkPen(color=(100, 200, 255), width=2),
-                )
-
-        # Горизонтальные линии на границах слоёв
-        drawn_z = set()
-        for layer_name, sub in self._active_layers.items():
-            x = sub.iloc[:, 0].values
-            z_top = sub.iloc[:, 2].values
-            z_bot = sub.iloc[:, 3].values
-
-            if sx < x[0] or sx > x[-1]:
-                continue
-
-            idx = np.searchsorted(x, sx, side='right') - 1
-            idx = np.clip(idx, 0, len(x) - 1)
-            nearest = idx if (idx >= len(x) - 1 or
-                              sx - x[idx] <= x[min(idx+1, len(x)-1)] - sx
-                              ) else idx + 1
-
-            for z in (z_top[nearest], z_bot[nearest]):
-                zr = round(z, 1)
-                if zr not in drawn_z:
-                    drawn_z.add(zr)
-                    self.profile_widget.addItem(
-                        pg.InfiniteLine(pos=z, angle=0,
-                                        pen=pg.mkPen((80, 80, 80), width=0.5))
-                    )
-
-        # Фиксированная шкала глубин
-        self.profile_widget.setYRange(self._fixed_z_min, self._fixed_z_max,
-                                       padding=0)
+        _fix_y_range(self.profile_widget, self._fixed_z_min, self._fixed_z_max)
 
     # -------------------------------------------------------------------
     # Hover: координаты и значение под курсором
     # -------------------------------------------------------------------
 
+    def _hover_hit(self, fr, mx, mz):
+        pd_ = fr.pd
+        x = pd_.x
+        st, en = fr.st, fr.en
+        near, left, nxt, inside = nearest_rows(x, st, en, mx)
+
+        x0 = x[left]
+        dx = x[nxt] - x0
+        ok = dx != 0
+        frac = np.where(ok, (mx - x0) / np.where(ok, dx, 1.0), 0.0)
+        zt = pd_.zt[left] + frac * (pd_.zt[nxt] - pd_.zt[left])
+        zb = pd_.zb[left] + frac * (pd_.zb[nxt] - pd_.zb[left])
+
+        hit = (inside & (np.minimum(zt, zb) <= mz)
+               & (mz <= np.maximum(zt, zb)))
+        cand = np.flatnonzero(hit)
+        if cand.size == 0:
+            return None
+        j = cand[np.argmin(fr.dict_rank[cand])]
+        return pd_.names[fr.layer[j]], pd_.va[near[j]]
+
+    def _set_info(self, text):
+        if text != self._last_hover_text:
+            self._last_hover_text = text
+            self.info_label.setText(text)
+
     def _on_mouse_moved(self, pos):
-        """Обработка движения мыши по графику."""
         vb = self.plot_widget.plotItem.vb
         if not vb.sceneBoundingRect().contains(pos):
-            self._vline.setVisible(False)
-            self._hline.setVisible(False)
-            self.info_label.setText('')
+            if self._cross_visible:
+                self._vline.setVisible(False)
+                self._hline.setVisible(False)
+                self._cross_visible = False
+            self._set_info('')
             return
 
         mouse_pt = vb.mapSceneToView(pos)
@@ -774,59 +1067,21 @@ class BasinViewer(QtWidgets.QWidget):
 
         self._vline.setPos(mx)
         self._hline.setPos(mz)
-        self._vline.setVisible(True)
-        self._hline.setVisible(True)
+        if not self._cross_visible:
+            self._vline.setVisible(True)
+            self._hline.setVisible(True)
+            self._cross_visible = True
 
-        # Ищем слой, в который попадает курсор
-        hit_layer = None
-        hit_value = None
+        hit = self._hover_hit(self._frame, mx, mz) if self._frame else None
 
-        for layer_name, sub in self._active_layers.items():
-            x = sub.iloc[:, 0].values
-            z_top = sub.iloc[:, 2].values
-            z_bot = sub.iloc[:, 3].values
-            vals = sub.iloc[:, 7].values
-
-            if mx < x[0] or mx > x[-1]:
-                continue
-
-            # Находим индекс ближайшей X-точки слева
-            idx = np.searchsorted(x, mx, side='right') - 1
-            idx = np.clip(idx, 0, len(x) - 1)
-
-            # Интерполяция Z_top и Z_bot по X (для попадания)
-            if idx < len(x) - 1:
-                frac = (mx - x[idx]) / (x[idx + 1] - x[idx]) \
-                    if x[idx + 1] != x[idx] else 0.0
-                zt = z_top[idx] + frac * (z_top[idx + 1] - z_top[idx])
-                zb = z_bot[idx] + frac * (z_bot[idx + 1] - z_bot[idx])
-            else:
-                zt, zb = z_top[idx], z_bot[idx]
-
-            # Значение — ближайший узел (без интерполяции,
-            # чтобы категориальные свойства не смешивались)
-            nearest = idx if (idx >= len(x) - 1 or
-                              mx - x[idx] <= x[min(idx+1, len(x)-1)] - mx
-                              ) else idx + 1
-            val = vals[nearest]
-
-            # Попадает ли mz между кровлей и подошвой?
-            z_lo, z_hi = min(zt, zb), max(zt, zb)
-            if z_lo <= mz <= z_hi:
-                hit_layer = layer_name
-                hit_value = val
-                break
-
-        unit = getattr(self, '_current_unit', '')
-        if hit_layer is not None:
-            self.info_label.setText(
+        unit = self._current_unit
+        if hit is not None:
+            self._set_info(
                 f'X = {mx:.1f} m  |  Depth = {mz:.1f} m  |  '
-                f'{hit_layer}  |  Value = {hit_value:.6g} {unit}'
+                f'{hit[0]}  |  Value = {hit[1]:.6g} {unit}'
             )
         else:
-            self.info_label.setText(
-                f'X = {mx:.1f} m  |  Depth = {mz:.1f} m'
-            )
+            self._set_info(f'X = {mx:.1f} m  |  Depth = {mz:.1f} m')
 
     # -------------------------------------------------------------------
     # Burial Plot (диаграмма погружения)
@@ -834,170 +1089,48 @@ class BasinViewer(QtWidgets.QWidget):
 
     def _show_burial_plot(self):
         """Строит burial plot при текущем X (позиция красной линии среза)."""
-        if not HAS_MPL:
+        mpl = _import_mpl()
+        if mpl is None:
             QtWidgets.QMessageBox.warning(
                 self, 'Ошибка',
                 'Для burial plot нужен matplotlib:\n  pip install matplotlib'
             )
             return
+        plt, LinearSegmentedColormap, LineCollection = mpl
 
-        if not self._active_layers:
+        if self._frame is None:
             return
 
         sx = self._slice_line.value()
         prop = self.properties[self.prop_combo.currentIndex()]
         unit = self.units.get(prop, '')
-        layers_data = self.data[prop]
+        pd_ = self._get_pdata(prop)
 
-        def layer_sort_key(name):
-            parts = name.replace('Layer_', '').split('_')
-            return tuple(int(p) for p in parts)
-
-        # Собираем данные: для каждого временного шага —
-        # границы слоёв и значения при X = sx
-        all_times = sorted(self._gather_times(prop))  # молодые→старые
-        time_layers = {}  # time -> [(z_top, z_bot, val_top, val_bot, layer_name)]
-
-        for t in all_times:
-            entries = []
-            for layer_name, df in layers_data.items():
-                sub = df[df.iloc[:, 1] == t]
-                if len(sub) == 0:
-                    continue
-                x = sub.iloc[:, 0].values
-                if sx < x[0] or sx > x[-1]:
-                    continue
-
-                idx = np.searchsorted(x, sx, side='right') - 1
-                idx = np.clip(idx, 0, len(x) - 1)
-                nearest = idx if (idx >= len(x) - 1 or
-                                  sx - x[idx] <= x[min(idx+1, len(x)-1)] - sx
-                                  ) else idx + 1
-
-                zt = sub.iloc[nearest, 2]
-                zb = sub.iloc[nearest, 3]
-                vt = sub.iloc[nearest, 5]
-                vb = sub.iloc[nearest, 6]
-                entries.append((zt, zb, vt, vb, layer_name))
-
-            entries.sort(key=lambda e: e[0])  # по глубине
-            time_layers[t] = entries
-
-        if not time_layers:
+        res = burial_field(pd_, sx)
+        if res is None:
             return
-
-        # Определяем глобальные диапазоны
-        all_z = [e[0] for t in time_layers for e in time_layers[t]]
-        all_z += [e[1] for t in time_layers for e in time_layers[t]]
-        z_min_g, z_max_g = min(all_z), max(all_z)
+        ages, depth_grid, field, lines, z_min_g, z_max_g = res
 
         vmin, vmax = self._fixed_v_min, self._fixed_v_max
+        if not vmax > vmin:
+            vmax = vmin + 1.0
 
-        # Сетка для contourf
-        n_z = 300
-        depth_grid = np.linspace(z_min_g, z_max_g, n_z)
-        ages = np.array(sorted(time_layers.keys()))
-
-        # Мелкая временная сетка (шаг ~1 Ma) для гладких границ
-        age_fine = np.arange(ages.min(), ages.max() + 0.5, 1.0)
-        # Добавляем оригинальные точки чтобы не потерять
-        age_fine = np.unique(np.concatenate([age_fine, ages]))
-        age_fine.sort()
-
-        field = np.full((len(age_fine), n_z), np.nan)
-
-        # Для каждого слоя интерполируем границы и значения по времени
-        all_layer_names = set()
-        for entries in time_layers.values():
-            for e in entries:
-                all_layer_names.add(e[4])
-
-        for ln in all_layer_names:
-            # Собираем точки (time, zt, zb, vt, vb) для этого слоя
-            pts = []
-            for t in ages:
-                for zt, zb, vt, vb, name in time_layers[t]:
-                    if name == ln:
-                        pts.append((t, zt, zb, vt, vb))
-            if not pts:
-                continue
-
-            pts.sort(key=lambda p: p[0])
-            t_pts = np.array([p[0] for p in pts])
-            zt_pts = np.array([p[1] for p in pts])
-            zb_pts = np.array([p[2] for p in pts])
-            vt_pts = np.array([p[3] for p in pts])
-            vb_pts = np.array([p[4] for p in pts])
-
-            # Интерполяция на мелкую сетку (только в диапазоне существования слоя)
-            mask_t = (age_fine >= t_pts.min()) & (age_fine <= t_pts.max())
-            t_interp = age_fine[mask_t]
-
-            zt_i = np.interp(t_interp, t_pts, zt_pts)
-            zb_i = np.interp(t_interp, t_pts, zb_pts)
-            vt_i = np.interp(t_interp, t_pts, vt_pts)
-            vb_i = np.interp(t_interp, t_pts, vb_pts)
-
-            for j, ti in enumerate(t_interp):
-                idx_t = np.searchsorted(age_fine, ti)
-                if idx_t >= len(age_fine):
-                    continue
-                z0, z1 = zt_i[j], zb_i[j]
-                v0, v1 = vt_i[j], vb_i[j]
-                inside = (depth_grid >= z0) & (depth_grid <= z1)
-                if z1 > z0:
-                    frac = (depth_grid[inside] - z0) / (z1 - z0)
-                    field[idx_t, inside] = v0 + frac * (v1 - v0)
-                elif np.any(inside):
-                    field[idx_t, inside] = v0
-
-        ages = age_fine  # используем мелкую сетку для отрисовки
-
-        pm_colors = [
-            (0.0,   (0/255,   0/255, 180/255)),
-            (0.15,  (0/255,  80/255, 220/255)),
-            (0.30,  (0/255, 180/255, 220/255)),
-            (0.45,  (0/255, 200/255, 150/255)),
-            (0.55,  (50/255, 210/255,  50/255)),
-            (0.70,  (150/255, 220/255,  30/255)),
-            (0.85,  (220/255, 220/255,   0/255)),
-            (1.0,   (255/255, 255/255,  50/255)),
-        ]
         cmap_mpl = LinearSegmentedColormap.from_list(
             'petromod',
-            [(p, c) for p, c in pm_colors],
+            [(p, tuple(v / 255.0 for v in c)) for p, c in _CMAP_STOPS],
         )
 
-        # Рисуем contourf
         fig, ax = plt.subplots(figsize=(11, 6))
 
-        n_levels = 21
-        levels = np.linspace(vmin, vmax, n_levels)
+        levels = np.linspace(vmin, vmax, 21)
         cf = ax.contourf(
             ages, depth_grid,
             np.ma.masked_invalid(field.T),
             levels=levels, cmap=cmap_mpl, extend='both',
         )
 
-        # Границы слоёв (линии погружения) — по интерполированным данным
-        for ln in sorted(all_layer_names, key=layer_sort_key):
-            pts = []
-            for t in sorted(time_layers.keys()):
-                for zt, zb, vt, vb, name in time_layers[t]:
-                    if name == ln:
-                        pts.append((t, zt, zb))
-            if not pts:
-                continue
-            pts.sort(key=lambda p: p[0])
-            t_pts = np.array([p[0] for p in pts])
-            zt_pts = np.array([p[1] for p in pts])
-            zb_pts = np.array([p[2] for p in pts])
-
-            t_fine_l = np.linspace(t_pts.min(), t_pts.max(), 200)
-            ax.plot(t_fine_l, np.interp(t_fine_l, t_pts, zt_pts),
-                    'k-', lw=0.8, zorder=4)
-            ax.plot(t_fine_l, np.interp(t_fine_l, t_pts, zb_pts),
-                    'k-', lw=0.8, zorder=4)
+        ax.add_collection(LineCollection(lines, colors='k', linewidths=0.8,
+                                         zorder=4))
 
         ax.set_xlim(ages.max(), ages.min())
         ax.set_ylim(z_max_g, z_min_g)
@@ -1020,7 +1153,6 @@ class BasinViewer(QtWidgets.QWidget):
 if __name__ == '__main__':
     app = QtWidgets.QApplication(sys.argv)
 
-    # Тёмная тема
     app.setStyle('Fusion')
     palette = QtGui.QPalette()
     palette.setColor(QtGui.QPalette.Window, QtGui.QColor(45, 45, 45))
