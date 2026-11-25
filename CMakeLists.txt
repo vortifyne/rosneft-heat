@@ -23,6 +23,7 @@ find_package(UMFPACK CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_search_module(PETSc REQUIRED IMPORTED_TARGET PETSc petsc)
 find_package(MPI REQUIRED COMPONENTS CXX)
+add_subdirectory(external/robust-tdma)
 
 function(heat_configure_target target)
   target_include_directories(${target} PUBLIC ${PROJECT_SOURCE_DIR}/src)
@@ -34,8 +35,10 @@ function(heat_configure_target target)
 endfunction()
 
 add_library(heat_numerics STATIC
+  src/numerics/linear/fgmres.cpp
   src/numerics/linear/umfpack_linear_solver.cpp
   src/numerics/linear/petsc_krylov_linear_solver.cpp
+  src/numerics/linear/petsc_preconditioner.cpp
   src/numerics/nonlinear/nonlinear_solver.cpp
   src/numerics/time/bdf1.cpp
   src/numerics/time/time_integrator.cpp

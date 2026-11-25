@@ -291,7 +291,7 @@ TEST(ColHeatSystem, TemperatureDependentCaseRefinesAndAgreesWithGamg) {
 
     const Vector gamg = solve_temperature_dependent_case(
         0.125,
-        LinearSolverOptions{.method = LinearMethod::gmres, .preconditioner = Preconditioner::gamg});
+        LinearSolverOptions{.method = LinearMethod::gmres, .preconditioner = PreconditionerType::gamg});
     EXPECT_LT((gamg - medium).infinity_norm(), 1.0e-5);
 }
 

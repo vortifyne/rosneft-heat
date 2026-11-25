@@ -10,17 +10,20 @@ double waples_heat_capacity(double T, double c20) {
 }
 
 double sekiguchi_conductivity(double T, double lambda20) {
-    return 1.84 + (358.0 * ((1.0227 * lambda20) - 1.882) * ((1.0 / T) - 0.00068));
+    // Sekiguchi (1984), Eq. (8), referenced to the input conductivity at 20 °C.
+    constexpr double T_m = 1473.0;
+    constexpr double lambda_m = 4.4 * 0.419; // mcal/(cm·s·°C) to W/(m·K).
+    return lambda_m + (lambda20 - lambda_m) * (1.0 / T - 1.0 / T_m) / (1.0 / 293.15 - 1.0 / T_m);
 }
 
 ThermalProperties thermal_properties(double T, double phi, const LithotypeProperties& lithotype,
                                      const FluidProperties& fluid) {
-    const double lambda_s = sekiguchi_conductivity(T, lithotype.lambda20);
     const double c_s = waples_heat_capacity(T, lithotype.c20);
     const double f_s = 1.0 - phi;
+    const double bulk_lambda20 = std::pow(lithotype.lambda20, f_s) * std::pow(fluid.lambda, phi);
 
     return {
-        .lambda = std::pow(lambda_s, f_s) * std::pow(fluid.lambda, phi),
+        .lambda = sekiguchi_conductivity(T, bulk_lambda20),
         .rho_c = (f_s * lithotype.rho_s * c_s) + (phi * fluid.rho * fluid.c),
         .A = f_s * lithotype.A_s,
     };

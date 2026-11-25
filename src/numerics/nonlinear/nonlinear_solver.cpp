@@ -1,6 +1,8 @@
 #include "numerics/nonlinear/nonlinear_solver.hpp"
 
+#include "numerics/linear/fgmres.hpp"
 #include "numerics/linear/petsc_krylov_linear_solver.hpp"
+#include "numerics/linear/petsc_preconditioner.hpp"
 #include "numerics/linear/umfpack_linear_solver.hpp"
 
 #include <cmath>
@@ -13,8 +15,7 @@ NonlinearSolver::NonlinearSolver() : linear_solver_(make_linear_solver(linear_op
 void NonlinearSolver::set_linear_solver(LinearSolverOptions options) {
     if (options == linear_options_)
         return;
-    auto linear_solver = make_linear_solver(options);
-    linear_solver_ = std::move(linear_solver);
+    linear_solver_ = make_linear_solver(options);
     linear_options_ = options;
 }
 
@@ -66,6 +67,7 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& system, Vecto
         b.native() = -r.native();
         linear_step.new_pattern = iteration == 0 || !fixed_pattern;
         linear_step.new_solve = iteration == 0;
+        dx.set_zero();
         start = Clock::now();
         const LinearSolveResult linear_result = linear_solver_->solve(A, b, dx, linear_step);
         timings.linear_s += elapsed_seconds(start);
@@ -108,6 +110,14 @@ NonlinearSolveResult NonlinearSolver::solve(const NonlinearSystem& system, Vecto
 
 std::unique_ptr<LinearSolver> NonlinearSolver::make_linear_solver(LinearSolverOptions options) {
     switch (options.method) {
+    case LinearMethod::fgmres:
+        if (options.preconditioner == PreconditionerType::none)
+            return std::make_unique<FGMRES>();
+        if (options.preconditioner == PreconditionerType::ilu ||
+            options.preconditioner == PreconditionerType::ilu2)
+            return std::make_unique<FGMRES>(std::make_unique<PetscPreconditioner>(
+                options.preconditioner == PreconditionerType::ilu2 ? 2 : 0));
+        throw std::invalid_argument("FGMRES supports --pc none, ilu or ilu2");
     case LinearMethod::lu:
         return std::make_unique<UmfpackLinearSolver>();
     case LinearMethod::gmres:

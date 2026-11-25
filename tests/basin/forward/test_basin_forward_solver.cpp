@@ -106,10 +106,10 @@ TEST(BasinForwardSolver, PreservesTemperatureAndAccumulatesFinalLayerNodalHistor
             return;
         saw_final = true;
         EXPECT_EQ(snapshot.grid.x, (std::vector<double>{0.0, 1.0, 2.0}));
-        ASSERT_EQ(snapshot.I.size(), snapshot.grid.cells.size() + snapshot.grid.columns.size());
+        ASSERT_EQ(snapshot.I.size(), snapshot.grid.maturity_node_count);
         for (const auto& cell : snapshot.grid.cells) {
             EXPECT_NEAR(snapshot.T[cell.index], 300.0, 1.0e-8);
-            const auto node = cell.index + cell.column;
+            const auto node = cell.maturity_top;
             if (cell.layer_id == 1) {
                 EXPECT_DOUBLE_EQ(snapshot.I[node], 0.0);
                 EXPECT_NEAR(snapshot.Ro[node], std::exp(-1.6), 1.0e-12);
@@ -191,7 +191,7 @@ TEST(BasinForwardSolver, PreservesTemperatureAndAccumulatesFinalLayerNodalHistor
             return;
         for (const auto& cell : snapshot.grid.cells) {
             if (cell.layer_id == 1) {
-                const auto node = cell.index + cell.column;
+                const auto node = cell.maturity_top;
                 EXPECT_DOUBLE_EQ(snapshot.I[node], 0.0);
                 EXPECT_DOUBLE_EQ(snapshot.I[node + 1], 0.0);
             }
@@ -246,7 +246,7 @@ TEST(BasinForwardSolver, PreservesGrownLayerHistoryAcrossTheNextBirth) {
             return snapshot.grid.cells[index].layer_id == 2;
         });
         ASSERT_NE(middle, cells.end());
-        const auto node = *middle + 1;
+        const auto node = snapshot.grid.cells[*middle].maturity_top + 1;
         if (snapshot.epoch == 1) {
             checked_birth = true;
             // Two compressed 0.1 mm cells shift the old nodes slightly during transfer.
@@ -275,7 +275,7 @@ TEST(BasinForwardSolver, StartsFromStationaryTemperatureWithCurrentBasalFlux) {
                 return;
             observed = true;
             for (const auto& cell : snapshot.grid.cells)
-                EXPECT_NEAR(snapshot.T[cell.index], 285.0 + q * cell.center().z / 1.84, 1e-7);
+                EXPECT_NEAR(snapshot.T[cell.index], 285.0 + q * cell.center().z / 1.8436, 1e-7);
             for (double integral : snapshot.I)
                 EXPECT_DOUBLE_EQ(integral, 0.0);
         });
@@ -299,7 +299,8 @@ TEST(BasinForwardSolver, StartsFromStationaryTemperatureWithCurrentBasalFlux) {
         EXPECT_EQ(layer, 1);
         EXPECT_TRUE(x == 0.0 || x == 1000.0);
         EXPECT_NEAR(top, 285.0 - 273.15, 1e-7);
-        EXPECT_NEAR(bottom, 285.0 - 273.15 + 0.09 * 1000.0 / 1.84, 1e-7);
+        // Below the deepest cell center the exported profile is extended as a constant.
+        EXPECT_NEAR(bottom, 285.0 - 273.15 + 0.09 * 950.0 / 1.8436, 1e-7);
         EXPECT_NEAR(average, 0.5 * (top + bottom), 1e-12);
         ++rows;
     }

@@ -25,7 +25,7 @@ enum class LinearSolveStatus {
 struct [[nodiscard]] LinearSolveResult {
     LinearSolveStatus status;
     int iterations;
-    // Original residual for UMFPACK; left-preconditioned residual for PETSc Krylov solvers.
+    // Original residual for FGMRES and UMFPACK; preconditioned residual for PETSc.
     double r_norm;
     LinearTimings timings{};
 };
@@ -38,18 +38,20 @@ enum class LinearSolverType {
 enum class LinearMethod {
     lu,
     gmres,
-    bicgstab
+    bicgstab,
+    fgmres
 };
-enum class Preconditioner {
+enum class PreconditionerType {
     ilu,
     ilu2,
     gamg,
-    boomeramg
+    boomeramg,
+    none,
 };
 
 struct LinearSolverOptions {
     LinearMethod method = LinearMethod::lu;
-    Preconditioner preconditioner = Preconditioner::ilu;
+    PreconditionerType preconditioner = PreconditionerType::ilu;
 
     bool operator==(const LinearSolverOptions&) const = default;
 };

@@ -18,7 +18,7 @@ struct BasinSnapshot {
     double age_ma = 0.0; // Geological age [Ma].
     const ColGrid& grid;
     std::span<const double> T; // Temperature [K].
-    // N+1 horizontal nodes per column; cell i in column c has nodes i+c and i+c+1.
+    // Each cell uses maturity_top and maturity_top + 1, with separate nodes at layer contacts.
     std::span<const double> I;  // Reaction integrals [-], node-major.
-    std::span<const double> Ro; // Vitrinite reflectance [%], horizontal nodes.
+    std::span<const double> Ro; // Vitrinite reflectance [%], maturity nodes.
 };

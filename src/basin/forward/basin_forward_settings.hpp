@@ -20,7 +20,7 @@ struct BasinForwardSettings {
     bool reset_final_maturity = false; // Discard the final new layer's reaction history.
     MultipointFluxScheme scheme = MultipointFluxScheme::linear;
     LinearSolverOptions linear_solver{.method = LinearMethod::gmres,
-                                      .preconditioner = Preconditioner::ilu2};
+                                      .preconditioner = PreconditionerType::ilu2};
     PcReuse pc_reuse = PcReuse::none;
     NonlinearSolveRequest nonlinear{};
     LinearSolveRequest linear{};

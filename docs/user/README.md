@@ -22,8 +22,8 @@ tools/run_basin_from_xlsx.sh path/to/input result
 | `--axis-rdp-tol` | Дополнительное упрощение только оси столбцов, м | Отключено |
 | `--min-height` | Минимальная высота ячейки, м | 0.05 |
 | `--scheme` | Схема: `linear` (MPFA), `nmpfa` | `linear` |
-| `--linear-method` | Решатель: `gmres`, `bicgstab`, `lu` (UMFPACK) | `gmres` |
-| `--pc` | Предобуславливатель: `ilu`, `ilu2`, `gamg`, `boomeramg` | `ilu2` |
+| `--linear-method` | Решатель: `gmres`, `bicgstab`, `lu` (UMFPACK), `fgmres` | `gmres` |
+| `--pc` | Для собственного FGMRES доступны `none`, `ilu`, `ilu2`. Для решателей PETSc также доступны `gamg` и `boomeramg` | `ilu2` |
 | `--pc-reuse` | Повторное использование предобуславливателя: `none`, `step`, `epoch` | `none` |
 | `--linear-rtol`, `--linear-atol` | Относительный и абсолютный допуски линейного решателя | `1e-8`, `1e-50` |
 | `--linear-maxiter` | Лимит линейных итераций | 1000 |
@@ -32,11 +32,17 @@ tools/run_basin_from_xlsx.sh path/to/input result
 | `--snapshots` | Снимки полей: `all` или только `final` | `all` |
 | `--parameters` | CSV с историей потока, например `inverse_result/parameters.csv` | Поток из XLSX |
 
+В режиме `--linear-method fgmres` длина рестарта равна 30. При выборе ILU
+факторизация строится для каждой линейной системы. Уровень заполнения можно
+переопределить, например `--linear-method fgmres --pc ilu -pc_factor_levels 2`.
+
 Дополнительные опции PETSc ставятся в конце, например `-ksp_gmres_restart 200`
 (по умолчанию рестарт через 100 векторов).
 Скрипт выдаёт `Temperature.xlsx` (°C) и `Sweeney_Burnham_1990_EASY_Ro.xlsx` (%Ro)
 на исходной геометрии для всех возрастов. Снимки полей — в `snapshots/`,
 настройки и статистика — в `summary.txt` и `timings.txt`.
+В новых снимках `CGRID003` на контакте слоёв сохраняются отдельные значения
+%Ro с каждой стороны. Просмотрщик также открывает снимки `CGRID001` и `CGRID002`.
 
 ### 2. Визуализация
 
