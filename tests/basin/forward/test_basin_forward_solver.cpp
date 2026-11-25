@@ -1,6 +1,7 @@
 #include "basin/basin_snapshot.hpp"
 #include "basin/forward/basin_forward_solver.hpp"
 #include "basin/mesh/col_grid.hpp"
+#include "basin/physics/thermal_properties.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -20,6 +21,32 @@ void write_file(const std::filesystem::path& path, const char* contents) {
     if (!output)
         throw std::runtime_error("Cannot write basin test input");
     output << contents;
+}
+
+std::filesystem::path stationary_column_input() {
+    const auto directory =
+        std::filesystem::temp_directory_path() /
+        ("basin-stationary-" + std::to_string(Clock::now().time_since_epoch().count()));
+    std::filesystem::create_directories(directory);
+    write_file(directory / "configurations.csv", "age_ma\n1\n0\n");
+    write_file(
+        directory / "layers.csv",
+        "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity_top,porosity_bottom\n"
+        "1,1,rock,0,0,1000,1,0,0\n1,1,rock,1000,0,1000,1,0,0\n"
+        "0,1,rock,0,0,1000,1,0,0\n0,1,rock,1000,0,1000,1,0,0\n");
+    write_file(directory / "boundaries.csv",
+               "age_ma,kind,x,value_si\n"
+               "1,surface_temperature,0,285\n1,surface_temperature,1000,285\n"
+               "1,basal_heat_flux,0,0.09\n1,basal_heat_flux,1000,0.09\n"
+               "0,surface_temperature,0,285\n0,surface_temperature,1000,285\n"
+               "0,basal_heat_flux,0,0.06\n0,basal_heat_flux,1000,0.06\n");
+    // This lambda20 makes Sekiguchi conductivity constant and equal to 1.84.
+    write_file(directory / "lithotypes.csv",
+               "code,name,solid_density,conductivity_20,specific_heat_20,heat_production\n"
+               "1,rock,2600,1.8402268504937909,900,0\n");
+    write_file(directory / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant\n"
+                                           "1e13,190000,1,8.314\n");
+    return directory;
 }
 
 void expect_timing_tree(const BasinTimings& t) {
@@ -238,28 +265,7 @@ TEST(BasinForwardSolver, PreservesGrownLayerHistoryAcrossTheNextBirth) {
 }
 
 TEST(BasinForwardSolver, StartsFromStationaryTemperatureWithCurrentBasalFlux) {
-    const auto directory =
-        std::filesystem::temp_directory_path() /
-        ("basin-stationary-" + std::to_string(Clock::now().time_since_epoch().count()));
-    std::filesystem::create_directories(directory);
-    write_file(directory / "configurations.csv", "age_ma\n1\n0\n");
-    write_file(
-        directory / "layers.csv",
-        "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity_top,porosity_bottom\n"
-        "1,1,rock,0,0,1000,1,0,0\n1,1,rock,1000,0,1000,1,0,0\n"
-        "0,1,rock,0,0,1000,1,0,0\n0,1,rock,1000,0,1000,1,0,0\n");
-    write_file(directory / "boundaries.csv",
-               "age_ma,kind,x,value_si\n"
-               "1,surface_temperature,0,285\n1,surface_temperature,1000,285\n"
-               "1,basal_heat_flux,0,0.06\n1,basal_heat_flux,1000,0.06\n"
-               "0,surface_temperature,0,285\n0,surface_temperature,1000,285\n"
-               "0,basal_heat_flux,0,0.06\n0,basal_heat_flux,1000,0.06\n");
-    // At the common intersection of the Sekiguchi curves the conductivity is constant.
-    write_file(directory / "lithotypes.csv",
-               "code,name,solid_density,conductivity_20,specific_heat_20,heat_production\n"
-               "1,rock,2600,1.8436,900,0\n");
-    write_file(directory / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant\n"
-                                           "1e13,190000,1,8.314\n");
+    const auto directory = stationary_column_input();
     BasinForwardSolver solver(BasinInput::read(directory), {.dx = 500, .dz = 100});
     for (double q : {0.06, 0.09}) {
         solver.set_parameters(Vector{q, q});
@@ -302,5 +308,40 @@ TEST(BasinForwardSolver, StartsFromStationaryTemperatureWithCurrentBasalFlux) {
     EXPECT_EQ(std::distance(std::filesystem::directory_iterator(directory / "result/snapshots"),
                             std::filesystem::directory_iterator{}),
               1);
+    std::filesystem::remove_all(directory);
+}
+
+TEST(BasinForwardSolver, IntegratesLinearBasalFluxOnEachTimeStep) {
+    const auto directory = stationary_column_input();
+    constexpr double seconds_per_ma = 1.0e6 * 365.25 * 24 * 3600;
+    for (const bool parameterized : {false, true}) {
+        const double final_q = parameterized ? 0.05 : 0.06;
+        BasinForwardSolver solver(BasinInput::read(directory),
+                                  {.dx = 1000, .dz = 1000, .dt_ma = 0.4});
+        if (parameterized)
+            solver.set_parameters(Vector{0.09, final_q});
+        double previous_age = 1.0;
+        double previous_T = 0.0;
+        const auto result = solver.solve([&](const BasinSnapshot& snapshot) {
+            ASSERT_EQ(snapshot.T.size(), 1U);
+            const double T = snapshot.T.front();
+            if (snapshot.kind == BasinSnapshot::Kind::initial) {
+                previous_T = T;
+                return;
+            }
+            if (snapshot.kind == BasinSnapshot::Kind::after_event)
+                return;
+            const double dt = (previous_age - snapshot.age_ma) * seconds_per_ma;
+            const double storage =
+                1000 * 2600 * waples_heat_capacity(T, 900) * (T - previous_T) / dt;
+            const double surface_out = 1.84 * (T - 285) / 500;
+            const double mean_q = std::lerp(final_q, 0.09, 0.5 * (previous_age + snapshot.age_ma));
+            EXPECT_NEAR(storage + surface_out, mean_q, 1e-7);
+            previous_age = snapshot.age_ma;
+            previous_T = T;
+        });
+        EXPECT_EQ(result.timesteps, 3);
+        EXPECT_DOUBLE_EQ(previous_age, 0.0);
+    }
     std::filesystem::remove_all(directory);
 }

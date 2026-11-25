@@ -62,6 +62,7 @@ heat_configure_target(basin_physics)
 add_library(basin_data STATIC
   src/basin/basin_problem.cpp
   src/basin/io/basin_input.cpp
+  src/basin/inverse/basin_heat_parameter_space.cpp
   src/basin/io/basin_parameters.cpp
   src/basin/geometry/basin_geometry.cpp
   src/basin/geometry/basin_geometry_rdp.cpp
@@ -87,7 +88,6 @@ target_link_libraries(basin_heat_forward PUBLIC heat_numerics basin_data)
 
 add_library(basin_heat_inverse STATIC
   src/basin/inverse/basin_heat_observation_data.cpp
-  src/basin/inverse/basin_heat_parameter_space.cpp
   src/basin/inverse/basin_heat_residual_evaluator.cpp
   src/basin/inverse/basin_heat_inverse_solver.cpp
 )
