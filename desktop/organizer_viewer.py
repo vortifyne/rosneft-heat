@@ -7,7 +7,6 @@ Backstrip Boys team note: matplotlib will add on the first run of Burial Plot in
 
 import sys
 import os
-import time
 from collections import OrderedDict
 
 import numpy as np
@@ -25,7 +24,6 @@ N_SUB = 3                      # sub-bands per cell in Top->Bot mode
 LUT_SIZE = 4096                # colour quantisation levels
 CACHE_MAX_FRAMES = 24
 CACHE_MAX_QUADS = 4_000_000    # rough memory cap for cached frames
-PREFETCH_MAX_BUILD_S = 0.4     # skip neighbour prefetch if a build is slower
 
 _CMAP_STOPS = [
     (0.0,   (  0,   0, 180)),
@@ -322,6 +320,90 @@ def _import_mpl():
 # Графические элементы
 # -----------------------------------------------------------------------
 
+class FrameSignals(QtCore.QObject):
+    finished = QtCore.pyqtSignal(object, object, object)
+
+
+class FrameTask(QtCore.QRunnable):
+    def __init__(self, key, prepare, args):
+        super().__init__()
+        self.key, self.prepare, self.args = key, prepare, args
+        self.signals = FrameSignals()
+
+    def run(self):
+        try:
+            frame = self.prepare(*self.args)
+        except Exception as error:
+            self.signals.finished.emit(self.key, None, str(error))
+        else:
+            self.signals.finished.emit(self.key, frame, None)
+
+
+def draw_paths(painter, parts):
+    painter.save()
+    painter.setRenderHint(QtGui.QPainter.Antialiasing, False)
+    for path, pen, brush in parts:
+        painter.setPen(pen)
+        painter.setBrush(brush)
+        painter.drawPath(path)
+    painter.restore()
+
+
+def draw_boundary_raster(painter, boundary):
+    """Clip long polylines to pixel-aligned strips before Qt strokes them."""
+    x, z = boundary
+    pen = pg.mkPen((40, 40, 40, 180), width=1.5)
+    painter.save()
+    painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+    painter.setPen(pen)
+    painter.setBrush(QtCore.Qt.NoBrush)
+    try:
+        transform = painter.worldTransform()
+        width = painter.device().width() / painter.device().devicePixelRatioF()
+        height = painter.device().height() / painter.device().devicePixelRatioF()
+        breaks = np.flatnonzero(~np.isfinite(x) | ~np.isfinite(z))
+        spans = [(start, end) for start, end in zip(np.r_[0, breaks+1], np.r_[breaks, len(x)])
+                 if end-start > 1]
+        if (len(x) < 2048 or transform.m11() <= 0 or transform.isRotating() or
+                any(np.any(np.diff(x[a:b]) < 0) for a,b in spans)):
+            painter.drawPath(arrayToQPath(x, z, connect='finite'))
+            return
+        inverse = transform.inverted()[0]
+        for left in range(0, int(np.ceil(width)), 64):
+            clip = inverse.mapRect(QtCore.QRectF(left, 0, 64, height))
+            margin = 3 / transform.m11()
+            path = QtGui.QPainterPath()
+            for a, b in spans:
+                segment = x[a:b]
+                lo = max(0, segment.searchsorted(clip.left()-margin)-1)
+                hi = min(len(segment), segment.searchsorted(clip.right()+margin, side='right')+1)
+                if hi-lo >= 2:
+                    path.addPolygon(pg.functions.arrayToQPolygonF(segment[lo:hi], z[a+lo:a+hi]))
+            painter.save()
+            painter.setClipRect(clip, QtCore.Qt.IntersectClip)
+            painter.drawPath(path)
+            painter.restore()
+    finally:
+        painter.restore()
+
+
+def viewport_raster(camera, draw):
+    transform, rect, dpr, size = camera
+    if rect.isEmpty():
+        return None
+    image = QtGui.QImage(int(np.ceil(rect.width()*dpr)), int(np.ceil(rect.height()*dpr)),
+                         QtGui.QImage.Format_ARGB32_Premultiplied)
+    image.setDevicePixelRatio(dpr)
+    image.fill(QtCore.Qt.transparent)
+    raster = QtGui.QPainter(image)
+    try:
+        raster.setWorldTransform(transform * QtGui.QTransform.fromTranslate(-rect.x(), -rect.y()))
+        draw(raster)
+    finally:
+        raster.end()
+    return image, transform.inverted()[0].mapRect(QtCore.QRectF(rect)), transform, dpr, size
+
+
 class FrameMeshItem(pg.GraphicsObject):
     """Whole section of one time step: QPainterPaths grouped by colour.
     Paths are kept as-is (no QPicture serialisation)."""
@@ -330,14 +412,48 @@ class FrameMeshItem(pg.GraphicsObject):
         super().__init__()
         self._parts = parts
         self._brect = brect
+        self.boundary = None
+        self.image = None
+        self.viewport_size = None
+        self.refine = QtCore.QTimer(self)
+        self.refine.setSingleShot(True)
+        self.refine.timeout.connect(self.invalidate_raster)
 
-    def paint(self, painter, *args):
+    def draw_vectors(self, painter, option, widget):
+        draw_paths(painter, self._parts)
+        if self.boundary is not None:
+            if isinstance(painter.device(), QtGui.QImage):
+                draw_boundary_raster(painter, self.boundary.getData())
+            else:
+                self.boundary.paint(painter, option, widget)
+
+    def invalidate_raster(self):
+        self.image = None
+        self.update()
+
+    def paint(self, painter, option, widget=None):
+        view = self.getViewBox()
+        if widget is None or view is None:
+            self.draw_vectors(painter, option, widget)
+            return
+        transform = painter.worldTransform()
+        size = widget.size()
+        dpr = painter.device().devicePixelRatioF()
+        if self.image is not None and self.viewport_size != size:
+            self.refine.start(65)
+        self.viewport_size = size
+        if (self.image is None or self.dpr != dpr or
+                (not self.refine.isActive() and transform != self.raster_transform)):
+            rect = transform.mapRect(view.viewRect()).toAlignedRect().adjusted(-1, -1, 1, 1)
+            rect = rect.intersected(QtCore.QRect(QtCore.QPoint(), size))
+            if rect.isEmpty():
+                return
+            cached = viewport_raster((transform, rect, dpr, size),
+                                     lambda raster: self.draw_vectors(raster, option, widget))
+            self.image, self.world_rect, self.raster_transform, self.dpr, self.viewport_size = cached
         painter.save()
-        painter.setRenderHint(QtGui.QPainter.Antialiasing, False)
-        for path, pen, brush in self._parts:
-            painter.setPen(pen)
-            painter.setBrush(brush)
-            painter.drawPath(path)
+        painter.resetTransform()
+        painter.drawImage(transform.mapRect(self.world_rect), self.image)
         painter.restore()
 
     def boundingRect(self):
@@ -536,7 +652,7 @@ def _fix_y_range(widget, lo, hi):
 
 class BasinViewer(QtWidgets.QWidget):
 
-    def __init__(self, directory=None, loaded=None, parent=None):
+    def __init__(self, directory=None, loaded=None, parent=None, preferred=None, prepared=None):
         super().__init__(parent)
         self.setWindowTitle('2D Basin Viewer')
         self.resize(1200, 700)
@@ -548,13 +664,14 @@ class BasinViewer(QtWidgets.QWidget):
         self.time_index = 0
         self.current_times = []
 
-        self._pdata = {}                # prop -> PropData
+        self._pdata = dict(prepared or {})                # prop -> PropData
         self._frame = None              # FrameView on screen (hover/profile)
         self._shown = []                # items of the current frame
         self._cache = OrderedDict()     # (prop, k, mode) -> (items, cost)
+        self._requested = None
+        self._job = None
+        self._recent_rasters = OrderedDict()
         self._cache_cost = 0
-        self._last_build_s = 0.0
-        self._draw_token = 0
         self._current_unit = ''
         self._prof_unit = None
         self._cross_visible = False
@@ -570,6 +687,9 @@ class BasinViewer(QtWidgets.QWidget):
             self.data, self.properties, self.units = loaded
         self._init_ui()
 
+        if preferred in self.properties:
+            with QtCore.QSignalBlocker(self.prop_combo):
+                self.prop_combo.setCurrentIndex(self.properties.index(preferred))
         if self.properties:
             self._on_property_changed()
 
@@ -658,6 +778,10 @@ class BasinViewer(QtWidgets.QWidget):
         )
 
         self.plot_widget = pg.PlotWidget()
+        self._loading_overlay = QtWidgets.QLabel('Отрисовка…', self.plot_widget.viewport())
+        self._loading_overlay.setAlignment(QtCore.Qt.AlignCenter)
+        self._loading_overlay.setStyleSheet('background-color: #1e1e1e; color: #cccccc')
+        self._loading_overlay.hide()
         self.plot_widget.setLabel('bottom', 'X, m')
         self.plot_widget.setLabel('left', 'Depth, m')
         self.plot_widget.invertY(True)
@@ -812,7 +936,8 @@ class BasinViewer(QtWidgets.QWidget):
     # Отрисовка разреза
     # -------------------------------------------------------------------
 
-    def _build_mesh(self, pd_, quads):
+    @staticmethod
+    def _mesh_paths(pd_, quads, lut_cid, lut_rgba):
         px, pz, val = quads
         m = val.shape[0]
 
@@ -820,33 +945,60 @@ class BasinViewer(QtWidgets.QWidget):
         rng = vmax - vmin if vmax > vmin else 1.0
         t = np.clip((val - vmin) / rng, 0.0, 1.0)
         li = (np.nan_to_num(t) * (LUT_SIZE - 1) + 0.5).astype(np.int32)
-        cid = self._lut_cid[li]
+        cid = lut_cid[li]
 
         order = np.argsort(cid, kind='stable')
-        counts = np.bincount(cid, minlength=self._lut_k)
+        counts = np.bincount(cid, minlength=len(lut_rgba))
         bounds = np.concatenate(([0], np.cumsum(counts)))
 
-        # closed quad + NaN separator -> one sub-path per quad
-        xo = np.empty((m, 6))
-        zo = np.empty((m, 6))
+        # All regular cells have five path vertices (last == first).
+        # Explicit subpath breaks avoid scanning for thousands of NaN sentinels.
+        finite = np.isfinite(px).all() and np.isfinite(pz).all()
+        width = 5 if finite else 6
+        xo = np.empty((m, width))
+        zo = np.empty((m, width))
         xo[:, :4] = px[order]
         zo[:, :4] = pz[order]
         xo[:, 4] = xo[:, 0]
         zo[:, 4] = zo[:, 0]
-        xo[:, 5] = np.nan
-        zo[:, 5] = np.nan
+        if finite:
+            connect = np.ones((m, width), dtype=np.int32)
+            connect[:, -1] = 0
+        else:
+            xo[:, 5] = np.nan
+            zo[:, 5] = np.nan
+
+        def path_for(start, stop):
+            return arrayToQPath(xo[start:stop].ravel(), zo[start:stop].ravel(),
+                                connect=connect[start:stop].ravel() if finite else 'finite',
+                                finiteCheck=not finite)
 
         parts = []
         for k in np.flatnonzero(counts):
             a, b = bounds[k], bounds[k + 1]
-            path = arrayToQPath(xo[a:b].ravel(), zo[a:b].ravel(),
-                                connect='finite')
-            c = self._lut_rgba[k]
+            c = lut_rgba[k]
             color = QtGui.QColor(int(c[0]), int(c[1]), int(c[2]), int(c[3]))
             pen = QtGui.QPen(color)
             pen.setWidthF(0.5)
             pen.setCosmetic(False)
-            parts.append((path, pen, QtGui.QBrush(color)))
+            brush = QtGui.QBrush(color)
+            start = a
+            if finite and b - a > 512:
+                # A nearly uniform property can put every cell in one path.
+                # Split only at X boundaries no polygon crosses, preserving the
+                # original odd-even fill even on overlapping/folded layers.
+                x = xo[a:b, :4]
+                minimum = x.min(axis=1)
+                order_x = minimum.argsort(kind='stable')
+                right = np.maximum.accumulate(x.max(axis=1)[order_x])
+                cuts = np.flatnonzero(minimum[order_x][1:] >= right[:-1]) + a + 1
+                xo[a:b] = xo[a:b][order_x]
+                zo[a:b] = zo[a:b][order_x]
+                for stop in cuts:
+                    if stop - start >= 256:
+                        parts.append((path_for(start, stop), pen, brush))
+                        start = stop
+            parts.append((path_for(start, b), pen, brush))
 
         brect = QtCore.QRectF()
         with np.errstate(all='ignore'):
@@ -855,9 +1007,10 @@ class BasinViewer(QtWidgets.QWidget):
         if np.isfinite([x_min, x_max, z_min, z_max]).all():
             brect = QtCore.QRectF(float(x_min), float(z_min),
                                   float(x_max - x_min), float(z_max - z_min))
-        return FrameMeshItem(parts, brect)
+        return parts, brect
 
-    def _build_boundaries(self, pd_, fr):
+    @staticmethod
+    def _boundary_arrays(pd_, fr):
         """Layer top/bottom lines of the frame as one NaN-separated curve."""
         st, en = fr.st, fr.en
         n = (en - st).tolist()
@@ -877,58 +1030,85 @@ class BasinViewer(QtWidgets.QWidget):
                 if key in seen:
                     continue
                 seen.add(key)
-                xs.append(pd_.x[st_l[s]:en_l[s]])
-                zs.append(z_arrs[w][st_l[s]:en_l[s]])
+                x = pd_.x[st_l[s]:en_l[s]]
+                z = z_arrs[w][st_l[s]:en_l[s]]
+                # A horizontal run has the same outline at every zoom.
+                keep = np.ones(len(z), dtype=bool)
+                keep[1:-1] = ((z[1:-1] != z[:-2]) | (z[1:-1] != z[2:]) |
+                              (x[1:-1] < x[:-2]) | (x[2:] < x[1:-1]))
+                xs.append(x[keep])
+                zs.append(z[keep])
                 xs.append(gap)
                 zs.append(gap)
         if not xs:
             return None
-        curve = pg.PlotCurveItem(
-            np.concatenate(xs), np.concatenate(zs),
-            pen=pg.mkPen(color=(40, 40, 40, 180), width=1.5),
-            connect='finite')
-        curve.setZValue(1)
-        return curve
+        return np.concatenate(xs), np.concatenate(zs)
 
-    def _build_frame(self, pd_, k, mode):
-        t0 = time.perf_counter()
-        fr = pd_.frame(k)
-        items = []
-        cost = 0
+    @staticmethod
+    def _prepare_frame(pd_, fr, mode, lut_cid, lut_rgba, camera):
         quads = build_quads(pd_, fr, mode)
-        if quads is not None:
-            cost = quads[2].shape[0]
-            items.append(self._build_mesh(pd_, quads))
-        curve = self._build_boundaries(pd_, fr)
-        if curve is not None:
-            items.append(curve)
-        self._last_build_s = time.perf_counter() - t0
-        return items, cost
+        mesh = BasinViewer._mesh_paths(pd_, quads, lut_cid, lut_rgba) if quads is not None else None
+        boundary = BasinViewer._boundary_arrays(pd_, fr)
+        cached = None
+        if camera is not None and mesh is not None and not mesh[1].isEmpty():
+            def paint(painter):
+                draw_paths(painter, mesh[0])
+                if boundary is not None:
+                    draw_boundary_raster(painter, boundary)
+            cached = viewport_raster(camera, paint)
+        return mesh, boundary, cached, len(quads[2]) if quads is not None else 0
 
-    def _frame_items(self, prop, k, mode):
-        key = (prop, k, mode)
-        ent = self._cache.get(key)
-        if ent is not None:
-            self._cache.move_to_end(key)
-            return ent[0]
-        items, cost = self._build_frame(self._get_pdata(prop), k, mode)
+    def _store_frame(self, key, result):
+        mesh, boundary, cached, cost = result
+        items = []
+        if mesh is not None:
+            item = FrameMeshItem(*mesh)
+            if cached is not None:
+                item.image, item.world_rect, item.raster_transform, item.dpr, item.viewport_size = cached
+            items.append(item)
+        if boundary is not None:
+            curve = pg.PlotCurveItem(*boundary, pen=pg.mkPen((40, 40, 40, 180), width=1.5), connect='finite')
+            curve.setZValue(1)
+            if items and not item.boundingRect().isEmpty():
+                item.boundary = curve
+                curve.setFlag(curve.ItemHasNoContents)
+            items.append(curve)
         self._cache[key] = (items, cost)
         self._cache_cost += cost
         while len(self._cache) > 1 and (
                 len(self._cache) > CACHE_MAX_FRAMES
                 or self._cache_cost > CACHE_MAX_QUADS):
-            _, (_, c) = self._cache.popitem(last=False)
+            _, (evicted, c) = self._cache.popitem(last=False)
+            for item in evicted:
+                self._recent_rasters.pop(item, None)
             self._cache_cost -= c
         return items
 
     def _remove_shown(self):
         for it in self._shown:
+            if isinstance(it, FrameMeshItem):
+                it.refine.stop()
+                if it.image is not None:
+                    self._recent_rasters[it] = it.image.sizeInBytes()
+                    self._recent_rasters.move_to_end(it)
+                    while (len(self._recent_rasters) > 4 or
+                           sum(self._recent_rasters.values()) > 24 * 1024**2):
+                        old, _ = self._recent_rasters.popitem(last=False)
+                        old.image = None
             self.plot_widget.removeItem(it)
         self._shown = []
 
+    def _frame_ready(self, key, result, error):
+        self._job = None
+        if key == self._requested and error:
+            self._loading_overlay.setText(str(error))
+            return
+        if key == self._requested and key not in self._cache:
+            self._store_frame(key, result)
+        if key == self._requested or self._requested not in self._cache:
+            self._draw()
+
     def _draw(self):
-        self._remove_shown()
-        self._draw_token += 1
 
         if not self.current_times:
             return
@@ -939,7 +1119,38 @@ class BasinViewer(QtWidgets.QWidget):
         pd_ = self._get_pdata(prop)
         mode = 'interp' if self.profile_mode.currentIndex() == 1 else 'aver'
 
-        items = self._frame_items(prop, k, mode)
+        key = prop, k, mode
+        self._requested = key
+        fr = pd_.frame(k)
+        if key not in self._cache:
+            args = (pd_, fr, mode, self._lut_cid, self._lut_rgba)
+            if fr.r1 - fr.r0 > 1500 and self.plot_widget.isVisible():
+                self.time_label.setText(f'{self.current_times[k]:g} Ma …')
+                # Keep controls responsive and coalesce rapid clicks to the last requested frame.
+                self._loading_overlay.setGeometry(self.plot_widget.viewport().rect())
+                self._loading_overlay.setText('Отрисовка…')
+                self._loading_overlay.show()
+                self._frame = None
+                self._update_profile()
+                self._set_info('')
+                if self._job is None:
+                    widget = self.plot_widget
+                    vb = widget.getViewBox()
+                    transform = vb.childGroup.deviceTransform(widget.viewportTransform())
+                    size = widget.viewport().size()
+                    rect = transform.mapRect(vb.viewRect()).toAlignedRect().adjusted(-1,-1,1,1)
+                    rect = rect.intersected(QtCore.QRect(QtCore.QPoint(), size))
+                    camera = (transform, rect, widget.devicePixelRatioF(), size)
+                    self._job = FrameTask(key, self._prepare_frame, (*args, camera))
+                    self._job.signals.finished.connect(self._frame_ready)
+                    QtCore.QThreadPool.globalInstance().start(self._job)
+                return
+            self._store_frame(key, self._prepare_frame(*args, None))
+        self._remove_shown()
+        self.time_label.setText(f'{self.current_times[k]:g} Ma')
+        self._loading_overlay.hide()
+        self._cache.move_to_end(key)
+        items = self._cache[key][0]
         for it in items:
             self.plot_widget.addItem(it)
         self._shown = list(items)
@@ -953,29 +1164,6 @@ class BasinViewer(QtWidgets.QWidget):
         self.plot_widget.enableAutoRange(axis='x')
 
         self._update_profile()
-        self._schedule_prefetch(prop, k, mode)
-
-    def _schedule_prefetch(self, prop, k, mode):
-        if self._last_build_s > PREFETCH_MAX_BUILD_S:
-            return
-        cands = [kk for kk in (k + 1, k - 1)
-                 if 0 <= kk < len(self.current_times)]
-        token = self._draw_token
-        QtCore.QTimer.singleShot(
-            0, lambda: self._prefetch(token, prop, mode, cands))
-
-    def _prefetch(self, token, prop, mode, cands):
-        """Build neighbouring frames while idle so that stepping is instant."""
-        if token != self._draw_token:
-            return
-        while cands:
-            kk = cands.pop(0)
-            if (prop, kk, mode) not in self._cache:
-                self._frame_items(prop, kk, mode)
-                break
-        if cands and self._last_build_s <= PREFETCH_MAX_BUILD_S:
-            QtCore.QTimer.singleShot(
-                0, lambda: self._prefetch(token, prop, mode, cands))
 
     # -------------------------------------------------------------------
     # 1D профиль по линии среза

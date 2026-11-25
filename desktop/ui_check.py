@@ -83,9 +83,15 @@ def attach(window, arguments):
                 viewer=page[0].viewer.viewer
                 assert viewer is not None, page[0].log.toPlainText()
                 assert 'Temperature' in viewer.properties
-                assert viewer._active_layers
+                if viewer._job is not None:return
+                assert viewer._frame is not None
                 viewer.time_index=len(viewer.current_times)-1;viewer._update_buttons();viewer._draw()
                 viewer.profile_mode.setCurrentIndex(1)
+                phase[0]='forward-frame'
+            elif state=='forward-frame':
+                viewer=page[0].viewer.viewer
+                if viewer._job is not None:return
+                assert viewer._frame is viewer._get_pdata('Temperature').frame(viewer.time_index)
                 assert len(viewer.plot_widget.items())>0
                 save('forward-visualize.png')
                 report['forward_viewer_properties']=viewer.properties
@@ -110,6 +116,16 @@ def attach(window, arguments):
                 for prop in ('Temperature','Sweeney_Burnham_1990_EASY_Ro','Heat_Flow_Basal'):
                     assert prop in viewer.properties
                 viewer.time_index=len(viewer.current_times)-1;viewer._update_buttons();viewer._draw()
+                viewer.prop_combo.setCurrentIndex(viewer.properties.index('Heat_Flow_Basal'))
+                viewer.btn_prev.click()
+                viewer.prop_combo.setCurrentIndex(viewer.properties.index('Temperature'))
+                viewer.btn_next.click()
+                phase[0]='inverse-frame'
+            elif state=='inverse-frame':
+                viewer=page[0].viewer.viewer
+                if viewer._job is not None:return
+                assert viewer._frame is viewer._get_pdata('Temperature').frame(len(viewer.current_times)-1)
+                assert viewer._loading_overlay.isHidden()
                 save('inverse-simple.png')
                 page[0].advanced_button.click()
                 assert page[0].views.currentIndex()==1 and not page[0].advanced.listDataItems()

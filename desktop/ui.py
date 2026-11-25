@@ -150,20 +150,20 @@ class ViewerHost(QtWidgets.QWidget):
         loading.setAlignment(QtCore.Qt.AlignCenter)
         self.layout.addWidget(loading)
 
-        def finish(data):
+        def finish(result):
             if generation != self.generation:
                 return
             self.task = None
             self.clear()
             try:
                 from organizer_viewer import BasinViewer
-                self.viewer = BasinViewer(directory=directory, loaded=data, parent=self)
+                data, prepared, _ = result
+                self.viewer = BasinViewer(directory=directory, loaded=data, parent=self,
+                                          preferred=preferred, prepared=prepared)
                 self.layout.addWidget(self.viewer)
-                if preferred and preferred in self.viewer.properties:
-                    self.viewer.prop_combo.setCurrentIndex(self.viewer.properties.index(preferred))
-                self.cache[signature] = data
+                self.cache[signature] = result
                 self.cache.move_to_end(signature)
-                while len(self.cache) > 3:
+                while len(self.cache) > 3 or sum(entry[2] for entry in self.cache.values()) > 256 * 1024**2:
                     self.cache.popitem(last=False)
                 self.loaded.emit()
             except Exception as error:
@@ -185,7 +185,17 @@ class ViewerHost(QtWidgets.QWidget):
             return
         def work(emit, cancelled):
             from viewer_data import load_directory
-            return load_directory(directory, emit, cancelled)
+            from organizer_viewer import PropData
+            data = load_directory(directory, emit, cancelled)
+            prepared = {}
+            for prop, layers in data[0].items():
+                if cancelled():
+                    raise InterruptedError('Loading stopped')
+                prepared[prop] = PropData(layers)
+            size = sum(frame.memory_usage().sum() for layers in data[0].values() for frame in layers.values())
+            size += sum(value.nbytes for prop in prepared.values() for value in vars(prop).values()
+                        if hasattr(value, 'nbytes'))
+            return data, prepared, size
         self.task = Task(work)
         self.task.signals.result.connect(finish)
         self.task.signals.error.connect(failure)
