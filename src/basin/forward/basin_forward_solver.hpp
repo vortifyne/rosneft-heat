@@ -2,6 +2,7 @@
 
 #include "basin/forward/basin_forward_settings.hpp"
 #include "basin/forward/basin_statistics.hpp"
+#include "basin/inverse/basin_heat_parameter_space.hpp"
 #include "basin/io/basin_input.hpp"
 #include "basin/mesh/col_epoch_grid.hpp"
 #include "numerics/algebra/vector.hpp"
@@ -28,7 +29,11 @@ class BasinForwardSolver {
 public:
     BasinForwardSolver(BasinInput input, BasinForwardSettings settings = {});
 
-    void set_parameters(const Vector& parameters);
+    void set_parameters(BasinHeatParameterSpace space);
+    void set_parameters(Vector parameters);
+    [[nodiscard]] const BasinHeatParameterSpace& parameter_space() const noexcept {
+        return parameter_space_;
+    }
     void set_intermediate_snapshots(bool enabled) noexcept;
     [[nodiscard]] std::span<const BasinConfig> configs() const noexcept;
     [[nodiscard]] const ColGrid& final_grid() const noexcept;
@@ -42,8 +47,6 @@ private:
     [[nodiscard]] Vector solve_initial_temperature() const;
     [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe,
                                            bool configuration_output) const;
-    void temperature_nodes(const ColGrid& grid, std::size_t configuration,
-                           std::span<const double> T, std::span<double> node_T) const;
 
     struct EpochData {
         ColEpochGrid mesh;
@@ -60,5 +63,6 @@ private:
     std::vector<EpochData> epochs_;
     ColGrid final_grid_;
     ColGrid initial_grid_;
-    Vector parameters_; // Basal heat flux [W/m²] at configuration ages.
+    BasinHeatParameterSpace parameter_space_;
+    bool use_parameterized_flux_ = false;
 };

@@ -23,6 +23,7 @@ find_package(UMFPACK CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_search_module(PETSc REQUIRED IMPORTED_TARGET PETSc petsc)
 find_package(MPI REQUIRED COMPONENTS CXX)
+add_subdirectory(external/robust-tdma)
 
 function(heat_configure_target target)
   target_include_directories(${target} PUBLIC ${PROJECT_SOURCE_DIR}/src)
@@ -34,8 +35,10 @@ function(heat_configure_target target)
 endfunction()
 
 add_library(heat_numerics STATIC
+  src/numerics/linear/fgmres.cpp
   src/numerics/linear/umfpack_linear_solver.cpp
   src/numerics/linear/petsc_krylov_linear_solver.cpp
+  src/numerics/linear/petsc_preconditioner.cpp
   src/numerics/nonlinear/nonlinear_solver.cpp
   src/numerics/time/bdf1.cpp
   src/numerics/time/time_integrator.cpp
@@ -59,6 +62,7 @@ heat_configure_target(basin_physics)
 add_library(basin_data STATIC
   src/basin/basin_problem.cpp
   src/basin/io/basin_input.cpp
+  src/basin/inverse/basin_heat_parameter_space.cpp
   src/basin/io/basin_parameters.cpp
   src/basin/geometry/basin_geometry.cpp
   src/basin/geometry/basin_geometry_rdp.cpp
@@ -84,7 +88,6 @@ target_link_libraries(basin_heat_forward PUBLIC heat_numerics basin_data)
 
 add_library(basin_heat_inverse STATIC
   src/basin/inverse/basin_heat_observation_data.cpp
-  src/basin/inverse/basin_heat_parameter_space.cpp
   src/basin/inverse/basin_heat_residual_evaluator.cpp
   src/basin/inverse/basin_heat_inverse_solver.cpp
 )

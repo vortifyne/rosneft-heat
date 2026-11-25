@@ -17,7 +17,7 @@ TEST(BasinForwardOptions, KeepsIndependentChoicesAndSerializesToleranceGroups) {
     set_basin_forward_option(settings, "--nonlinear-atol", "1e-10");
     set_basin_forward_option(settings, "--nonlinear-maxiter", "30");
     EXPECT_EQ(settings.linear_solver.method, LinearMethod::bicgstab);
-    EXPECT_EQ(settings.linear_solver.preconditioner, Preconditioner::ilu2);
+    EXPECT_EQ(settings.linear_solver.preconditioner, PreconditionerType::ilu2);
     EXPECT_EQ(settings.pc_reuse, PcReuse::manual);
     EXPECT_EQ(settings.linear.maxiter, 42);
     EXPECT_DOUBLE_EQ(settings.linear.rtol, 1e-9);

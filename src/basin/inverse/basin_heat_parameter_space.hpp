@@ -2,9 +2,19 @@
 
 #include "numerics/algebra/vector.hpp"
 
+#include <vector>
+
 class BasinHeatParameterSpace {
 public:
-    explicit BasinHeatParameterSpace(Vector::Index size) : size_(size) {}
+    BasinHeatParameterSpace(std::vector<double> ages_ma, Vector flux);
+    [[nodiscard]] const std::vector<double>& ages_ma() const noexcept {
+        return ages_ma_;
+    }
+    [[nodiscard]] const Vector& values() const noexcept {
+        return flux_;
+    }
+    void set_values(Vector flux);
+    [[nodiscard]] double at(double age_ma) const;
 
     [[nodiscard]] Vector to_normalized(const Vector& parameters) const;
     [[nodiscard]] Vector to_physical(const Vector& normalized) const;
@@ -12,5 +22,6 @@ public:
     [[nodiscard]] Vector normalized_upper_bounds() const;
 
 private:
-    Vector::Index size_;
+    std::vector<double> ages_ma_; // Oldest to youngest.
+    Vector flux_;                 // W/m².
 };

@@ -1,12 +1,9 @@
 #pragma once
 
-#include "basin/basin_problem.hpp"
-#include "numerics/algebra/vector.hpp"
+#include "basin/inverse/basin_heat_parameter_space.hpp"
 
 #include <filesystem>
-#include <span>
 
-[[nodiscard]] Vector read_basin_parameters(const std::filesystem::path& path,
-                                           std::span<const BasinConfig> configs);
-void write_basin_parameters(const std::filesystem::path& path, std::span<const BasinConfig> configs,
-                            const Vector& parameters);
+[[nodiscard]] BasinHeatParameterSpace read_basin_parameters(const std::filesystem::path& path);
+void write_basin_parameters(const std::filesystem::path& path,
+                            const BasinHeatParameterSpace& space);

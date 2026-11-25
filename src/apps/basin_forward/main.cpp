@@ -53,7 +53,8 @@ int main(int argc, char* argv[]) {
                      "[--nonlinear-atol tolerance] [--nonlinear-maxiter n] [--min-height m] "
                      "[--rdp-tol m] [--axis-rdp-tol m] "
                      "[--scheme linear|nmpfa] "
-                     "[--linear-method lu|gmres|bicgstab] [--pc ilu|ilu2|gamg|boomeramg] "
+                     "[--linear-method lu|gmres|bicgstab|fgmres] "
+                     "[--pc none|ilu|ilu2|gamg|boomeramg] "
                      "[--pc-reuse none|step|epoch] [--linear-rtol tolerance] [--linear-atol "
                      "tolerance] [--linear-maxiter n] [--parameters csv] "
                      "[--snapshots all|final] [PETSc -options ...]\n";
@@ -88,7 +89,7 @@ int main(int argc, char* argv[]) {
             const auto configs = input.configs();
             BasinForwardSolver solver(std::move(input), settings);
             if (!parameters_path.empty())
-                solver.set_parameters(read_basin_parameters(parameters_path, solver.configs()));
+                solver.set_parameters(read_basin_parameters(parameters_path));
             result = solver.solve(output_directory, [configs](const BasinSnapshot& snapshot) {
                 if (snapshot.kind == BasinSnapshot::Kind::after_event)
                     return;

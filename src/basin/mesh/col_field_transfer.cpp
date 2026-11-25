@@ -78,9 +78,12 @@ Vector interpolate_temperature(const ColGrid& old_grid, const ColGrid& new_grid,
 std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, const ColGrid& new_grid,
                                                    std::span<const double> old_I,
                                                    std::size_t reaction_count, int born_layer_id) {
-    std::vector<double> I((new_grid.cells.size() + new_grid.columns.size()) * reaction_count, 0.0);
-    const auto old_z = horizontal_node_depths(old_grid);
-    const auto new_z = horizontal_node_depths(new_grid);
+    std::vector<double> I(new_grid.maturity_node_count * reaction_count, 0.0);
+    std::vector<double> old_z(old_grid.maturity_node_count);
+    for (const auto& cell : old_grid.cells) {
+        old_z[cell.maturity_top] = cell.z_top;
+        old_z[cell.maturity_top + 1] = cell.z_bottom;
+    }
     std::vector<std::size_t> node_indices(old_z.size());
     std::iota(node_indices.begin(), node_indices.end(), 0);
     std::vector<int> layer_ids;
@@ -106,9 +109,9 @@ std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, cons
                 continue;
             const auto last = std::find_if_not(first, cells.end(), in_layer);
             columns.push_back(column);
-            rows[column] =
-                std::span<const std::size_t>(node_indices)
-                    .subspan(*first + column, static_cast<std::size_t>(last - first) + 1);
+            rows[column] = std::span<const std::size_t>(node_indices)
+                               .subspan(old_grid.cells[*first].maturity_top,
+                                        static_cast<std::size_t>(last - first) + 1);
         }
         std::size_t column_upper = 0;
         for (std::size_t column = 0; column < new_grid.columns.size(); ++column) {
@@ -118,21 +121,28 @@ std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, cons
             const double wx = fraction(target_x, x(left), x(right));
             std::size_t left_upper = 0, right_upper = 0;
             const auto& cells = new_grid.columns[column];
-            const auto first = std::find_if(cells.begin(), cells.end(), [&](std::size_t cell) {
+            const auto in_layer = [&](std::size_t cell) {
                 return new_grid.cells[cell].layer_id == layer_id;
-            });
+            };
+            const auto first = std::find_if(cells.begin(), cells.end(), in_layer);
             if (first == cells.end())
                 continue;
-            const auto last = std::find_if_not(first, cells.end(), [&](std::size_t cell) {
-                return new_grid.cells[cell].layer_id == layer_id;
-            });
-            const auto end_node = *(last - 1) + column + 1;
-            for (std::size_t node = *first + column; node <= end_node; ++node) {
-                const double target_z = new_z[node];
-                const auto [l0, l1] =
-                    neighboring_indices(rows[left], target_z, left_upper, false, z);
-                const auto [r0, r1] =
-                    neighboring_indices(rows[right], target_z, right_upper, false, z);
+            const auto last = std::find_if_not(first, cells.end(), in_layer);
+            const auto start_node = new_grid.cells[*first].maturity_top;
+            const auto end_node = new_grid.cells[*(last - 1)].maturity_top + 1;
+            for (auto node = start_node; node <= end_node; ++node) {
+                const double target_z = node == end_node
+                                            ? new_grid.cells[*(last - 1)].z_bottom
+                                            : new_grid.cells[first[node - start_node]].z_top;
+                const auto neighbors = [&](std::span<const std::size_t> row, std::size_t& upper) {
+                    if (node == start_node)
+                        return std::pair{row.front(), row.front()};
+                    if (node == end_node)
+                        return std::pair{row.back(), row.back()};
+                    return neighboring_indices(row, target_z, upper, false, z);
+                };
+                const auto [l0, l1] = neighbors(rows[left], left_upper);
+                const auto [r0, r1] = neighbors(rows[right], right_upper);
                 const double wl = fraction(target_z, z(l0), z(l1));
                 const double wr = fraction(target_z, z(r0), z(r1));
                 for (std::size_t reaction = 0; reaction < reaction_count; ++reaction) {
@@ -144,12 +154,6 @@ std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, cons
                 }
             }
         }
-    }
-    for (const auto& cell : new_grid.cells) {
-        if (cell.layer_id == born_layer_id)
-            std::fill_n(I.begin() + static_cast<std::ptrdiff_t>((cell.index + cell.column) *
-                                                                reaction_count),
-                        2 * reaction_count, 0.0);
     }
     return I;
 }

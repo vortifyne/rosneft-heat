@@ -25,6 +25,5 @@ private:
 
     BasinForwardSolver forward_;
     BasinHeatObservationData observations_;
-    BasinHeatParameterSpace parameter_space_;
     std::vector<Interpolation> interpolation_;
 };
