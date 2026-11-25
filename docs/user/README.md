@@ -41,6 +41,8 @@ tools/run_basin_from_xlsx.sh path/to/input result
 Скрипт выдаёт `Temperature.xlsx` (°C) и `Sweeney_Burnham_1990_EASY_Ro.xlsx` (%Ro)
 на исходной геометрии для всех возрастов. Снимки полей — в `snapshots/`,
 настройки и статистика — в `summary.txt` и `timings.txt`.
+В новых снимках `CGRID003` на контакте слоёв сохраняются отдельные значения
+%Ro с каждой стороны. Просмотрщик также открывает снимки `CGRID001` и `CGRID002`.
 
 ### 2. Визуализация
 

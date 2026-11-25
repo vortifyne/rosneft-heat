@@ -57,7 +57,7 @@ std::vector<double> deposition_times(const ColGrid& grid, std::span<const BasinC
             birth.try_emplace(layer.id, begin, end);
         }
     }
-    std::vector<double> result(grid.cells.size() + grid.columns.size());
+    std::vector<double> result(grid.maturity_node_count);
     for (const auto& column : grid.columns) {
         auto first = column.begin();
         while (first != column.end()) {
@@ -69,10 +69,10 @@ std::vector<double> deposition_times(const ColGrid& grid, std::span<const BasinC
             const auto [begin, end] = birth.at(top.layer_id);
             for (auto cell = first; cell != last; ++cell) {
                 const double depth = grid.cells[*cell].z_top;
-                result[*cell + top.column] =
+                result[grid.cells[*cell].maturity_top] =
                     std::lerp(end, begin, (depth - top.z_top) / (bottom.z_bottom - top.z_top));
             }
-            result[bottom.index + bottom.column + 1] = begin;
+            result[bottom.maturity_top + 1] = begin;
             first = last;
         }
     }
@@ -116,7 +116,7 @@ void observe_state(const ColGrid& grid, const Vector& T, std::span<const double>
     if (!observer)
         return;
     auto start = Clock::now();
-    std::vector<double> Ro(grid.cells.size() + grid.columns.size());
+    std::vector<double> Ro(grid.maturity_node_count);
     easy_ro.reflectance(I, Ro);
     timings.easy_ro_s += elapsed_seconds(start);
     start = Clock::now();
@@ -236,15 +236,9 @@ const ColGrid& BasinForwardSolver::final_grid() const noexcept {
 
 void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
                                                  std::span<double> node_T) const {
-    temperature_nodes(final_grid_, input_.configs().size() - 1, T, node_T);
-}
-
-void BasinForwardSolver::temperature_nodes(const ColGrid& grid, std::size_t configuration,
-                                           std::span<const double> T,
-                                           std::span<double> node_T) const {
-    const auto& cfg = input_.configs()[configuration];
+    const auto& cfg = input_.configs().back();
     std::vector<double> lambda(T.size());
-    for_each_layer_cell(grid, [&](const ColCell& cell, double depth) {
+    for_each_layer_cell(final_grid_, [&](const ColCell& cell, double depth) {
         const auto& layer = cfg.layer(cell.layer_id);
         const double x = cell.center().x;
         lambda[cell.index] = thermal_properties(T[cell.index], layer.phi_at(x, depth),
@@ -253,10 +247,10 @@ void BasinForwardSolver::temperature_nodes(const ColGrid& grid, std::size_t conf
     });
     auto boundaries = bc(cfg, cfg, 0.0);
     if (!parameters_.empty()) {
-        const double q = parameters_[static_cast<Vector::Index>(configuration)];
+        const double q = parameters_[parameters_.size() - 1];
         boundaries.q_basal = [q](Point2D) { return q; };
     }
-    interpolate_horizontal_temperature(grid, T, lambda, boundaries, node_T);
+    interpolate_horizontal_temperature(final_grid_, T, lambda, boundaries, node_T);
 }
 
 BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const {
@@ -275,8 +269,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
     Vector T = solve_initial_temperature();
     result.timings.initial_s = elapsed_seconds(initial_start);
     if (settings.intermediate_snapshots || configuration_output) {
-        const auto initial_I =
-            easy_ro.initial_state(initial_grid_.cells.size() + initial_grid_.columns.size());
+        const auto initial_I = easy_ro.initial_state(initial_grid_.maturity_node_count);
         observe_state(initial_grid_, T, initial_I, easy_ro, BasinSnapshot::Kind::initial, 0, 0,
                       configs.front().age_ma, observe, result.timings);
     }
@@ -306,7 +299,15 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
         const double epoch_begin = (configs.front().age_ma - cfg0.age_ma) * kSecondsPerMa;
         const double dt_max = settings.dt_ma * kSecondsPerMa;
         const auto& epoch = epochs_[epoch_index];
+        std::vector<double> face_T(grid.cells.size() + grid.columns.size());
         std::vector<double> node_T0(epoch.deposition_times.size()), node_T1(node_T0.size());
+        const auto copy_face_temperatures = [&](std::span<double> material_T) {
+            for (const auto& cell : grid.cells) {
+                const auto face = cell.index + cell.column;
+                material_T[cell.maturity_top] = face_T[face];
+                material_T[cell.maturity_top + 1] = face_T[face + 1];
+            }
+        };
         std::vector<const LithotypeProperties*> lithotypes(epoch.lithotypes.size());
         for (std::size_t i = 0; i < lithotypes.size(); ++i)
             lithotypes[i] = &input.lithotype(epoch.lithotypes[i]);
@@ -335,8 +336,8 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
                 lambda[cell.index] = thermal_properties(T[cell.index], phi[cell.index],
                                                         *lithotypes[cell.index], kFluid)
                                          .lambda;
-            interpolate_horizontal_temperature(grid, values(T), lambda, boundaries_at(0.0),
-                                               node_T0);
+            interpolate_horizontal_temperature(grid, values(T), lambda, boundaries_at(0.0), face_T);
+            copy_face_temperatures(node_T0);
         }
         double t = 0.0;
         integrator.set_initial_solution(t, T);
@@ -379,7 +380,8 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             }
             const Vector& T1 = integrator.current_snapshot().u;
             const auto easy_ro_start = Clock::now();
-            system.interpolate_horizontal_temperature(T1, node_T1);
+            system.interpolate_horizontal_temperature(T1, face_T);
+            copy_face_temperatures(node_T1);
             easy_ro.advance(node_T0, node_T1, epoch_begin + t, epoch_begin + t_next,
                             epoch.deposition_times, I);
             node_T0.swap(node_T1);
