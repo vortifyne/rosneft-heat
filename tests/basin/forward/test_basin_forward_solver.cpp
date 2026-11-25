@@ -40,10 +40,10 @@ std::filesystem::path stationary_column_input() {
                "1,basal_heat_flux,0,0.09\n1,basal_heat_flux,1000,0.09\n"
                "0,surface_temperature,0,285\n0,surface_temperature,1000,285\n"
                "0,basal_heat_flux,0,0.06\n0,basal_heat_flux,1000,0.06\n");
-    // This lambda20 makes Sekiguchi conductivity constant and equal to 1.84.
+    // At the common intersection of the Sekiguchi curves the conductivity is constant.
     write_file(directory / "lithotypes.csv",
                "code,name,solid_density,conductivity_20,specific_heat_20,heat_production\n"
-               "1,rock,2600,1.8402268504937909,900,0\n");
+               "1,rock,2600,1.8436,900,0\n");
     write_file(directory / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant\n"
                                            "1e13,190000,1,8.314\n");
     return directory;
@@ -334,7 +334,7 @@ TEST(BasinForwardSolver, IntegratesLinearBasalFluxOnEachTimeStep) {
             const double dt = (previous_age - snapshot.age_ma) * seconds_per_ma;
             const double storage =
                 1000 * 2600 * waples_heat_capacity(T, 900) * (T - previous_T) / dt;
-            const double surface_out = 1.84 * (T - 285) / 500;
+            const double surface_out = 1.8436 * (T - 285) / 500;
             const double mean_q = std::lerp(final_q, 0.09, 0.5 * (previous_age + snapshot.age_ma));
             EXPECT_NEAR(storage + surface_out, mean_q, 1e-7);
             previous_age = snapshot.age_ma;

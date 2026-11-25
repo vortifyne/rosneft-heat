@@ -269,7 +269,7 @@ void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
     });
     const auto boundaries =
         bc(cfg, cfg, 0.0, use_parameterized_flux_ ? &parameter_space_ : nullptr, cfg.age_ma);
-    interpolate_horizontal_temperature(grid, T, lambda, boundaries, node_T);
+    interpolate_horizontal_temperature(final_grid_, T, lambda, boundaries, node_T);
 }
 
 BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const {
@@ -348,7 +348,8 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
                                                         *lithotypes[cell.index], kFluid)
                                          .lambda;
             interpolate_horizontal_temperature(grid, values(T), lambda,
-                                               bc(cfg0, cfg1, 0.0, flux, cfg0.age_ma), node_T0);
+                                               bc(cfg0, cfg1, 0.0, flux, cfg0.age_ma), face_T);
+            copy_face_temperatures(node_T0);
         }
         double t = 0.0;
         integrator.set_initial_solution(t, T);
@@ -410,7 +411,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             }
             const Vector& T1 = integrator.current_snapshot().u;
             const auto easy_ro_start = Clock::now();
-            system.interpolate_horizontal_temperature(T1, face_T);
+            system.interpolate_horizontal_temperature(T1, end_bc, face_T);
             copy_face_temperatures(node_T1);
             easy_ro.advance(node_T0, node_T1, epoch_begin + t, epoch_begin + t_next,
                             epoch.deposition_times, I);
