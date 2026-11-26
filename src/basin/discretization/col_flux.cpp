@@ -58,7 +58,8 @@ double vertical_sample(const ColGrid& grid, const std::size_t P, const bool upwa
 
 double one_sided_flux(const ColGrid& grid, const std::size_t P, const std::size_t N,
                       const double x_f, const std::span<const double> lambda,
-                      const HeatBoundaryData& bc, FluxStencil& stencil) {
+                      const HeatBoundaryData& bc, FluxStencil& stencil,
+                      double* dflux_dq = nullptr) {
     const Point2D p = grid.cells[P].center();
     const Point2D n = grid.cells[N].center();
     const double d_P = std::abs(x_f - p.x);
@@ -88,7 +89,20 @@ double one_sided_flux(const ColGrid& grid, const std::size_t P, const std::size_
     }
     stencil.b *= a_x;
     add_scaled(stencil, difference(P, vertical), a_z);
+    if (dflux_dq)
+        *dflux_dq = d.z < 0.0 && !grid.cells[P].downward ? -a_z * dz / lambda[P] : 0.0;
     return a_x * w_N;
+}
+
+// Derivative of (|n| + eps) / (|p| + |n| + 2 eps) on the active NMPFA branch.
+double left_weight_derivative(double p, double n, double dp, double dn, double w, double denom) {
+    const double d_abs_p = p > 0 ? dp : (p < 0 ? -dp : 0.0);
+    const double d_abs_n = n > 0 ? dn : (n < 0 ? -dn : 0.0);
+    double d_eps = 0.0;
+    if (std::max(std::abs(p), std::abs(n)) > 1.0)
+        d_eps = std::numeric_limits<double>::epsilon() *
+                (std::abs(p) >= std::abs(n) ? d_abs_p : d_abs_n);
+    return (d_abs_n + d_eps - w * (d_abs_p + d_abs_n + 2 * d_eps)) / denom;
 }
 
 } // namespace
@@ -136,15 +150,18 @@ void compute_mpfa_flux(const ColGrid& grid, const VerticalSubface& face,
 
 void compute_nmpfa_flux(const ColGrid& grid, const VerticalSubface& face,
                         const std::span<const double> lambda, const std::span<const double> T,
-                        const HeatBoundaryData& bc, FluxStencil& stencil) {
+                        const HeatBoundaryData& bc, FluxStencil& stencil, double* dflux_dq) {
     const auto P = face.left_cell;
     const auto N = face.right_cell;
     stencil.size = 0;
     stencil.b = 0.0;
     FluxStencil s_P;
     FluxStencil s_N;
-    const double a_P = one_sided_flux(grid, P, N, face.x, lambda, bc, s_P);
-    const double a_N = one_sided_flux(grid, N, P, face.x, lambda, bc, s_N);
+    double dp, dn;
+    const double a_P =
+        one_sided_flux(grid, P, N, face.x, lambda, bc, s_P, dflux_dq ? &dp : nullptr);
+    const double a_N =
+        one_sided_flux(grid, N, P, face.x, lambda, bc, s_N, dflux_dq ? &dn : nullptr);
     const double q_P = evaluate_flux(s_P, T);
     const double q_N = evaluate_flux(s_N, T);
     const double eps =
@@ -153,6 +170,10 @@ void compute_nmpfa_flux(const ColGrid& grid, const VerticalSubface& face,
         const double denom = std::abs(q_P) + std::abs(q_N) + 2.0 * eps;
         const double w_P = (std::abs(q_N) + eps) / denom;
         const double w_N = (std::abs(q_P) + eps) / denom;
+        if (dflux_dq) {
+            const double dw = left_weight_derivative(q_P, q_N, dp, dn, w_P, denom);
+            *dflux_dq = face.length() * (w_P * dp - w_N * dn + dw * (q_P + q_N));
+        }
         add_scaled(stencil, s_P, face.length() * w_P);
         add_scaled(stencil, s_N, -face.length() * w_N);
     } else {
@@ -172,6 +193,13 @@ void compute_nmpfa_flux(const ColGrid& grid, const VerticalSubface& face,
         const double a_PN = w_P * a_P + w_N * a_N;
         add_term(stencil, P, face.length() * a_PN);
         add_term(stencil, N, -face.length() * a_PN);
+        if (dflux_dq) {
+            const double dw = left_weight_derivative(v_P, v_N, dp, dn, w_P, denom);
+            double slope = dw * (a_P - a_N) * (T[P] - T[N]);
+            if (v_P * v_N <= 0.0)
+                slope += w_P * dp - w_N * dn + dw * (v_P + v_N);
+            *dflux_dq = face.length() * slope;
+        }
         if (v_P * v_N <= 0.0) {
             add_scaled(stencil, r_P, face.length() * w_P);
             add_scaled(stencil, r_N, -face.length() * w_N);

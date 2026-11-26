@@ -40,6 +40,14 @@ public:
     [[nodiscard]] const ColGrid& final_grid() const noexcept;
     void final_temperature_nodes(std::span<const double> T, std::span<double> node_T) const;
 
+    [[nodiscard]] const ColGrid& epoch_initial_grid(std::size_t epoch) const {
+        return epochs_.at(epoch).initial_grid;
+    }
+    // One BDF1 step within an epoch and flux interval. T and the optional cell Jacobian are in/out.
+    void advance_temperature_step(std::size_t epoch, double age_begin_ma, double age_end_ma,
+                                  const Vector& eta, Vector& T,
+                                  Eigen::MatrixXd* jacobian = nullptr) const;
+
     [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe = {}) const;
     // Optional Jacobian of the sampled T and Ro with respect to normalized flux parameters.
     [[nodiscard]] Vector solve_at_wells(std::span<const BasinWellSample> samples,
@@ -59,6 +67,9 @@ private:
         std::vector<std::array<double, 2>> phi0;
         std::vector<std::array<double, 2>> phi1;
         std::vector<double> deposition_times;
+
+        void update_porosity(const ColGrid& grid, double theta, std::span<double> phi) const;
+        std::vector<const LithotypeProperties*> materials(const BasinInput& input) const;
     };
 
     BasinInput input_;

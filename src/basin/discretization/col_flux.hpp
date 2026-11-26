@@ -41,7 +41,7 @@ void compute_mpfa_flux(const ColGrid& grid, const VerticalSubface& face,
 
 void compute_nmpfa_flux(const ColGrid& grid, const VerticalSubface& face,
                         std::span<const double> lambda, std::span<const double> T,
-                        const HeatBoundaryData& bc, FluxStencil& stencil);
+                        const HeatBoundaryData& bc, FluxStencil& stencil, double* dflux_dq = nullptr);
 
 void compute_surface_flux(const ColGrid& grid, const VerticalBoundaryFace& face,
                           std::span<const double> lambda, const HeatBoundaryData& bc,

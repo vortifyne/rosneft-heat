@@ -7,6 +7,7 @@
 #include "basin/mesh/col_field_transfer.hpp"
 #include "basin/physics/easy_ro.hpp"
 #include "basin/physics/thermal_properties.hpp"
+#include "numerics/linear/umfpack_linear_solver.hpp"
 #include "numerics/time/time_integrator.hpp"
 
 #include <algorithm>
@@ -149,6 +150,26 @@ void observe_state(const ColGrid& grid, const Vector& T, std::span<const double>
     timings.output_s += elapsed_seconds(start);
 }
 
+TimeIntegrationResult advance_bdf1(TimeIntegrator& integrator, const ColHeatSystem& system,
+                                   double t_next, double dt, double end_age,
+                                   const BasinForwardSettings& settings) {
+    integrator.set_timestep(dt);
+    const auto step = integrator.advance_to(system, t_next, settings.nonlinear, settings.linear);
+    if (!step.completed()) {
+        throw std::runtime_error(
+            "basin nonlinear solve failed at age " + std::to_string(end_age) +
+            ": nonlinear_status=" +
+            std::to_string(
+                step.last_nonlinear_status ? static_cast<int>(*step.last_nonlinear_status) : -1) +
+            " linear_status=" +
+            std::to_string(step.last_linear_status ? static_cast<int>(*step.last_linear_status)
+                                                   : -1) +
+            " nonlinear_iterations=" + std::to_string(step.nonlinear_iterations) +
+            " residual=" + std::to_string(step.last_r_norm));
+    }
+    return step;
+}
+
 } // namespace
 
 BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings options)
@@ -205,6 +226,77 @@ BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings op
         geometries.front(),
         make_column_axis(geometries.front().x, settings.dx, lithotype_breakpoints(configs.front())),
         settings.dz);
+}
+
+void BasinForwardSolver::EpochData::update_porosity(const ColGrid& grid, double theta,
+                                                   std::span<double> phi) const {
+    for_each_layer_cell(grid, [&](const ColCell& cell, double depth) {
+        const auto i = cell.index;
+        const double top = std::lerp(phi0[i][0], phi1[i][0], theta);
+        const double bottom = std::lerp(phi0[i][1], phi1[i][1], theta);
+        phi[i] = std::lerp(top, bottom, depth);
+    });
+}
+
+std::vector<const LithotypeProperties*>
+BasinForwardSolver::EpochData::materials(const BasinInput& input) const {
+    std::vector<const LithotypeProperties*> result(lithotypes.size());
+    for (std::size_t i = 0; i < result.size(); ++i)
+        result[i] = &input.lithotype(lithotypes[i]);
+    return result;
+}
+
+void BasinForwardSolver::advance_temperature_step(std::size_t index, double age_begin_ma,
+                                                  double age_end_ma, const Vector& eta, Vector& T,
+                                                  Eigen::MatrixXd* jacobian) const {
+    const auto& epoch = epochs_.at(index);
+    const auto& first = configs()[index];
+    const auto& last = configs()[index + 1];
+    if (!(first.age_ma >= age_begin_ma && age_begin_ma > age_end_ma && age_end_ma >= last.age_ma))
+        throw std::invalid_argument("Temperature step must lie within one epoch");
+    const auto& knots = parameter_space_.ages_ma();
+    const auto knot = std::upper_bound(knots.begin(), knots.end(), age_begin_ma, std::greater<>{});
+    if (knot != knots.end() && *knot > age_end_ma)
+        throw std::invalid_argument("End the temperature step at the next basal flux knot");
+    if (T.size() != static_cast<Vector::Index>(epoch.initial_grid.cells.size()) || !T.all_finite())
+        throw std::invalid_argument("Expected one finite initial temperature per epoch cell");
+    if (jacobian &&
+        (jacobian->rows() != T.size() || jacobian->cols() != eta.size() || !jacobian->allFinite()))
+        throw std::invalid_argument(
+            "Expected finite initial sensitivities for every cell and parameter");
+
+    const double theta = (first.age_ma - age_end_ma) / (first.age_ma - last.age_ma);
+    const auto grid = epoch.mesh.at(theta);
+    std::vector<double> phi(grid.cells.size());
+    epoch.update_porosity(grid, theta, phi);
+    const auto lithotypes = epoch.materials(input_);
+    auto boundaries = bc(first, last, theta, nullptr, age_end_ma);
+    const double mid_age = std::midpoint(age_begin_ma, age_end_ma);
+    Vector dq_deta;
+    double q;
+    if (jacobian) {
+        q = parameter_space_.at(mid_age, eta, dq_deta);
+    } else {
+        const BasinHeatParameterSpace flux(parameter_space_.ages_ma(),
+                                           parameter_space_.to_physical(eta));
+        q = flux.at(mid_age);
+    }
+    boundaries.q_basal = [q](Point2D) { return q; };
+    ColHeatSystem system(grid, phi, lithotypes, kFluid, std::move(boundaries));
+    system.set_flux_scheme(settings_.scheme);
+    TimeIntegrator integrator;
+    integrator.set_linear_solver(settings_.linear_solver);
+    integrator.set_preconditioner_reuse(settings_.pc_reuse);
+    integrator.set_initial_solution(0.0, T);
+    const double dt = (age_begin_ma - age_end_ma) * kSecondsPerMa;
+    (void)advance_bdf1(integrator, system, dt, dt, age_end_ma, settings_);
+    const Vector& accepted_T = integrator.current_snapshot().u;
+    if (jacobian) {
+        SparseMatrix matrix(T.size(), T.size(), SparseStorageOrder::csc);
+        auto rhs = system.assemble_ddm_step(accepted_T, dt, *jacobian, dq_deta, matrix);
+        *jacobian = UmfpackLinearSolver::solve_columns(matrix, std::move(rhs));
+    }
+    T = accepted_T;
 }
 
 Vector BasinForwardSolver::solve_initial_temperature() const {
@@ -276,7 +368,7 @@ Vector BasinForwardSolver::solve_at_wells(std::span<const BasinWellSample> sampl
                                           Eigen::MatrixXd* jacobian) const {
     if (jacobian)
         throw std::logic_error(
-            "Gauss-Newton requires the basin observation Jacobian; DDM is not implemented yet");
+            "The full well temperature and reflectance Jacobian is not available yet");
     Vector calculated(static_cast<Vector::Index>(samples.size()));
     (void)solve([&](const BasinSnapshot& snapshot) {
         if (snapshot.epoch + 1 != configs().size())
@@ -360,19 +452,9 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
                 material_T[cell.maturity_top + 1] = face_T[face + 1];
             }
         };
-        std::vector<const LithotypeProperties*> lithotypes(epoch.lithotypes.size());
-        for (std::size_t i = 0; i < lithotypes.size(); ++i)
-            lithotypes[i] = &input.lithotype(epoch.lithotypes[i]);
+        const auto lithotypes = epoch.materials(input);
         std::vector<double> phi(grid.cells.size());
-        const auto update_porosity = [&](double theta) {
-            for_each_layer_cell(grid, [&](const ColCell& cell, double depth) {
-                const auto i = cell.index;
-                const double top = std::lerp(epoch.phi0[i][0], epoch.phi1[i][0], theta);
-                const double bottom = std::lerp(epoch.phi0[i][1], epoch.phi1[i][1], theta);
-                phi[i] = std::lerp(top, bottom, depth);
-            });
-        };
-        update_porosity(0.0);
+        epoch.update_porosity(grid, 0.0, phi);
         const auto* flux = use_parameterized_flux_ ? &parameter_space_ : nullptr;
         {
             std::vector<double> lambda(grid.cells.size());
@@ -414,7 +496,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             BasinIntervalStats step_stats{
                 .epoch = epoch_index, .age_begin_ma = age, .age_end_ma = end_age};
             grid = epoch.mesh.at(theta);
-            update_porosity(theta);
+            epoch.update_porosity(grid, theta, phi);
             const auto end_bc = bc(cfg0, cfg1, theta, flux, end_age);
             auto step_bc = end_bc;
             // Steps end at flux knots, so the midpoint gives the exact mean basal flux.
@@ -422,26 +504,11 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
                                          std::midpoint(age, end_age));
             ColHeatSystem system(grid, phi, lithotypes, kFluid, std::move(step_bc));
             system.set_flux_scheme(settings.scheme);
-            integrator.set_timestep(dt);
             step_stats.timings.grid_s += elapsed_seconds(grid_start);
             const TimeIntegrationResult step =
-                integrator.advance_to(system, t_next, settings.nonlinear, settings.linear);
+                advance_bdf1(integrator, system, t_next, dt, end_age, settings);
             step_stats.timings.nonlinear = step.timings;
             step_stats.timings.properties = system.property_timings();
-            if (!step.completed()) {
-                throw std::runtime_error(
-                    "basin nonlinear solve failed at age " +
-                    std::to_string(cfg0.age_ma - theta * (cfg0.age_ma - cfg1.age_ma)) +
-                    ": nonlinear_status=" +
-                    std::to_string(step.last_nonlinear_status
-                                       ? static_cast<int>(*step.last_nonlinear_status)
-                                       : -1) +
-                    " linear_status=" +
-                    std::to_string(
-                        step.last_linear_status ? static_cast<int>(*step.last_linear_status) : -1) +
-                    " nonlinear_iterations=" + std::to_string(step.nonlinear_iterations) +
-                    " residual=" + std::to_string(step.last_r_norm));
-            }
             const Vector& T1 = integrator.current_snapshot().u;
             const auto easy_ro_start = Clock::now();
             system.interpolate_horizontal_temperature(T1, end_bc, face_T);

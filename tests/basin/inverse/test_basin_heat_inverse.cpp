@@ -110,6 +110,27 @@ TEST(BasinHeatObservationData, UsesCelsiusErrorBoundsAndSeparateObservables) {
     std::filesystem::remove_all(path);
 }
 
+TEST(BasinForwardSolver, AdvancesTemperatureAndOptionalCellJacobianWithinEpoch) {
+    const auto path = small_problem();
+    BasinForwardSolver solver(BasinInput::read(path), small_settings());
+    std::filesystem::remove_all(path);
+    const Vector eta{0.9, 0.7, 0.8};
+    Vector plain(solver.epoch_initial_grid(0).cells.size());
+    plain.set_constant(300.0);
+    Vector T = plain;
+    Eigen::MatrixXd S = Eigen::MatrixXd::Zero(T.size(), eta.size());
+    S.col(2).setOnes(); // This column can only propagate from the previous step.
+    for (const double age : {20.0, 17.5}) {
+        solver.advance_temperature_step(0, age, age - 2.5, eta, plain);
+        solver.advance_temperature_step(0, age, age - 2.5, eta, T, &S);
+        EXPECT_LT((T - plain).infinity_norm(), 1e-10);
+        EXPECT_GT(S.col(0).norm(), 0.0);
+        EXPECT_GT(S.col(1).norm(), 0.0);
+        EXPECT_GT(S.col(2).minCoeff(), 0.0);
+        EXPECT_LT(S.col(2).maxCoeff(), 1.0);
+    }
+}
+
 TEST(BasinForwardSolver, ReusesPreparationAndResetsStateAfterUpdatingParameters) {
     const auto path = small_problem();
     BasinForwardSolver solver(BasinInput::read(path), small_settings());

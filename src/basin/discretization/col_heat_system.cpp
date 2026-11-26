@@ -140,6 +140,56 @@ void ColHeatSystem::assemble_matrix(const Vector& T, double alpha, SparseMatrix&
     M.set_from_triplets(triplets_);
 }
 
+Eigen::MatrixXd ColHeatSystem::assemble_ddm_step(const Vector& T, double dt,
+                                                 const Eigen::MatrixXd& previous,
+                                                 const Vector& dq_deta,
+                                                 SparseMatrix& matrix) const {
+    if (!(dt > 0.0) || !std::isfinite(dt) || previous.rows() != size() ||
+        previous.cols() != dq_deta.size() || dq_deta.empty() || rho_c_.empty())
+        throw std::invalid_argument("Invalid BDF1 sensitivity dimensions, capacity or timestep");
+    const double alpha = 1.0 / dt;
+    // shortcut: the Picard matrix freezes coefficients at T; use the full tangent for exact sensitivities.
+    assemble_matrix(T, alpha, matrix);
+
+    Vector basal(size());
+    basal.set_zero();
+    for (const auto cell : grid_->bottom_cells)
+        basal[cell] += grid_->cells[cell].width();
+
+    // Unit basal flux and zero surface temperature isolate the MPFA boundary constant.
+    const HeatBoundaryData unit{.T_surf = [](Point2D) { return 0.0; },
+                                .q_basal = [](Point2D) { return 1.0; }};
+    const std::span<const double> values{T.native().data(), static_cast<std::size_t>(T.size())};
+    FluxStencil stencil;
+    for (const auto& face : grid_->vertical_subfaces) {
+        if (grid_->cells[face.left_cell].downward && grid_->cells[face.right_cell].downward)
+            continue;
+        double slope;
+        if (scheme_ == MultipointFluxScheme::linear) {
+            compute_mpfa_flux(*grid_, face, lambda_, unit, stencil);
+            slope = stencil.b;
+        } else {
+            compute_nmpfa_flux(*grid_, face, lambda_, values, bc_, stencil, &slope);
+        }
+        basal[face.left_cell] -= slope;
+        basal[face.right_cell] += slope;
+    }
+    for (const auto& face : grid_->surface_vertical_faces) {
+        if (!grid_->cells[face.cell].downward) {
+            compute_surface_flux(*grid_, face, lambda_, unit, stencil);
+            basal[face.cell] -= stencil.b;
+        }
+    }
+
+    Eigen::MatrixXd rhs(size(), previous.cols());
+    for (const auto& cell : grid_->cells) {
+        const auto i = cell.index;
+        rhs.row(i) = alpha * cell.area() * rho_c_[i] * previous.row(i) +
+                     basal[i] * dq_deta.native().transpose();
+    }
+    return rhs;
+}
+
 void ColHeatSystem::add_mpfa_residual(const Vector& T, Vector& r) const {
     const std::span<const double> values{T.native().data(), static_cast<std::size_t>(T.size())};
     FluxStencil stencil;
