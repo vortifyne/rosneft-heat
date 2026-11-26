@@ -327,6 +327,10 @@ class ModePage(QtWidgets.QWidget):
         log_title = QtWidgets.QLabel('LOG:'); log_title.setObjectName('logTitle'); log_title.setAlignment(QtCore.Qt.AlignTop)
         log_layout.addWidget(log_title)
         self.log = QtWidgets.QPlainTextEdit(); self.log.setReadOnly(True); self.log.setMaximumBlockCount(5000)
+        self.pending_log = []
+        self.log_timer = QtCore.QTimer(self)
+        self.log_timer.setSingleShot(True)
+        self.log_timer.timeout.connect(self.flush_log)
         self.log.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap); log_layout.addWidget(self.log, 1)
         right.addWidget(log_frame)
         right.setStretchFactor(0, 1)
@@ -340,7 +344,16 @@ class ModePage(QtWidgets.QWidget):
             return value
 
     def append_log(self, text):
-        self.log.appendPlainText(text)
+        if text or self.pending_log or not self.log.document().isEmpty():
+            self.pending_log.append(text)
+            if not self.log_timer.isActive():
+                self.log_timer.start(0)
+
+    def flush_log(self):
+        if not self.pending_log:
+            return
+        self.log.appendPlainText('\n'.join(self.pending_log))
+        self.pending_log.clear()
         self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
 
     def values(self):
@@ -602,6 +615,9 @@ class Window(QtWidgets.QWidget):
             button.clicked.connect(lambda _=False, mode=mode:self.open_page(mode)); home_layout.addWidget(button)
         home_layout.addStretch(); self.stack.addWidget(self.home)
         qt = QtCore.Qt
+        self.mask_timer = QtCore.QTimer(self)
+        self.mask_timer.setSingleShot(True)
+        self.mask_timer.timeout.connect(self.apply_masks)
         self.handles = []
         for edges, cursor in (
                 (qt.LeftEdge, qt.SizeHorCursor), (qt.RightEdge, qt.SizeHorCursor),
@@ -643,7 +659,7 @@ class Window(QtWidgets.QWidget):
             y = self.height() - height if edges & qt.BottomEdge else 0
             handle.setGeometry(x, y, width, height)
             handle.raise_()
-        QtCore.QTimer.singleShot(0, self.apply_masks)
+        self.mask_timer.start(0)
 
     def apply_masks(self):
         if self.isMaximized() or self.isFullScreen():

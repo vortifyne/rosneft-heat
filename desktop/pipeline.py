@@ -122,6 +122,9 @@ def validate_input(directory: Path, inverse=False) -> None:
 
     def workbook(filename, **kwargs):
         try:
+            if kwargs.get('sheet_name', 0) is None:
+                from viewer_data import read_layers
+                return read_layers(directory / filename)
             return pd.read_excel(directory / filename, **kwargs)
         except Exception as error:
             raise ValueError(f'Cannot read workbook {filename}: {error}') from error
@@ -238,9 +241,9 @@ class Pipeline:
 
         def consume(data, final=False):
             nonlocal pending, initialized
-            pending += decoder.decode(data, final=final)
-            while '\n' in pending:
-                line, pending = pending.split('\n', 1)
+            lines = (pending + decoder.decode(data, final=final)).split('\n')
+            pending = lines.pop()
+            for line in lines:
                 if line.strip() == 'PETSc/MPI initialized':
                     initialized = True
                 write(line.rstrip())
@@ -382,7 +385,8 @@ def check_results(source: Path, directory: Path, *, inverse=False):
     import pandas as pd
     from basin_data import _layer_sort_key
     from basin_snapshot import read_snapshot
-    geometry = pd.read_excel(source / 'Depth.xlsx', sheet_name=None)
+    from viewer_data import read_layers
+    geometry = read_layers(source / 'Depth.xlsx')
     field_directory = directory / 'forward' if inverse else directory
     fields = pd.read_csv(field_directory / 'fields.csv', float_precision='round_trip')
     fields = fields.set_index(['age_ma', 'layer_id', 'x'])
@@ -393,7 +397,7 @@ def check_results(source: Path, directory: Path, *, inverse=False):
         flux = pd.read_csv(directory / 'parameters.csv', float_precision='round_trip').set_index('age_ma')
         outputs.append(('Heat_Flow_Basal.xlsx', 'flux'))
     for name, quantity in outputs:
-        frames = pd.read_excel(directory / name, sheet_name=None)
+        frames = read_layers(directory / name)
         if set(frames) != set(geometry):
             raise ValueError(f'{name}: missing output layers')
         for layer, frame in frames.items():

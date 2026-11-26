@@ -97,10 +97,14 @@ def upper_bound(x, st, en, v):
     return lo - st
 
 
-def nearest_rows(x, st, en, v):
+def nearest_rows(x, st, en, v, segments=None):
     """Per segment: nearest node to v (ties go left), left node, next node,
     and whether v lies inside the segment's x range."""
-    cnt = upper_bound(x, st, en, v)
+    if segments is None or not np.isfinite(v):
+        cnt = upper_bound(x, st, en, v)
+    else:
+        cnt = np.fromiter((xs.searchsorted(v, side='right') for xs in segments),
+                          dtype=np.intp, count=len(segments))
     n = en - st
     left = np.clip(cnt - 1, 0, n - 1)
     nxt = np.minimum(left + 1, n - 1)
@@ -122,6 +126,8 @@ class FrameView:
         self.r0 = int(self.st[0])
         self.r1 = int(self.en[-1])
         self.dict_rank = pd.dict_rank[self.layer]
+        self.x_segments = (tuple(pd.x[start:end] for start, end in zip(self.st, self.en))
+                           if self.st.size <= 32 else None)
 
 
 class PropData:
@@ -826,6 +832,7 @@ class BasinViewer(QtWidgets.QWidget):
             self.profile_widget.getAxis(axis_name).enableAutoSIPrefix(False)
 
         # Persistent items: updated with setData instead of clear()+plot()
+        self._profile_selection = None
         self._prof_curve = pg.PlotCurveItem(
             pen=pg.mkPen(color=(100, 200, 255), width=2))
         self._prof_lines = HLinesItem(pg.mkPen((80, 80, 80), width=0.5))
@@ -1173,6 +1180,7 @@ class BasinViewer(QtWidgets.QWidget):
         """Строит вертикальный профиль свойства при фиксированном X."""
         fr = self._frame
         if fr is None:
+            self._profile_selection = None
             self._prof_curve.setData(np.empty(0), np.empty(0))
             self._prof_lines.set_zs(np.empty(0))
             return
@@ -1184,11 +1192,17 @@ class BasinViewer(QtWidgets.QWidget):
             self.profile_widget.setLabel('bottom', f'Value [{unit}]')
             self._prof_unit = unit
 
-        near, _, _, inside = nearest_rows(pd_.x, fr.st, fr.en, sx)
+        near, _, _, inside = nearest_rows(pd_.x, fr.st, fr.en, sx, fr.x_segments)
         rr = near[inside]
+        mode = self.profile_mode.currentIndex()
+        previous = self._profile_selection
+        if previous and previous[0] is fr and previous[1] == mode and np.array_equal(rr, previous[2]):
+            _fix_y_range(self.profile_widget, self._fixed_z_min, self._fixed_z_max)
+            return
+        self._profile_selection = fr, mode, rr
         zt = pd_.zt[rr]
         zb = pd_.zb[rr]
-        if self.profile_mode.currentIndex() == 0:
+        if mode == 0:
             v0 = v1 = pd_.va[rr]
         else:
             v0 = pd_.vt[rr]
@@ -1218,7 +1232,7 @@ class BasinViewer(QtWidgets.QWidget):
         pd_ = fr.pd
         x = pd_.x
         st, en = fr.st, fr.en
-        near, left, nxt, inside = nearest_rows(x, st, en, mx)
+        near, left, nxt, inside = nearest_rows(x, st, en, mx, fr.x_segments)
 
         x0 = x[left]
         dx = x[nxt] - x0

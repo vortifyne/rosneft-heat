@@ -32,7 +32,13 @@ def dispatch():
     elif action == '--prepare':
         import prepare_basin_input
         sys.argv = ['prepare_basin_input', *args]
-        prepare_basin_input.main()
+        from viewer_data import read_layers
+
+        def load_property(path):
+            print('Читаю ' + path)
+            return read_layers(path)
+
+        prepare_basin_input.main(load_property)
     elif action == '--export':
         from export_basin_results import export_results
         export_results(Path(args[0]), Path(args[1]), inverse=inverse)

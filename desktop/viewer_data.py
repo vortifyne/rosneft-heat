@@ -60,8 +60,30 @@ def compatible(columns):
         for part in ('Top', 'Bot', 'Aver'))
 
 
-def load_directory(directory, emit=lambda _: None, cancelled=lambda: False):
+def read_layers(path, *, properties_only=False, cancelled=lambda: False):
+    """Read dense organizer sheets directly and delegate other layouts to pandas."""
     import pandas as pd
+    with pd.ExcelFile(path, engine='openpyxl') as book:
+        layers = {}
+        for sheet in book.book.worksheets:
+            if cancelled():
+                raise InterruptedError('Loading stopped')
+            sheet.reset_dimensions()
+            columns = next(sheet.values, ())
+            is_property = compatible(columns)
+            if properties_only and not is_property:
+                return {}
+            frame = None
+            if (is_property and all(isinstance(c, str) and c for c in columns)
+                    and len(set(columns)) == len(columns)):
+                frame = numeric_sheet(book.book, sheet, columns, cancelled)
+            if frame is None:
+                frame = pd.read_excel(book, sheet.title)
+            layers[sheet.title] = frame
+        return layers
+
+
+def load_directory(directory, emit=lambda _: None, cancelled=lambda: False):
     data, properties, units = {}, [], {}
     files = sorted(path for path in Path(directory).iterdir()
                    if path.suffix.lower() == '.xlsx' and not path.name.startswith('~$'))
@@ -72,20 +94,7 @@ def load_directory(directory, emit=lambda _: None, cancelled=lambda: False):
             raise InterruptedError('Loading stopped')
         emit(f'Loading {path.name}')
         try:
-            with pd.ExcelFile(path, engine='openpyxl') as book:
-                layers = {}
-                for sheet in book.book.worksheets:
-                    if cancelled():
-                        raise InterruptedError('Loading stopped')
-                    sheet.reset_dimensions()
-                    columns = next(sheet.values, ())
-                    if not compatible(columns):
-                        layers.clear()
-                        break
-                    frame = numeric_sheet(book.book, sheet, columns, cancelled)
-                    if frame is None:
-                        frame = pd.read_excel(book, sheet.title)
-                    layers[sheet.title] = frame
+            layers = read_layers(path, properties_only=True, cancelled=cancelled)
             if not layers:
                 emit(f'Skipped {path.name}: not a layer-property workbook')
                 continue
