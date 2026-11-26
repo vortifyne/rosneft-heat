@@ -12,15 +12,15 @@ import pandas as pd
 from basin_data import BasinData, _EASY_RO, _layer_sort_key, _load_property_xlsx
 
 
-def read_basin_data(directory: Path) -> BasinData:
+def read_basin_data(directory: Path, read_layers=_load_property_xlsx) -> BasinData:
     # Keep the organizer's reader unchanged; inverse inputs need no basal-flux file.
     data = BasinData.__new__(BasinData)
     data._dir = str(directory)
     for attribute, filename in (("_depth", "Depth.xlsx"), ("_lith", "Lithology.xlsx"),
                                 ("_poro", "Porosity.xlsx"), ("_tsurf", "Tsurf.xlsx")):
-        setattr(data, attribute, _load_property_xlsx(str(directory / filename)))
+        setattr(data, attribute, read_layers(str(directory / filename)))
     flux = directory / "Heat_Flow_Basal.xlsx"
-    data._hf = _load_property_xlsx(str(flux)) if flux.exists() else None
+    data._hf = read_layers(str(flux)) if flux.exists() else None
     data.layers = sorted(data._depth, key=_layer_sort_key)
     data._layer_times = {name: sorted(frame.iloc[:, 1].unique())
                          for name, frame in data._depth.items()}
@@ -44,13 +44,13 @@ def write_csv(path: Path, header: tuple[str, ...], rows) -> None:
         writer.writerows(rows)
 
 
-def main() -> None:
+def main(read_layers=_load_property_xlsx) -> None:
     parser = argparse.ArgumentParser(description="Prepare compact forward-problem input")
     parser.add_argument("data_dir", type=Path)
     parser.add_argument("output", type=Path)
     arguments = parser.parse_args()
 
-    data = read_basin_data(arguments.data_dir)
+    data = read_basin_data(arguments.data_dir, read_layers)
     ages = tuple(float(age) for age in reversed(data.times))
 
     arguments.output.mkdir(parents=True, exist_ok=True)
