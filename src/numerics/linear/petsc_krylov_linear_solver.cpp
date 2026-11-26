@@ -1,44 +1,15 @@
 #include "numerics/linear/petsc_krylov_linear_solver.hpp"
 
+#include "numerics/linear/petsc_linear_utils.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <petscksp.h>
 #include <stdexcept>
-#include <string>
-#include <type_traits>
 
-namespace {
-
-template <typename Handle, PetscErrorCode (*Destroy)(Handle*)> class PetscHandle {
-public:
-    ~PetscHandle() {
-        reset();
-    }
-    PetscHandle() = default;
-    PetscHandle(const PetscHandle&) = delete;
-    PetscHandle& operator=(const PetscHandle&) = delete;
-    Handle get() const noexcept {
-        return value_;
-    }
-    Handle* out() noexcept {
-        return &value_;
-    }
-    void reset() noexcept {
-        if (value_ != nullptr)
-            Destroy(&value_);
-    }
-
-private:
-    Handle value_ = nullptr;
-};
-
-void check(PetscErrorCode error) {
-    if (error != PETSC_SUCCESS)
-        throw std::runtime_error("PETSc linear solver error " + std::to_string(error));
-}
-
-} // namespace
+using petsc_linear::check;
+using petsc_linear::PetscHandle;
 
 struct PetscKrylovLinearSolver::Impl {
     PetscHandle<Mat, MatDestroy> matrix;
@@ -50,7 +21,8 @@ struct PetscKrylovLinearSolver::Impl {
     bool pc_ready = false;
 };
 
-PetscKrylovLinearSolver::PetscKrylovLinearSolver(LinearMethod method, Preconditioner preconditioner)
+PetscKrylovLinearSolver::PetscKrylovLinearSolver(LinearMethod method,
+                                                 PreconditionerType preconditioner)
     : LinearSolver(LinearSolverType::iterative), method_(method), preconditioner_(preconditioner) {
     if (method != LinearMethod::gmres && method != LinearMethod::bicgstab)
         throw std::invalid_argument("PETSc requires an iterative method");
@@ -75,9 +47,6 @@ void PetscKrylovLinearSolver::reset() noexcept {
 
 LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Vector& b, Vector& x,
                                                  const LinearSolveRequest& request) {
-    static_assert(std::is_same_v<PetscInt, SparseMatrix::StorageIndex>,
-                  "PETSc and Eigen must use the same CSR index type");
-    static_assert(std::is_same_v<PetscScalar, double>, "PETSc must use real double precision");
     const auto transfer_start = Clock::now();
     LinearTimings timings;
     if (request.new_pattern &&
@@ -107,15 +76,18 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
         PC pc = nullptr;
         check(KSPGetPC(ksp, &pc));
         switch (preconditioner_) {
-        case Preconditioner::ilu:
-        case Preconditioner::ilu2:
-            check(PCSetType(pc, PCILU));
-            check(PCFactorSetLevels(pc, preconditioner_ == Preconditioner::ilu ? 0 : 2));
+        case PreconditionerType::none:
+            check(PCSetType(pc, PCNONE));
             break;
-        case Preconditioner::gamg:
+        case PreconditionerType::ilu:
+        case PreconditionerType::ilu2:
+            check(PCSetType(pc, PCILU));
+            check(PCFactorSetLevels(pc, preconditioner_ == PreconditionerType::ilu ? 0 : 2));
+            break;
+        case PreconditionerType::gamg:
             check(PCSetType(pc, PCGAMG));
             break;
-        case Preconditioner::boomeramg:
+        case PreconditionerType::boomeramg:
             check(PCSetType(pc, PCHYPRE));
             check(PCHYPRESetType(pc, "boomeramg"));
             break;
@@ -137,9 +109,7 @@ LinearSolveResult PetscKrylovLinearSolver::solve(const SparseMatrix& A, const Ve
             timings.vector_builds += 2;
         }
         work.matrix.reset();
-        check(MatCreateSeqAIJ(PETSC_COMM_SELF, size, size, 0, nullptr, work.matrix.out()));
-        check(MatSeqAIJSetPreallocationCSR(work.matrix.get(), matrix.outerIndexPtr(),
-                                           matrix.innerIndexPtr(), matrix.valuePtr()));
+        petsc_linear::create_matrix(matrix, work.matrix.out());
         ++timings.matrix_builds;
     } else {
         // The caller guarantees identical CSR ordering throughout this nonlinear solve.

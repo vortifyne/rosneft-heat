@@ -50,6 +50,7 @@ void rebuild_col_faces(ColGrid& result) {
     result.basal_vertical_faces.clear();
     result.top_cells.resize(result.columns.size());
     result.bottom_cells.resize(result.columns.size());
+    result.maturity_node_count = 0;
     for (ColCell& cell : result.cells) {
         cell.upward.reset();
         cell.downward.reset();
@@ -69,6 +70,7 @@ void rebuild_col_faces(ColGrid& result) {
         const double scale = std::max(1.0, result.cells[column_cells.back()].z_bottom -
                                                result.cells[column_cells.front()].z_top);
         const double tolerance = 1.0e-10 * scale;
+        result.cells[column_cells.front()].maturity_top = result.maturity_node_count;
         for (std::size_t row = 1; row < column_cells.size(); ++row) {
             ColCell& upper = result.cells[column_cells[row - 1]];
             ColCell& lower = result.cells[column_cells[row]];
@@ -80,11 +82,14 @@ void rebuild_col_faces(ColGrid& result) {
             lower.z_top = interface;
             upper.downward = lower.index;
             lower.upward = upper.index;
+            // A contact shares temperature, but each layer retains its own maturity history.
+            lower.maturity_top = upper.maturity_top + (upper.layer_id == lower.layer_id ? 1 : 2);
             result.horizontal_faces.push_back(
                 {upper.index, lower.index, interface, right - result.x[column]});
         }
         result.top_cells[column] = column_cells.front();
         result.bottom_cells[column] = column_cells.back();
+        result.maturity_node_count = result.cells[column_cells.back()].maturity_top + 2;
     }
     for (std::size_t interface = 1; interface < result.columns.size(); ++interface) {
         const auto& left_cells = result.columns[interface - 1];

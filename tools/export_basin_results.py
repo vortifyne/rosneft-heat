@@ -20,14 +20,14 @@ def export_results(data_dir: Path, directory: Path, inverse: bool = False) -> No
     outputs = [("Temperature.xlsx", "temperature", "Celsius"),
                ("Sweeney_Burnham_1990_EASY_Ro.xlsx", "reflectance", "%Ro")]
     if inverse:
-        parameters = pd.read_csv(directory / "parameters.csv").set_index("age_ma")
+        parameters = pd.read_csv(directory / "parameters.csv").iloc[::-1]
         outputs.append(("Heat_Flow_Basal.xlsx", "flux", "mW/m^2"))
     for filename, quantity, unit in outputs:
         with pd.ExcelWriter(directory / filename, engine="openpyxl") as writer:
             for name, source in geometry.items():
                 frame = source.iloc[:, :5].copy()
                 if quantity == "flux":
-                    q = frame.iloc[:, 1].map(parameters.basal_heat_flux_mw_m2).to_numpy()
+                    q = np.interp(frame.iloc[:, 1], parameters.age_ma, parameters.basal_heat_flux_mw_m2)
                     values = np.column_stack((q, q, q))
                 else:
                     index = pd.MultiIndex.from_arrays(

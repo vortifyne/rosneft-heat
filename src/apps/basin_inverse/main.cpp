@@ -138,11 +138,7 @@ int main(int argc, char* argv[]) {
                         "reflectance_in_tolerance,reflectance_count,elapsed_s\n"
                      << std::setprecision(17);
             const Vector parameters = solver.solve(request, [&](int iteration, int evaluation,
-                                                                const Vector& q, const Vector& r) {
-                if (evaluation == 1)
-                    write_basin_parameters(output / "initial_parameters.csv",
-                                           solver.residual_evaluator().forward_solver().configs(),
-                                           q);
+                                                                const Vector&, const Vector& r) {
                 const double elapsed = elapsed_seconds(start);
                 const auto [temperature_inside, reflectance_inside] = count_within_errors(r);
                 progress << iteration << ',' << evaluation << ',' << r.squared_norm() << ','
@@ -162,7 +158,8 @@ int main(int argc, char* argv[]) {
                 count_within_errors(result.residuals);
             auto& evaluator = solver.residual_evaluator();
             auto& final_forward = evaluator.forward_solver();
-            write_basin_parameters(output / "parameters.csv", final_forward.configs(), parameters);
+            final_forward.set_parameters(parameters);
+            write_basin_parameters(output / "parameters.csv", final_forward.parameter_space());
             std::ofstream comparison(output / "observations.csv");
             comparison << "kind,well,x,z,observed,calculated,error,normalized_residual\n"
                        << std::setprecision(17);

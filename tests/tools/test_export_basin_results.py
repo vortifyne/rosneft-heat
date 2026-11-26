@@ -17,7 +17,7 @@ class ExportTest(unittest.TestCase):
             root = Path(tmp)
             source = root / "source"
             source.mkdir()
-            geometry = pd.DataFrame({"X": [0., 10., 0., 10.], "Time_Ma": [0., 0., 1., 1.],
+            geometry = pd.DataFrame({"X": [0., 10., 0., 10.], "Time_Ma": [0., 0.5, 1., 1.],
                                      "Z_Top [m]": [0., 1., 2., 3.],
                                      "Z_Bot [m]": [10., 11., 12., 13.],
                                      "Z_Aver [m]": [0., 1., 2., 3.]})
@@ -56,7 +56,7 @@ class ExportTest(unittest.TestCase):
                         for frame in flux.values():
                             np.testing.assert_array_equal(frame.iloc[:, :5], geometry)
                             np.testing.assert_array_equal(frame.iloc[:, 5:],
-                                                           np.tile([60., 60., 90., 90.], (3, 1)).T)
+                                                           np.tile([60., 75., 90., 90.], (3, 1)).T)
 
 
 if __name__ == "__main__":

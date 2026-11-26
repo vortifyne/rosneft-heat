@@ -20,6 +20,7 @@ struct ColCell {
     double z_bottom = 0.0;
     std::optional<std::size_t> upward;
     std::optional<std::size_t> downward;
+    std::size_t maturity_top = 0; // The bottom material node follows immediately.
 
     [[nodiscard]] double width() const noexcept;
     [[nodiscard]] double height() const noexcept;
@@ -65,6 +66,7 @@ struct ColGrid {
     std::vector<VerticalBoundaryFace> basal_vertical_faces;
     std::vector<std::size_t> top_cells;
     std::vector<std::size_t> bottom_cells;
+    std::size_t maturity_node_count = 0;
 
     [[nodiscard]] double area() const noexcept;
 };

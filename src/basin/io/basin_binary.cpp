@@ -25,15 +25,15 @@ template <typename T> void write_array(std::ofstream& file, const std::vector<T>
 void write_basin_binary(const std::filesystem::path& path, const BasinSnapshot& snapshot) {
     static_assert(std::endian::native == std::endian::little);
     const std::size_t count = snapshot.grid.cells.size();
-    const std::size_t nodes = count + snapshot.grid.columns.size();
+    const std::size_t nodes = snapshot.grid.maturity_node_count;
     if (snapshot.T.size() != count || snapshot.Ro.size() != nodes ||
-        (nodes > 0 && snapshot.I.size() % nodes != 0)) {
+        (nodes == 0 ? !snapshot.I.empty() : snapshot.I.size() % nodes != 0)) {
         throw std::invalid_argument("column-grid binary field sizes do not match");
     }
     std::ofstream file(path, std::ios::binary);
     if (!file)
         throw std::runtime_error("Cannot create column-grid binary snapshot");
-    file.write("CGRID002", 8);
+    file.write("CGRID003", 8);
     write_value(file, static_cast<std::uint32_t>(snapshot.kind));
     write_value(file, snapshot.age_ma);
     write_value(file, static_cast<std::uint64_t>(snapshot.grid.x.size()));

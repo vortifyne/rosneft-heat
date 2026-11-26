@@ -15,8 +15,9 @@ struct ColGrid;
 [[nodiscard]] Vector interpolate_temperature(const ColGrid& old_grid, const ColGrid& new_grid,
                                              const Vector& old_T);
 
-// I[node * reaction_count + reaction] is interpolated within the same layer,
-// clamping to its outer source nodes. The born layer starts with zero I.
+// I[node * reaction_count + reaction] uses layer-local maturity nodes. Endpoints
+// transfer by layer side, while interiors interpolate in depth within the same
+// layer, clamping to its outer source nodes. The born layer starts with zero I.
 // Every other target layer must be present in old_grid.
 [[nodiscard]] std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid,
                                                                  const ColGrid& new_grid,

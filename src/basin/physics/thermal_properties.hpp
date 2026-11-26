@@ -11,7 +11,7 @@ struct LithotypeProperties {
 };
 
 struct FluidProperties {
-    double lambda; // Thermal conductivity [W/(m*K)].
+    double lambda; // Fluid conductivity at 20 C [W/(m*K)].
     double rho;    // Density [kg/m^3].
     double c;      // Specific heat [J/(kg*K)].
 };

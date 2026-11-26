@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -57,7 +58,7 @@ std::vector<double> deposition_times(const ColGrid& grid, std::span<const BasinC
             birth.try_emplace(layer.id, begin, end);
         }
     }
-    std::vector<double> result(grid.cells.size() + grid.columns.size());
+    std::vector<double> result(grid.maturity_node_count);
     for (const auto& column : grid.columns) {
         auto first = column.begin();
         while (first != column.end()) {
@@ -69,26 +70,43 @@ std::vector<double> deposition_times(const ColGrid& grid, std::span<const BasinC
             const auto [begin, end] = birth.at(top.layer_id);
             for (auto cell = first; cell != last; ++cell) {
                 const double depth = grid.cells[*cell].z_top;
-                result[*cell + top.column] =
+                result[grid.cells[*cell].maturity_top] =
                     std::lerp(end, begin, (depth - top.z_top) / (bottom.z_bottom - top.z_top));
             }
-            result[bottom.index + bottom.column + 1] = begin;
+            result[bottom.maturity_top + 1] = begin;
             first = last;
         }
     }
     return result;
 }
 
-HeatBoundaryData bc(const BasinConfig& cfg0, const BasinConfig& cfg1, double theta) {
+BasinHeatParameterSpace epoch_flux_space(std::span<const BasinConfig> configs) {
+    std::vector<double> ages;
+    for (const auto& cfg : configs)
+        ages.push_back(cfg.age_ma);
+    Vector flux(static_cast<Vector::Index>(configs.size()));
+    flux.set_constant(0.075);
+    return BasinHeatParameterSpace(std::move(ages), std::move(flux));
+}
+
+std::function<double(Point2D)> basal_flux(const BasinConfig& cfg0, const BasinConfig& cfg1,
+                                          double theta, const BasinHeatParameterSpace* space,
+                                          double age_ma) {
+    if (space)
+        return [q = space->at(age_ma)](Point2D) { return q; };
+    return [&cfg0, &cfg1, theta](Point2D point) {
+        return std::lerp(cfg0.q_basal.at(point.x), cfg1.q_basal.at(point.x), theta);
+    };
+}
+
+HeatBoundaryData bc(const BasinConfig& cfg0, const BasinConfig& cfg1, double theta,
+                    const BasinHeatParameterSpace* space, double age_ma) {
     return {
         .T_surf =
             [&cfg0, &cfg1, theta](Point2D point) {
                 return std::lerp(cfg0.T_surf.at(point.x), cfg1.T_surf.at(point.x), theta);
             },
-        .q_basal =
-            [&cfg0, &cfg1, theta](Point2D point) {
-                return std::lerp(cfg0.q_basal.at(point.x), cfg1.q_basal.at(point.x), theta);
-            },
+        .q_basal = basal_flux(cfg0, cfg1, theta, space, age_ma),
     };
 }
 
@@ -116,7 +134,7 @@ void observe_state(const ColGrid& grid, const Vector& T, std::span<const double>
     if (!observer)
         return;
     auto start = Clock::now();
-    std::vector<double> Ro(grid.cells.size() + grid.columns.size());
+    std::vector<double> Ro(grid.maturity_node_count);
     easy_ro.reflectance(I, Ro);
     timings.easy_ro_s += elapsed_seconds(start);
     start = Clock::now();
@@ -134,7 +152,8 @@ void observe_state(const ColGrid& grid, const Vector& T, std::span<const double>
 } // namespace
 
 BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings options)
-    : input_(std::move(input)), settings_(std::move(options)), easy_ro_(input_.easy_ro()) {
+    : input_(std::move(input)), settings_(std::move(options)), easy_ro_(input_.easy_ro()),
+      parameter_space_(epoch_flux_space(input_.configs())) {
     const auto configs = input_.configs();
     const auto& settings = settings_;
     if (settings.nonlinear.method != NonlinearMethod::picard || configs.size() < 2 ||
@@ -200,11 +219,8 @@ Vector BasinForwardSolver::solve_initial_temperature() const {
         lithotypes[cell.index] = &input_.lithotype(layer.lithotype_at(x));
         T[static_cast<Vector::Index>(cell.index)] = cfg.T_surf.at(x);
     });
-    auto boundaries = bc(cfg, cfg, 0.0);
-    if (!parameters_.empty()) {
-        const double q = parameters_[0];
-        boundaries.q_basal = [q](Point2D) { return q; };
-    }
+    const auto boundaries =
+        bc(cfg, cfg, 0.0, use_parameterized_flux_ ? &parameter_space_ : nullptr, cfg.age_ma);
     ColHeatSystem system(initial_grid_, phi, lithotypes, kFluid, boundaries);
     system.set_flux_scheme(settings_.scheme);
     NonlinearSolver solver;
@@ -215,11 +231,17 @@ Vector BasinForwardSolver::solve_initial_temperature() const {
     return T;
 }
 
-void BasinForwardSolver::set_parameters(const Vector& parameters) {
-    if (parameters.size() != static_cast<Vector::Index>(input_.configs().size()) ||
-        !parameters.all_finite())
-        throw std::invalid_argument("Expected one finite basal flux per configuration");
-    parameters_ = parameters;
+void BasinForwardSolver::set_parameters(BasinHeatParameterSpace space) {
+    if (space.ages_ma().front() != configs().front().age_ma ||
+        space.ages_ma().back() != configs().back().age_ma)
+        throw std::invalid_argument("Basal flux knots must start and end at the basin ages");
+    parameter_space_ = std::move(space);
+    use_parameterized_flux_ = true;
+}
+
+void BasinForwardSolver::set_parameters(Vector parameters) {
+    parameter_space_.set_values(std::move(parameters));
+    use_parameterized_flux_ = true;
 }
 
 void BasinForwardSolver::set_intermediate_snapshots(bool enabled) noexcept {
@@ -236,27 +258,18 @@ const ColGrid& BasinForwardSolver::final_grid() const noexcept {
 
 void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
                                                  std::span<double> node_T) const {
-    temperature_nodes(final_grid_, input_.configs().size() - 1, T, node_T);
-}
-
-void BasinForwardSolver::temperature_nodes(const ColGrid& grid, std::size_t configuration,
-                                           std::span<const double> T,
-                                           std::span<double> node_T) const {
-    const auto& cfg = input_.configs()[configuration];
+    const auto& cfg = input_.configs().back();
     std::vector<double> lambda(T.size());
-    for_each_layer_cell(grid, [&](const ColCell& cell, double depth) {
+    for_each_layer_cell(final_grid_, [&](const ColCell& cell, double depth) {
         const auto& layer = cfg.layer(cell.layer_id);
         const double x = cell.center().x;
         lambda[cell.index] = thermal_properties(T[cell.index], layer.phi_at(x, depth),
                                                 input_.lithotype(layer.lithotype_at(x)), kFluid)
                                  .lambda;
     });
-    auto boundaries = bc(cfg, cfg, 0.0);
-    if (!parameters_.empty()) {
-        const double q = parameters_[static_cast<Vector::Index>(configuration)];
-        boundaries.q_basal = [q](Point2D) { return q; };
-    }
-    interpolate_horizontal_temperature(grid, T, lambda, boundaries, node_T);
+    const auto boundaries =
+        bc(cfg, cfg, 0.0, use_parameterized_flux_ ? &parameter_space_ : nullptr, cfg.age_ma);
+    interpolate_horizontal_temperature(final_grid_, T, lambda, boundaries, node_T);
 }
 
 BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const {
@@ -275,8 +288,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
     Vector T = solve_initial_temperature();
     result.timings.initial_s = elapsed_seconds(initial_start);
     if (settings.intermediate_snapshots || configuration_output) {
-        const auto initial_I =
-            easy_ro.initial_state(initial_grid_.cells.size() + initial_grid_.columns.size());
+        const auto initial_I = easy_ro.initial_state(initial_grid_.maturity_node_count);
         observe_state(initial_grid_, T, initial_I, easy_ro, BasinSnapshot::Kind::initial, 0, 0,
                       configs.front().age_ma, observe, result.timings);
     }
@@ -306,7 +318,15 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
         const double epoch_begin = (configs.front().age_ma - cfg0.age_ma) * kSecondsPerMa;
         const double dt_max = settings.dt_ma * kSecondsPerMa;
         const auto& epoch = epochs_[epoch_index];
+        std::vector<double> face_T(grid.cells.size() + grid.columns.size());
         std::vector<double> node_T0(epoch.deposition_times.size()), node_T1(node_T0.size());
+        const auto copy_face_temperatures = [&](std::span<double> material_T) {
+            for (const auto& cell : grid.cells) {
+                const auto face = cell.index + cell.column;
+                material_T[cell.maturity_top] = face_T[face];
+                material_T[cell.maturity_top + 1] = face_T[face + 1];
+            }
+        };
         std::vector<const LithotypeProperties*> lithotypes(epoch.lithotypes.size());
         for (std::size_t i = 0; i < lithotypes.size(); ++i)
             lithotypes[i] = &input.lithotype(epoch.lithotypes[i]);
@@ -320,23 +340,16 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             });
         };
         update_porosity(0.0);
-        const auto boundaries_at = [&](double theta) {
-            auto boundaries = bc(cfg0, cfg1, theta);
-            if (!parameters_.empty()) {
-                const auto index = static_cast<Vector::Index>(epoch_index);
-                const double q = std::lerp(parameters_[index], parameters_[index + 1], theta);
-                boundaries.q_basal = [q](Point2D) { return q; };
-            }
-            return boundaries;
-        };
+        const auto* flux = use_parameterized_flux_ ? &parameter_space_ : nullptr;
         {
             std::vector<double> lambda(grid.cells.size());
             for (const auto& cell : grid.cells)
                 lambda[cell.index] = thermal_properties(T[cell.index], phi[cell.index],
                                                         *lithotypes[cell.index], kFluid)
                                          .lambda;
-            interpolate_horizontal_temperature(grid, values(T), lambda, boundaries_at(0.0),
-                                               node_T0);
+            interpolate_horizontal_temperature(grid, values(T), lambda,
+                                               bc(cfg0, cfg1, 0.0, flux, cfg0.age_ma), face_T);
+            copy_face_temperatures(node_T0);
         }
         double t = 0.0;
         integrator.set_initial_solution(t, T);
@@ -344,18 +357,37 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             integrator.reset_linear_solver();
         }
         epoch_stats.timings.grid_s += elapsed_seconds(grid_start);
+        const auto& ages = parameter_space_.ages_ma();
+        auto knot = std::upper_bound(ages.begin(), ages.end(), cfg0.age_ma, std::greater<>{});
+        double age = cfg0.age_ma;
         while (t < duration) {
             const auto step_start = Clock::now();
             grid_start = step_start;
-            const double t_next = std::min(duration, t + dt_max);
-            const double dt = t_next - t;
+            const bool interior_knot = flux && knot != ages.end() && *knot > cfg1.age_ma;
+            const double stop_age = interior_knot ? *knot : cfg1.age_ma;
+            const double stop_time = (cfg0.age_ma - stop_age) * kSecondsPerMa;
+            const double proposed = t + dt_max;
+            // Snap roundoff-sized gaps to the knot instead of taking an extra tiny BDF step.
+            const double time_tol = 8.0 * std::numeric_limits<double>::epsilon() * stop_time;
+            const double t_next = stop_time - proposed <= time_tol ? stop_time : proposed;
+            if (!(t_next > t))
+                throw std::runtime_error("Basal flux knot or timestep is below time resolution");
             const double theta = t_next / duration;
-            BasinIntervalStats step_stats{.epoch = epoch_index,
-                                          .age_begin_ma = cfg0.age_ma - t / kSecondsPerMa,
-                                          .age_end_ma = cfg0.age_ma - t_next / kSecondsPerMa};
+            const double end_age =
+                t_next == stop_time ? stop_age : std::lerp(cfg0.age_ma, cfg1.age_ma, theta);
+            if (interior_knot && t_next == stop_time)
+                ++knot;
+            const double dt = t_next - t;
+            BasinIntervalStats step_stats{
+                .epoch = epoch_index, .age_begin_ma = age, .age_end_ma = end_age};
             grid = epoch.mesh.at(theta);
             update_porosity(theta);
-            ColHeatSystem system(grid, phi, lithotypes, kFluid, boundaries_at(theta));
+            const auto end_bc = bc(cfg0, cfg1, theta, flux, end_age);
+            auto step_bc = end_bc;
+            // Steps end at flux knots, so the midpoint gives the exact mean basal flux.
+            step_bc.q_basal = basal_flux(cfg0, cfg1, std::midpoint(t / duration, theta), flux,
+                                         std::midpoint(age, end_age));
+            ColHeatSystem system(grid, phi, lithotypes, kFluid, std::move(step_bc));
             system.set_flux_scheme(settings.scheme);
             integrator.set_timestep(dt);
             step_stats.timings.grid_s += elapsed_seconds(grid_start);
@@ -379,7 +411,8 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             }
             const Vector& T1 = integrator.current_snapshot().u;
             const auto easy_ro_start = Clock::now();
-            system.interpolate_horizontal_temperature(T1, node_T1);
+            system.interpolate_horizontal_temperature(T1, end_bc, face_T);
+            copy_face_temperatures(node_T1);
             easy_ro.advance(node_T0, node_T1, epoch_begin + t, epoch_begin + t_next,
                             epoch.deposition_times, I);
             node_T0.swap(node_T1);
@@ -388,6 +421,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             step_stats.nonlinear_iterations = step.nonlinear_iterations;
             step_stats.linear_iterations = step.linear_iterations;
             t = t_next;
+            age = end_age;
             const bool at_event = t == duration;
             if (settings.intermediate_snapshots || (configuration_output && at_event))
                 observe_state(

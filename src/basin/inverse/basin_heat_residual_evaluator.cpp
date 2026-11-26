@@ -5,7 +5,10 @@
 #include "basin/mesh/col_field_transfer.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <map>
 #include <numeric>
+#include <stdexcept>
 #include <utility>
 
 namespace {
@@ -30,44 +33,85 @@ double fraction(double value, double first, double second) {
 
 BasinHeatResidualEvaluator::BasinHeatResidualEvaluator(BasinForwardSolver forward,
                                                        BasinHeatObservationData observations)
-    : forward_(std::move(forward)), observations_(std::move(observations)),
-      parameter_space_(static_cast<Vector::Index>(forward_.configs().size())) {
+    : forward_(std::move(forward)), observations_(std::move(observations)) {
     forward_.set_intermediate_snapshots(false);
     const auto& grid = forward_.final_grid();
     std::vector<std::size_t> columns(grid.columns.size());
     std::iota(columns.begin(), columns.end(), 0);
     const auto x = [&](std::size_t column) { return 0.5 * (grid.x[column] + grid.x[column + 1]); };
     const auto depths = horizontal_node_depths(grid);
-    std::vector<std::vector<std::size_t>> nodes(grid.columns.size());
     std::vector<std::vector<std::size_t>> temperatures(grid.columns.size());
+    std::map<int, std::vector<std::size_t>> layer_columns;
     const auto count = grid.cells.size();
-    for (std::size_t c = 0; c < nodes.size(); ++c) {
-        nodes[c].resize(grid.columns[c].size() + 1);
-        std::iota(nodes[c].begin(), nodes[c].end(), grid.columns[c].front() + c);
+    for (std::size_t c = 0; c < grid.columns.size(); ++c) {
         for (auto cell : grid.columns[c]) {
             temperatures[c].push_back(count + cell + c);
             temperatures[c].push_back(cell);
+            auto& supporting = layer_columns[grid.cells[cell].layer_id];
+            if (supporting.empty() || supporting.back() != c)
+                supporting.push_back(c);
         }
-        temperatures[c].push_back(count + nodes[c].back());
+        temperatures[c].push_back(count + grid.columns[c].back() + c + 1);
     }
     const auto& cfg = forward_.configs().back();
     const auto geometry = make_basin_geometry(cfg);
     interpolation_.reserve(static_cast<std::size_t>(observations_.size()));
     for (const auto& point : observations_.points()) {
-        const bool nodal = point.kind == BasinObservable::reflectance;
-        if (!nodal && point.z <= geometry.boundary_at(0, point.x)) {
+        if (point.kind == BasinObservable::reflectance) {
+            const double geometry_x = std::clamp(point.x, geometry.x.front(), geometry.x.back());
+            const BasinLayerRegion* layer = nullptr;
+            double relative_depth = 0.0;
+            for (std::size_t i = 0; i < geometry.layers.size(); ++i) {
+                const auto& candidate = geometry.layers[i];
+                const double top = geometry.boundary_at(i, geometry_x);
+                const double bottom = geometry.boundary_at(i + 1, geometry_x);
+                if (geometry_x < candidate.x_min || geometry_x > candidate.x_max || top >= bottom ||
+                    !layer_columns.contains(candidate.id))
+                    continue;
+                layer = &candidate;
+                relative_depth = std::clamp(fraction(point.z, top, bottom), 0.0, 1.0);
+                if (point.z < bottom)
+                    break;
+            }
+            if (!layer)
+                throw std::invalid_argument("Reflectance observation has no material at well " +
+                                            point.well);
+            const auto [left, right] = neighboring(layer_columns.at(layer->id), point.x, x);
+            const auto sample = [&](std::size_t column) {
+                const auto& cells = grid.columns[column];
+                const auto first = std::find_if(cells.begin(), cells.end(), [&](std::size_t cell) {
+                    return grid.cells[cell].layer_id == layer->id;
+                });
+                const auto end = std::find_if(first, cells.end(), [&](std::size_t cell) {
+                    return grid.cells[cell].layer_id != layer->id;
+                });
+                const double z = std::lerp(grid.cells[*first].z_top,
+                                           grid.cells[*(end - 1)].z_bottom, relative_depth);
+                const auto upper = std::lower_bound(first, end, z, [&](std::size_t cell, double d) {
+                    return grid.cells[cell].z_bottom < d;
+                });
+                const auto& cell = grid.cells[*std::min(upper, end - 1)];
+                return std::pair{cell.maturity_top, fraction(z, cell.z_top, cell.z_bottom)};
+            };
+            const auto [l0, wl] = sample(left);
+            const auto [r0, wr] = sample(right);
+            const double wx = std::clamp(fraction(point.x, x(left), x(right)), 0.0, 1.0);
+            interpolation_.push_back(
+                {.indices = {l0, l0 + 1, r0, r0 + 1},
+                 .weights = {(1.0 - wx) * (1.0 - wl), (1.0 - wx) * wl, wx * (1.0 - wr), wx * wr}});
+            continue;
+        }
+        if (point.z <= geometry.boundary_at(0, point.x)) {
             interpolation_.push_back(
                 {.indices = {}, .weights = {}, .constant = cfg.T_surf.at(point.x)});
             continue;
         }
         const auto [left, right] = neighboring(columns, point.x, x);
         const auto z = [&](std::size_t index) {
-            if (nodal)
-                return depths[index];
             return index < count ? grid.cells[index].center().z : depths[index - count];
         };
-        const auto [l0, l1] = neighboring(nodal ? nodes[left] : temperatures[left], point.z, z);
-        const auto [r0, r1] = neighboring(nodal ? nodes[right] : temperatures[right], point.z, z);
+        const auto [l0, l1] = neighboring(temperatures[left], point.z, z);
+        const auto [r0, r1] = neighboring(temperatures[right], point.z, z);
         const double wx = fraction(point.x, x(left), x(right));
         const double wl = fraction(point.z, z(l0), z(l1));
         const double wr = fraction(point.z, z(r0), z(r1));
@@ -78,7 +122,7 @@ BasinHeatResidualEvaluator::BasinHeatResidualEvaluator(BasinForwardSolver forwar
 }
 
 const BasinHeatParameterSpace& BasinHeatResidualEvaluator::parameter_space() const noexcept {
-    return parameter_space_;
+    return forward_.parameter_space();
 }
 
 const BasinHeatObservationData& BasinHeatResidualEvaluator::observations() const noexcept {
@@ -90,7 +134,7 @@ BasinForwardSolver& BasinHeatResidualEvaluator::forward_solver() noexcept {
 }
 
 Vector BasinHeatResidualEvaluator::evaluate(const Vector& normalized) {
-    forward_.set_parameters(parameter_space_.to_physical(normalized));
+    forward_.set_parameters(parameter_space().to_physical(normalized));
     Vector calculated(observations_.size());
     std::vector<double> node_T(forward_.final_grid().cells.size() +
                                forward_.final_grid().columns.size());

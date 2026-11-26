@@ -1,5 +1,6 @@
 #include "basin/basin_snapshot.hpp"
 #include "basin/forward/basin_forward_solver.hpp"
+#include "basin/geometry/basin_geometry.hpp"
 #include "basin/io/basin_binary.hpp"
 #include "basin/io/basin_forward_options.hpp"
 #include "basin/io/basin_statistics.hpp"
@@ -14,12 +15,26 @@
 
 namespace {
 
-void write_layer_fields(std::ostream& output, const BasinConfig& cfg, const BasinSnapshot& snapshot,
-                        std::span<const double> node_T) {
+void write_layer_fields(std::ostream& output, const BasinConfig& cfg,
+                        const BasinSnapshot& snapshot) {
     const auto& grid = snapshot.grid;
+    const auto geometry = make_basin_geometry(cfg);
+    std::vector<double> centers;
+    std::vector<ScalarProfile> temperatures;
+    for (const auto& column : grid.columns) {
+        const auto& first = grid.cells[column.front()];
+        centers.push_back(first.center().x);
+        auto& profile = temperatures.emplace_back();
+        profile.x.push_back(first.z_top);
+        profile.values.push_back(cfg.T_surf.at(centers.back()));
+        for (const auto i : column) {
+            profile.x.push_back(grid.cells[i].center().z);
+            profile.values.push_back(snapshot.T[i]);
+        }
+    }
     for (const auto& layer : cfg.layers) {
         std::vector<double> x;
-        std::vector<std::array<double, 4>> values;
+        std::vector<std::array<double, 2>> ro;
         for (const auto& column : grid.columns) {
             const auto first = std::find_if(column.begin(), column.end(), [&](std::size_t i) {
                 return grid.cells[i].layer_id == layer.id;
@@ -30,13 +45,31 @@ void write_layer_fields(std::ostream& output, const BasinConfig& cfg, const Basi
                 return grid.cells[i].layer_id == layer.id;
             });
             const auto& cell = grid.cells[*first];
-            const auto top = *first + cell.column;
-            const auto bottom = *(last - 1) + cell.column + 1;
+            const auto top = cell.maturity_top;
+            const auto bottom = grid.cells[*(last - 1)].maturity_top + 1;
             x.push_back(cell.center().x);
-            values.push_back({node_T[top] - 273.15, node_T[bottom] - 273.15, snapshot.Ro[top],
-                              snapshot.Ro[bottom]});
+            ro.push_back({snapshot.Ro[top], snapshot.Ro[bottom]});
         }
-        for (const double coordinate : layer.x) {
+        std::size_t upper_column = 0;
+        for (std::size_t i = 0; i < layer.x.size(); ++i) {
+            const double coordinate = layer.x[i];
+            while (upper_column < centers.size() && centers[upper_column] < coordinate)
+                ++upper_column;
+            const auto left_column = upper_column == 0 ? 0 : upper_column - 1;
+            const auto right_column = std::min(upper_column, centers.size() - 1);
+            const double wx = left_column == right_column
+                                  ? 0.0
+                                  : (coordinate - centers[left_column]) /
+                                        (centers[right_column] - centers[left_column]);
+            const double surface = geometry.boundary_at(0, coordinate);
+            const auto temperature = [&](double z) {
+                if (z <= surface)
+                    return cfg.T_surf.at(coordinate);
+                return std::lerp(temperatures[left_column].at(z), temperatures[right_column].at(z),
+                                 wx);
+            };
+            const double top = temperature(layer.top[i]) - 273.15;
+            const double bottom = temperature(layer.bottom[i]) - 273.15;
             std::size_t left = 0, right = 0;
             double weight = 0.0;
             if (x.size() > 1) {
@@ -46,12 +79,11 @@ void write_layer_fields(std::ostream& output, const BasinConfig& cfg, const Basi
                 left = right - 1;
                 weight = (coordinate - x[left]) / (x[right] - x[left]);
             }
-            std::array<double, 4> v;
-            for (std::size_t i = 0; i < v.size(); ++i)
-                v[i] = std::lerp(values[left][i], values[right][i], weight);
-            output << cfg.age_ma << ',' << layer.id << ',' << coordinate << ',' << v[0] << ','
-                   << v[1] << ',' << 0.5 * (v[0] + v[1]) << ',' << v[2] << ',' << v[3] << ','
-                   << 0.5 * (v[2] + v[3]) << '\n';
+            const double ro_top = std::lerp(ro[left][0], ro[right][0], weight);
+            const double ro_bottom = std::lerp(ro[left][1], ro[right][1], weight);
+            output << cfg.age_ma << ',' << layer.id << ',' << coordinate << ',' << top << ','
+                   << bottom << ',' << 0.5 * (top + bottom) << ',' << ro_top << ',' << ro_bottom
+                   << ',' << 0.5 * (ro_top + ro_bottom) << '\n';
         }
     }
 }
@@ -79,9 +111,7 @@ BasinForwardResult BasinForwardSolver::solve(const std::filesystem::path& output
                 const auto index = snapshot.kind == BasinSnapshot::Kind::before_event
                                        ? snapshot.epoch + 1
                                        : snapshot.epoch;
-                std::vector<double> node_T(snapshot.Ro.size());
-                temperature_nodes(snapshot.grid, index, snapshot.T, node_T);
-                write_layer_fields(fields, configs()[index], snapshot, node_T);
+                write_layer_fields(fields, configs()[index], snapshot);
             }
             if (settings_.intermediate_snapshots || final) {
                 std::ostringstream name;

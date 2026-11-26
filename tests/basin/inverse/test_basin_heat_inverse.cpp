@@ -46,20 +46,28 @@ BasinForwardSettings small_settings() {
 
 } // namespace
 
-TEST(BasinHeatParameterSpace, RepresentsAllEpochBoundaryFluxesAndPreservesMonotonicity) {
-    BasinHeatParameterSpace space(17);
-    Vector flux(17);
-    for (Vector::Index i = 0; i < flux.size(); ++i)
-        flux[i] = 0.1 - 0.05 * static_cast<double>(i) / 16.0;
+TEST(BasinHeatParameterSpace, InterpolatesAndPreservesMonotonicityAtArbitraryAges) {
+    const Vector flux{0.1, 0.08, 0.08, 0.05};
+    const BasinHeatParameterSpace space({20, 16, 6, 0}, flux);
+    EXPECT_DOUBLE_EQ(space.at(20), 0.1);
+    EXPECT_DOUBLE_EQ(space.at(18), 0.09);
+    EXPECT_DOUBLE_EQ(space.at(10), 0.08);
+    EXPECT_DOUBLE_EQ(space.at(3), 0.065);
+    EXPECT_DOUBLE_EQ(space.at(0), 0.05);
     const Vector recovered = space.to_physical(space.to_normalized(flux));
     EXPECT_LT((recovered - flux).norm(), 1e-15);
-    Vector u(17);
+    Vector u(flux.size());
     u.set_constant(0.9);
     const auto physical = space.to_physical(u);
     for (Vector::Index i = 1; i < physical.size(); ++i) {
         EXPECT_LE(physical[i], physical[i - 1]);
         EXPECT_GE(physical[i], 0.05);
     }
+    EXPECT_THROW(BasinHeatParameterSpace({20}, {0.08}), std::invalid_argument);
+    EXPECT_THROW(BasinHeatParameterSpace({20, 0, 0}, {0.08, 0.07, 0.06}), std::invalid_argument);
+    EXPECT_THROW(BasinHeatParameterSpace({20, 0}, {0.07, 0.08}), std::invalid_argument);
+    EXPECT_THROW(BasinHeatParameterSpace({20, 0}, {0.101, 0.07}), std::invalid_argument);
+    EXPECT_THROW(BasinHeatParameterSpace({20, 0}, {0.08, 0.049}), std::invalid_argument);
 }
 
 TEST(BasinHeatObservationData, UsesCelsiusErrorBoundsAndSeparateObservables) {
@@ -83,7 +91,7 @@ TEST(BasinForwardSolver, ReusesPreparationAndResetsStateAfterUpdatingParameters)
     Vector initial;
     Vector first_temperature;
     std::vector<double> first_reflectance;
-    (void)solver.solve([&](const BasinSnapshot& snapshot) {
+    const auto result = solver.solve([&](const BasinSnapshot& snapshot) {
         if (snapshot.kind == BasinSnapshot::Kind::initial) {
             initial = Vector(static_cast<Vector::Index>(snapshot.T.size()));
             for (const auto& cell : snapshot.grid.cells) {
@@ -98,6 +106,7 @@ TEST(BasinForwardSolver, ReusesPreparationAndResetsStateAfterUpdatingParameters)
             first_reflectance.assign(snapshot.Ro.begin(), snapshot.Ro.end());
         }
     });
+    EXPECT_EQ(result.timesteps, 8);
     solver.set_parameters(Vector{0.1, 0.09, 0.08});
     (void)solver.solve([&](const BasinSnapshot& snapshot) {
         if (snapshot.kind == BasinSnapshot::Kind::initial) {
@@ -121,17 +130,36 @@ TEST(BasinForwardSolver, ReusesPreparationAndResetsStateAfterUpdatingParameters)
             EXPECT_DOUBLE_EQ(snapshot.Ro[i], first_reflectance[i]);
     });
     EXPECT_EQ(callbacks, 1);
-    write_basin_parameters(path / "parameters.csv", solver.configs(), original);
-    EXPECT_LT((read_basin_parameters(path / "parameters.csv", solver.configs()) - original).norm(),
-              1e-16);
+    std::filesystem::remove_all(path);
+}
+
+TEST(BasinForwardSolver, StepsToFluxKnotsLoadedFromCsv) {
+    const auto path = small_problem();
+    const auto csv = path / "parameters.csv";
+    write_file(csv, "age_ma,basal_heat_flux_mw_m2\n20,90\n16,82\n10,80\n0,60\n");
+    BasinForwardSolver solver(BasinInput::read(path), small_settings());
+    EXPECT_THROW(solver.set_parameters(BasinHeatParameterSpace({19, 0}, {0.09, 0.06})),
+                 std::invalid_argument);
+    solver.set_parameters(read_basin_parameters(csv));
+    write_basin_parameters(csv, solver.parameter_space());
+    const auto saved = read_basin_parameters(csv);
+    EXPECT_EQ(saved.ages_ma().size(), 4u);
+    EXPECT_DOUBLE_EQ(saved.at(16), 0.082);
+    const auto result = solver.solve();
+    std::vector<double> ends;
+    for (const auto& step : result.steps) {
+        EXPECT_GT(step.age_begin_ma, step.age_end_ma);
+        ends.push_back(step.age_end_ma);
+    }
+    EXPECT_EQ(ends, (std::vector<double>{17.5, 16, 13.5, 11, 10, 7.5, 5, 2.5, 0}));
     std::filesystem::remove_all(path);
 }
 
 TEST(BasinHeatInverseSolver, RecoversKnownFluxHistoryFromSyntheticTemperatureAndReflectance) {
     const auto path = small_problem();
     BasinForwardSolver forward(BasinInput::read(path), small_settings());
-    const Vector known{0.09, 0.08, 0.06};
-    forward.set_parameters(known);
+    const Vector known{0.09, 0.06};
+    forward.set_parameters(BasinHeatParameterSpace({20, 0}, known));
     forward.set_intermediate_snapshots(false);
     std::vector<BasinObservation> points;
     (void)forward.solve([&](const BasinSnapshot& snapshot) {
@@ -152,7 +180,7 @@ TEST(BasinHeatInverseSolver, RecoversKnownFluxHistoryFromSyntheticTemperatureAnd
                               .z = center.z,
                               .value = snapshot.T[cell.index],
                               .error = 0.02 * (snapshot.T[cell.index] - 273.15)});
-            const auto node = cell.index + cell.column;
+            const auto node = cell.maturity_top;
             const double Ro = 0.5 * (snapshot.Ro[node] + snapshot.Ro[node + 1]);
             points.push_back({.kind = BasinObservable::reflectance,
                               .well = "synthetic",
@@ -164,7 +192,7 @@ TEST(BasinHeatInverseSolver, RecoversKnownFluxHistoryFromSyntheticTemperatureAnd
     });
     BasinHeatInverseSolver inverse(BasinHeatResidualEvaluator(
         std::move(forward), BasinHeatObservationData(std::move(points))));
-    BasinHeatInverseSolveRequest request{.initial_parameters = Vector{0.075, 0.075, 0.075}};
+    BasinHeatInverseSolveRequest request{.initial_parameters = Vector{0.075, 0.075}};
     request.optimization = {
         .gatol = 1e-10, .grtol = 1e-10, .gttol = 1e-10, .maxiter = 100, .maxfev = 400};
     int evaluations = 0;
@@ -185,5 +213,50 @@ TEST(BasinHeatInverseSolver, RecoversKnownFluxHistoryFromSyntheticTemperatureAnd
     EXPECT_LE(evaluations, 401);
     for (Vector::Index i = 1; i < found.size(); ++i)
         EXPECT_LE(found[i], found[i - 1]);
+    std::filesystem::remove_all(path);
+}
+
+TEST(BasinHeatResidualEvaluator, SamplesTheDeeperSideOfAContactAndStaysWithinPinchingLayers) {
+    const auto path = small_problem();
+    write_file(
+        path / "layers.csv",
+        "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity_top,porosity_bottom\n"
+        "20,1,rock,0,0,3600,1,0.1,0.1\n20,1,rock,2000,0,3600,1,0.1,0.1\n"
+        "10,1,rock,0,0,3600,1,0.1,0.1\n10,1,rock,2000,0,3600,1,0.1,0.1\n"
+        "0,2,cap,0,0,1600,1,0.1,0.1\n0,2,cap,1000,0,0,1,0.1,0.1\n"
+        "0,1,rock,0,1600,3600,1,0.1,0.1\n0,1,rock,1000,0,3600,1,0.1,0.1\n"
+        "0,1,rock,2000,0,3600,1,0.1,0.1\n");
+    write_file(path / "boundaries.csv",
+               "age_ma,kind,x,value_si\n"
+               "20,surface_temperature,0,330\n20,surface_temperature,2000,330\n"
+               "10,surface_temperature,0,330\n10,surface_temperature,2000,330\n"
+               "0,surface_temperature,0,330\n0,surface_temperature,2000,330\n");
+    write_file(path / "kinetics.csv", "preexponential,activation_energy,weight,gas_constant\n"
+                                      "1e13,190000,1.0,8.314\n");
+    auto settings = small_settings();
+    settings.dz = 400.0;
+    BasinForwardSolver forward(BasinInput::read(path), settings);
+    const Vector flux{0.09, 0.08, 0.06};
+    forward.set_parameters(flux);
+    forward.set_intermediate_snapshots(false);
+    std::vector<BasinObservation> points;
+    (void)forward.solve([&](const BasinSnapshot& snapshot) {
+        const auto& grid = snapshot.grid;
+        const auto cap_top = grid.cells[grid.columns[0][0]].maturity_top;
+        const auto cap_second = grid.cells[grid.columns[0][1]].maturity_top;
+        const auto rock_left = grid.cells[grid.columns[0][2]].maturity_top;
+        const auto rock_right = grid.cells[grid.columns[1][0]].maturity_top;
+        EXPECT_EQ(grid.cells[grid.columns[0][2]].layer_id, 1);
+        EXPECT_NE(snapshot.Ro[cap_second + 1], snapshot.Ro[rock_left]);
+        points = {{BasinObservable::reflectance, "contact", 750.0, 400.0,
+                   0.75 * snapshot.Ro[rock_left] + 0.25 * snapshot.Ro[rock_right], 1.0},
+                  {BasinObservable::reflectance, "cap", 750.0, 100.0,
+                   0.5 * (snapshot.Ro[cap_top] + snapshot.Ro[cap_top + 1]), 1.0}};
+    });
+    BasinHeatResidualEvaluator evaluator(std::move(forward),
+                                         BasinHeatObservationData(std::move(points)));
+    const auto residual = evaluator.evaluate(evaluator.parameter_space().to_normalized(flux));
+    EXPECT_NEAR(residual[0], 0.0, 1e-12);
+    EXPECT_NEAR(residual[1], 0.0, 1e-12);
     std::filesystem::remove_all(path);
 }
