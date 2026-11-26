@@ -2,6 +2,7 @@
 #include "basin/inverse/basin_heat_inverse_solver.hpp"
 #include "basin/io/basin_parameters.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -68,6 +69,28 @@ TEST(BasinHeatParameterSpace, InterpolatesAndPreservesMonotonicityAtArbitraryAge
     EXPECT_THROW(BasinHeatParameterSpace({20, 0}, {0.07, 0.08}), std::invalid_argument);
     EXPECT_THROW(BasinHeatParameterSpace({20, 0}, {0.101, 0.07}), std::invalid_argument);
     EXPECT_THROW(BasinHeatParameterSpace({20, 0}, {0.08, 0.049}), std::invalid_argument);
+}
+
+TEST(BasinHeatParameterSpace, FluxDerivativesMatchFiniteDifferencesInNormalizedParameters) {
+    const BasinHeatParameterSpace space({20, 16, 6, 0}, {0.09, 0.08, 0.07, 0.06});
+    const auto flux_at = [&](double age, const Vector& z) {
+        return BasinHeatParameterSpace(space.ages_ma(), space.to_physical(z)).at(age);
+    };
+    for (const Vector& z : {Vector{0.8, 0.7, 0.4, 0.3}, Vector{0.8, 0.0, 0.4, 1.0}}) {
+        for (double age : {20.0, 16.0, 10.0, 0.0}) {
+            Vector gradient;
+            EXPECT_DOUBLE_EQ(space.at(age, z, gradient), flux_at(age, z));
+            ASSERT_EQ(gradient.size(), z.size());
+            for (Vector::Index j = 0; j < z.size(); ++j) {
+                Vector lower = z, upper = z;
+                lower[j] = std::max(0.0, z[j] - 1e-5);
+                upper[j] = std::min(1.0, z[j] + 1e-5);
+                const double difference =
+                    (flux_at(age, upper) - flux_at(age, lower)) / (upper[j] - lower[j]);
+                EXPECT_NEAR(gradient[j], difference, 1e-10) << "age=" << age << ", j=" << j;
+            }
+        }
+    }
 }
 
 TEST(BasinHeatObservationData, UsesCelsiusErrorBoundsAndSeparateObservables) {
