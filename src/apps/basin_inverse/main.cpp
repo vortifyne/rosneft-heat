@@ -101,11 +101,15 @@ int main(int argc, char* argv[]) {
             std::cout << "Prepared input read; building epoch grids...\n" << std::flush;
             BasinForwardSolver forward(std::move(basin_input), settings);
             std::cout << "Epoch grids ready; starting inverse problem...\n" << std::flush;
-            request.initial_parameters =
-                Vector(static_cast<Vector::Index>(forward.configs().size()));
-            request.initial_parameters.set_constant(initial_flux * 1e-3);
-            if (!initial_path.empty())
-                request.initial_parameters = read_basin_parameters(initial_path, forward.configs());
+            if (initial_path.empty()) {
+                Vector initial(static_cast<Vector::Index>(forward.configs().size()));
+                initial.set_constant(initial_flux / 1000.0);
+                forward.set_parameters(initial);
+            } else {
+                forward.set_parameters(read_basin_parameters(initial_path));
+            }
+            request.initial_parameters = forward.parameter_space().values();
+            write_basin_parameters(output / "initial_parameters.csv", forward.parameter_space());
             BasinHeatInverseSolver solver(BasinHeatResidualEvaluator(
                 std::move(forward), BasinHeatObservationData::read(input / "observations.csv")));
             const auto points = solver.residual_evaluator().observations().points();
@@ -194,7 +198,6 @@ int main(int argc, char* argv[]) {
                       << "; Ro=" << reflectance_inside << '/' << reflectance_count << '\n';
             if (save_forward) {
                 std::cout << "Saving forward fields for recovered heat flux...\n" << std::flush;
-                final_forward.set_parameters(parameters);
                 final_forward.set_intermediate_snapshots(settings.intermediate_snapshots);
                 (void)final_forward.solve(output / "forward");
                 std::cout << "Recovered forward fields saved\n" << std::flush;
