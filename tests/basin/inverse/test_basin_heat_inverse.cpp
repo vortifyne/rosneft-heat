@@ -57,9 +57,9 @@ TEST(BasinHeatParameterSpace, InterpolatesAndPreservesMonotonicityAtArbitraryAge
     EXPECT_DOUBLE_EQ(space.at(0), 0.05);
     const Vector recovered = space.to_physical(space.to_normalized(flux));
     EXPECT_LT((recovered - flux).norm(), 1e-15);
-    Vector u(flux.size());
-    u.set_constant(0.9);
-    const auto physical = space.to_physical(u);
+    Vector eta(flux.size());
+    eta.set_constant(0.9);
+    const auto physical = space.to_physical(eta);
     for (Vector::Index i = 1; i < physical.size(); ++i) {
         EXPECT_LE(physical[i], physical[i - 1]);
         EXPECT_GE(physical[i], 0.05);
@@ -73,18 +73,19 @@ TEST(BasinHeatParameterSpace, InterpolatesAndPreservesMonotonicityAtArbitraryAge
 
 TEST(BasinHeatParameterSpace, FluxDerivativesMatchFiniteDifferencesInNormalizedParameters) {
     const BasinHeatParameterSpace space({20, 16, 6, 0}, {0.09, 0.08, 0.07, 0.06});
-    const auto flux_at = [&](double age, const Vector& z) {
-        return BasinHeatParameterSpace(space.ages_ma(), space.to_physical(z)).at(age);
+    const auto flux_at = [&](double age, const Vector& eta) {
+        return BasinHeatParameterSpace(space.ages_ma(), space.to_physical(eta)).at(age);
     };
-    for (const Vector& z : {Vector{0.8, 0.7, 0.4, 0.3}, Vector{0.8, 0.0, 0.4, 1.0}}) {
+    for (const Vector& eta :
+         {Vector{0.8, 0.7, 0.4, 0.3}, Vector{0.8, 0.0, 0.4, 1.0}, Vector{0.0, 0.7, 0.0, 0.3}}) {
         for (double age : {20.0, 16.0, 10.0, 0.0}) {
             Vector gradient;
-            EXPECT_DOUBLE_EQ(space.at(age, z, gradient), flux_at(age, z));
-            ASSERT_EQ(gradient.size(), z.size());
-            for (Vector::Index j = 0; j < z.size(); ++j) {
-                Vector lower = z, upper = z;
-                lower[j] = std::max(0.0, z[j] - 1e-5);
-                upper[j] = std::min(1.0, z[j] + 1e-5);
+            EXPECT_DOUBLE_EQ(space.at(age, eta, gradient), flux_at(age, eta));
+            ASSERT_EQ(gradient.size(), eta.size());
+            for (Vector::Index j = 0; j < eta.size(); ++j) {
+                Vector lower = eta, upper = eta;
+                lower[j] = std::max(0.0, eta[j] - 1e-5);
+                upper[j] = std::min(1.0, eta[j] + 1e-5);
                 const double difference =
                     (flux_at(age, upper) - flux_at(age, lower)) / (upper[j] - lower[j]);
                 EXPECT_NEAR(gradient[j], difference, 1e-10) << "age=" << age << ", j=" << j;

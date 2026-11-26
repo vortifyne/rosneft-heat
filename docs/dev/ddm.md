@@ -8,18 +8,18 @@
 4. `basin/discretization` — чувствительности температуры на гранях. `basin/physics/easy_ro` — накопление производных интегралов реакций. `basin/mesh` — перенос чувствительностей при смене сетки.
 5. `tests/basin` — сверка направленной производной скважинных невязок с конечной разностью при постоянных теплофизических коэффициентах.
 
-## Гаусс–Ньютон · один прямой расчёт в точке z
+## Гаусс–Ньютон · один прямой расчёт в точке $\eta$
 
-Строки плотного якобиана соответствуют наблюдениям температуры и $R_o$ в порядке входных данных, столбцы — нормированным параметрам $z$.
+Строки плотного якобиана соответствуют наблюдениям температуры и $R_o$ в порядке входных данных, столбцы — нормированным параметрам $\eta$.
 
 $$
-r=d^{\rm calc}-d^{\rm obs},\qquad J\simeq\partial_z d^{\rm calc},\qquad
+r=d^{\rm calc}-d^{\rm obs},\qquad J\simeq\partial_{\eta} d^{\rm calc},\qquad
 W=\operatorname{diag}(1/\sigma_k),\qquad r_w=Wr,\quad J_w=WJ.
 $$
 
 $$
 \Phi=\tfrac12 r_w^\top r_w,\qquad g=J_w^\top r_w,\qquad H=J_w^\top J_w,
-\qquad H p=-g,\quad z^+=\operatorname{clip}(z+p,0,1).
+\qquad H p=-g,\quad \eta^+=\operatorname{clip}(\eta+p,0,1).
 $$
 
 В отчёте обоих оптимизаторов сохраняется $\Phi$.
@@ -29,7 +29,7 @@ $$
 Сначала температура до сходимости, затем по одной правой части на параметр. Звёздочка — последняя сборка Пикара.
 
 $$
-S_j\simeq\partial_{z_j}T,\qquad b_j(t)=\partial_{z_j}q(t),\qquad
+S_j\simeq\partial_{\eta_j}T,\qquad b_j(t)=\partial_{\eta_j}q(t),\qquad
 e=-\left.\partial_q R_{\rm heat}\right|_{T\ \text{фикс.}}
 \quad\text{(базальный приток и граничные слагаемые в реконструкции потоков)} .
 $$
@@ -48,7 +48,7 @@ $$
 
 $$
 \beta_\ell=E_\ell/R_g,\quad k_\ell(T)=A e^{-\beta_\ell/T},\quad
-a=\min(t_n,\max(t_{n-1},t_{\rm dep})),\quad s_j\simeq\partial_{z_j}T_\sigma .
+a=\min(t_n,\max(t_{n-1},t_{\rm dep})),\quad s_j\simeq\partial_{\eta_j}T_\sigma .
 $$
 
 Температура грани и её чувствительность линейны по времени внутри шага.
@@ -62,7 +62,7 @@ $$
 
 $$
 R_o=\exp\!\left[-1.6+3.7\sum_\ell f_\ell(1-e^{-I_\ell})\right],\qquad
-U_j=3.7R_o\sum_\ell f_\ell e^{-I_\ell}Z_{\ell j}\simeq\partial_{z_j}R_o .
+U_j=3.7R_o\sum_\ell f_\ell e^{-I_\ell}Z_{\ell j}\simeq\partial_{\eta_j}R_o .
 $$
 
 ## Смена сетки и финальные наблюдения
@@ -85,14 +85,16 @@ $$
 ## Параметризация потока и реконструкция на грани
 
 $$
-q(t)=\sum_{i=1}^m\psi_i(t)q_i,\quad b_j(t)=\sum_i\psi_i(t)Q_{ij}
+q(t)=\sum_{i=0}^{m-1}\psi_i(t)q_i,\quad b_j(t)=\sum_i\psi_i(t)Q_{ij}
 \qquad(\psi_i\text{ — кусочно-линейный узловой базис}).
 $$
 
 $$
-q_0=q_{\max},\quad Q_{0j}=0,\qquad
-q_i=q_{\min}+z_i(q_{i-1}-q_{\min}),\quad
-Q_{ij}=\delta_{ij}(q_{i-1}-q_{\min})+z_i Q_{i-1,j}.
+q_i=q_{\min}+(q_{\max}-q_{\min})\prod_{k=0}^{i}\eta_k,\qquad
+Q_{ij}=\begin{cases}
+(q_{\max}-q_{\min})\displaystyle\prod_{0\le k\le i,\ k\ne j}\eta_k, & j\le i,\\
+0, & j>i.
+\end{cases}
 $$
 
 $$

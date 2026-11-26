@@ -16,15 +16,15 @@ Vector BasinHeatInverseSolver::solve(const BasinHeatInverseSolveRequest& request
         .upper_bounds = space.normalized_upper_bounds(),
         .residual_count = objective_.observations().size(),
         .objective =
-            [&](const Vector& normalized, double tolerance, Eigen::MatrixXd* jacobian) {
-                return objective_.evaluate(normalized, tolerance, jacobian);
+            [&](const Vector& eta, double tolerance, Eigen::MatrixXd* jacobian) {
+                return objective_.evaluate(eta, tolerance, jacobian);
             },
     };
     const Vector initial = space.to_normalized(request.initial_parameters);
-    const auto report = [&](int iteration, int evaluation, const Vector& normalized,
+    const auto report = [&](int iteration, int evaluation, const Vector& eta,
                             const Vector& residuals) {
         if (observe)
-            observe(iteration, evaluation, space.to_physical(normalized), residuals);
+            observe(iteration, evaluation, space.to_physical(eta), residuals);
     };
     if (request.method == BasinInverseMethod::gauss_newton)
         result_ = GaussNewtonOptimizer{}.solve(problem, initial, request.optimization, report);

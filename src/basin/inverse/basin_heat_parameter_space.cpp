@@ -20,6 +20,23 @@ void validate_flux(const Vector& flux, std::size_t count) {
     }
 }
 
+Vector prefix_products(const Vector& eta, Vector::Index count) {
+    if (eta.size() != count || !eta.all_finite() || (eta.native().array() < 0.0).any() ||
+        (eta.native().array() > 1.0).any())
+        throw std::invalid_argument("Normalized basal flux parameters must lie in [0, 1]");
+    Vector prefix(count);
+    double product = 1.0;
+    for (Vector::Index i = 0; i < count; ++i) {
+        product *= eta[i];
+        prefix[i] = product;
+    }
+    return prefix;
+}
+
+double knot_flux(double product) {
+    return kMinimumFlux + (kMaximumFlux - kMinimumFlux) * product;
+}
+
 std::pair<Vector::Index, double> flux_interval(const std::vector<double>& ages, double age) {
     if (!(age >= ages.back() && age <= ages.front()))
         throw std::out_of_range("Age outside the basal flux history");
@@ -50,47 +67,41 @@ double BasinHeatParameterSpace::at(double age_ma) const {
     return std::lerp(flux_[i], flux_[i + 1], theta);
 }
 
-double BasinHeatParameterSpace::at(double age_ma, const Vector& normalized, Vector& dq_dz) const {
+double BasinHeatParameterSpace::at(double age_ma, const Vector& eta, Vector& dq_deta) const {
     const auto [i, theta] = flux_interval(ages_ma_, age_ma);
-    const Vector flux = to_physical(normalized);
-    Vector gradient(flux.size());
+    const Vector prefix = prefix_products(eta, flux_.size());
+    Vector gradient(eta.size());
     gradient.set_zero();
-    gradient[i + 1] = theta * (flux[i] - kMinimumFlux);
-    // q(t) depends on q_i both directly and through q_{i+1}.
-    double dq_dnode = std::lerp(1.0, normalized[i + 1], theta);
+    constexpr double range = kMaximumFlux - kMinimumFlux;
+    gradient[i + 1] = range * theta * prefix[i];
+    // Exclude eta[j] by multiplying the factors on either side, including at eta[j] = 0.
+    double suffix = std::lerp(1.0, eta[i + 1], theta);
     for (auto j = i; j >= 0; --j) {
-        const double previous_flux = j == 0 ? kMaximumFlux : flux[j - 1];
-        gradient[j] = dq_dnode * (previous_flux - kMinimumFlux);
-        dq_dnode *= normalized[j];
+        gradient[j] = range * (j == 0 ? 1.0 : prefix[j - 1]) * suffix;
+        suffix *= eta[j];
     }
-    dq_dz = std::move(gradient);
-    return std::lerp(flux[i], flux[i + 1], theta);
+    dq_deta = std::move(gradient);
+    return std::lerp(knot_flux(prefix[i]), knot_flux(prefix[i + 1]), theta);
 }
 
 Vector BasinHeatParameterSpace::to_normalized(const Vector& parameters) const {
     validate_flux(parameters, ages_ma_.size());
-    Vector normalized(flux_.size());
+    Vector eta(flux_.size());
     double previous = kMaximumFlux;
     for (Vector::Index i = 0; i < flux_.size(); ++i) {
-        normalized[i] = previous == kMinimumFlux
-                            ? 1.0
-                            : (parameters[i] - kMinimumFlux) / (previous - kMinimumFlux);
+        eta[i] = previous == kMinimumFlux
+                     ? 1.0
+                     : (parameters[i] - kMinimumFlux) / (previous - kMinimumFlux);
         previous = parameters[i];
     }
-    return normalized;
+    return eta;
 }
 
-Vector BasinHeatParameterSpace::to_physical(const Vector& normalized) const {
-    if (normalized.size() != flux_.size() || !normalized.all_finite() ||
-        (normalized.native().array() < 0.0).any() || (normalized.native().array() > 1.0).any())
-        throw std::invalid_argument("Normalized basal flux parameters must lie in [0, 1]");
-    Vector parameters(flux_.size());
-    double previous = kMaximumFlux;
-    for (Vector::Index i = 0; i < flux_.size(); ++i) {
-        parameters[i] = std::lerp(kMinimumFlux, previous, normalized[i]);
-        previous = parameters[i];
-    }
-    return parameters;
+Vector BasinHeatParameterSpace::to_physical(const Vector& eta) const {
+    Vector flux = prefix_products(eta, flux_.size());
+    for (Vector::Index i = 0; i < flux.size(); ++i)
+        flux[i] = knot_flux(flux[i]);
+    return flux;
 }
 
 Vector BasinHeatParameterSpace::normalized_lower_bounds() const {

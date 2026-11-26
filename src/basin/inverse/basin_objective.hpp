@@ -12,7 +12,7 @@ public:
     [[nodiscard]] const BasinHeatObservationData& observations() const noexcept;
     [[nodiscard]] BasinForwardSolver& forward_solver() noexcept;
     [[nodiscard]] Vector residuals_in_error_units(Vector weighted) const;
-    [[nodiscard]] LeastSquaresEvaluation evaluate(const Vector& normalized, double tolerance,
+    [[nodiscard]] LeastSquaresEvaluation evaluate(const Vector& eta, double tolerance,
                                                   Eigen::MatrixXd* jacobian = nullptr);
 
 private:
