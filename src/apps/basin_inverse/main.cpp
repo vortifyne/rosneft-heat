@@ -18,6 +18,8 @@
 
 namespace {
 
+constexpr double default_initial_flux = 75.0;
+
 const char* termination(LeastSquaresStatus status) {
     switch (status) {
     case LeastSquaresStatus::within_errors:
