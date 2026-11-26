@@ -22,9 +22,11 @@ class PetscSession {
 public:
     PetscSession(int& argc, char**& argv, double& seconds) : seconds_(seconds) {
         const auto start = Clock::now();
+        std::cout << "Initializing PETSc/MPI...\n" << std::flush;
         if (PetscInitialize(&argc, &argv, nullptr, nullptr) != PETSC_SUCCESS) {
             throw std::runtime_error("Cannot initialize PETSc");
         }
+        std::cout << "PETSc/MPI initialized\n" << std::flush;
         seconds_ += elapsed_seconds(start);
     }
     ~PetscSession() {
@@ -47,6 +49,11 @@ std::string_view value(int argc, const char* const argv[], int& index) {
 
 int main(int argc, char* argv[]) {
     const auto program_start = Clock::now();
+    // Read the same settings object used by the solver, without starting PETSc.
+    if (argc == 2 && std::string_view(argv[1]) == "--print-defaults") {
+        write_basin_forward_settings(std::cout, BasinForwardSettings{});
+        return EXIT_SUCCESS;
+    }
     if (argc < 3) {
         std::cerr << "Usage: basin_forward_solver <input-dir> <output-dir> "
                      "[--dx m] [--dz m] [--dt-ma Ma] [--nonlinear-rtol tolerance] "
@@ -84,10 +91,13 @@ int main(int argc, char* argv[]) {
             char** petsc_argv = petsc_arguments.data();
             PetscSession petsc(petsc_argc, petsc_argv, initialization_s);
             const auto input_start = Clock::now();
+            std::cout << "Reading prepared input data...\n" << std::flush;
             auto input = BasinInput::read(argv[1]);
             input_s = elapsed_seconds(input_start);
             const auto configs = input.configs();
+            std::cout << "Prepared input read; building epoch grids...\n" << std::flush;
             BasinForwardSolver solver(std::move(input), settings);
+            std::cout << "Epoch grids ready; solving forward problem...\n" << std::flush;
             if (!parameters_path.empty())
                 solver.set_parameters(read_basin_parameters(parameters_path));
             result = solver.solve(output_directory, [configs](const BasinSnapshot& snapshot) {

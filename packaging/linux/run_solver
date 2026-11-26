@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+app_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export OMPI_MCA_ess_singleton_isolated=1
+export HWLOC_PLUGINS_PATH="$app_dir/usr/lib/hwloc"
+export HWLOC_COMPONENTS=linux,stop
+export LD_LIBRARY_PATH="$app_dir/usr/lib"
+exec "$app_dir/usr/lib/ld-linux-x86-64.so.2" --inhibit-cache \
+    --library-path "$app_dir/usr/lib" "$app_dir/usr/bin/basin_forward_solver" "$@"
