@@ -272,6 +272,39 @@ void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
     interpolate_horizontal_temperature(final_grid_, T, lambda, boundaries, node_T);
 }
 
+Vector BasinForwardSolver::solve_at_wells(std::span<const BasinWellSample> samples,
+                                          Eigen::MatrixXd* jacobian) const {
+    if (jacobian)
+        throw std::logic_error(
+            "Gauss-Newton requires the basin observation Jacobian; DDM is not implemented yet");
+    Vector calculated(static_cast<Vector::Index>(samples.size()));
+    (void)solve([&](const BasinSnapshot& snapshot) {
+        if (snapshot.epoch + 1 != configs().size())
+            return;
+        std::vector<double> node_T(final_grid_.cells.size() + final_grid_.columns.size());
+        final_temperature_nodes(snapshot.T, node_T);
+        for (std::size_t i = 0; i < samples.size(); ++i) {
+            const auto& sample = samples[i];
+            double value = sample.constant;
+            for (std::size_t j = 0; j < sample.indices.size(); ++j) {
+                const auto source = sample.indices[j];
+                double field;
+                if (sample.kind == BasinObservable::reflectance) {
+                    if (source >= snapshot.Ro.size())
+                        throw std::out_of_range("Invalid well reflectance index");
+                    field = snapshot.Ro[source];
+                } else {
+                    field = source < snapshot.T.size() ? snapshot.T[source]
+                                                       : node_T.at(source - snapshot.T.size());
+                }
+                value += sample.weights[j] * field;
+            }
+            calculated[static_cast<Vector::Index>(i)] = value;
+        }
+    });
+    return calculated;
+}
+
 BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const {
     return solve(observe, false);
 }

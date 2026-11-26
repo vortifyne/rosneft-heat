@@ -5,11 +5,11 @@
 
 struct ModelHeatInverseSolveRequest {
     ModelHeatParameters initial_parameters;
-    PoundersSolveRequest optimization;
+    LeastSquaresSolveRequest optimization;
 };
 
 struct [[nodiscard]] ModelHeatInverseResult {
-    PoundersStatus status;
+    LeastSquaresStatus status;
 
     ModelHeatParameters parameters;
     Vector normalized_parameters;
@@ -24,7 +24,7 @@ struct [[nodiscard]] ModelHeatInverseResult {
     double forward_elapsed_time_seconds;
 
     [[nodiscard]] constexpr bool converged() const noexcept {
-        return is_pounders_converged(status);
+        return is_least_squares_converged(status);
     }
 };
 

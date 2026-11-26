@@ -34,7 +34,7 @@ TEST(ModelHeatInverseSolverTest, ConnectsModelEvaluatorToPoundersAndReturnsConsi
     EXPECT_NEAR(result.parameters.basal_heat_flux, hidden_parameters.basal_heat_flux, 1e-5);
     expect_vector_near(result.calculated_temperatures, observed_temperatures);
     expect_vector_near(result.normalized_residuals, Vector{0.0, 0.0, 0.0});
-    EXPECT_NEAR(result.objective, result.normalized_residuals.squared_norm(), 1e-14);
+    EXPECT_NEAR(result.objective, 0.5 * result.normalized_residuals.squared_norm(), 1e-14);
     EXPECT_EQ(result.forward_evaluations, result.optimization_function_evaluations + 1);
     EXPECT_GE(result.optimization_iterations, 0);
     EXPECT_GE(result.optimization_function_evaluations, 1);
@@ -49,7 +49,7 @@ TEST(ModelHeatInverseSolverTest, ReturnsBestPointAfterFunctionEvaluationLimit) {
     };
     ModelHeatInverseSolver solver =
         make_inverse_solver(make_synthetic_observations(hidden_parameters));
-    PoundersSolveRequest limited_request = kOptimizationRequest;
+    LeastSquaresSolveRequest limited_request = kOptimizationRequest;
     limited_request.maxfev = 3;
 
     const ModelHeatInverseResult result = solver.solve({
@@ -57,13 +57,13 @@ TEST(ModelHeatInverseSolverTest, ReturnsBestPointAfterFunctionEvaluationLimit) {
         .optimization = limited_request,
     });
 
-    EXPECT_EQ(result.status, PoundersStatus::maxfev);
+    EXPECT_EQ(result.status, LeastSquaresStatus::limit_reached);
     EXPECT_FALSE(result.converged());
     EXPECT_GE(result.optimization_function_evaluations, 3);
     EXPECT_EQ(result.forward_evaluations, result.optimization_function_evaluations + 1);
     EXPECT_TRUE(result.normalized_parameters.all_finite());
     EXPECT_TRUE(result.normalized_residuals.all_finite());
-    EXPECT_NEAR(result.objective, result.normalized_residuals.squared_norm(), 1e-14);
+    EXPECT_NEAR(result.objective, 0.5 * result.normalized_residuals.squared_norm(), 1e-14);
 }
 
 TEST(ModelHeatInverseSolverTest, ValidatesPhysicalInitialParameters) {

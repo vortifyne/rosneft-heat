@@ -49,7 +49,11 @@ target_link_libraries(heat_numerics
   PRIVATE SuiteSparse::UMFPACK_static PkgConfig::PETSc MPI::MPI_CXX
 )
 
-add_library(heat_opt STATIC EXCLUDE_FROM_ALL src/numerics/optimization/pounders_optimizer.cpp)
+add_library(heat_opt STATIC EXCLUDE_FROM_ALL
+  src/numerics/optimization/bounded_least_squares_problem.cpp
+  src/numerics/optimization/gauss_newton_optimizer.cpp
+  src/numerics/optimization/pounders_optimizer.cpp
+)
 heat_configure_target(heat_opt)
 target_link_libraries(heat_opt PUBLIC Eigen3::Eigen PRIVATE PkgConfig::PETSc MPI::MPI_CXX)
 
@@ -88,7 +92,7 @@ target_link_libraries(basin_heat_forward PUBLIC heat_numerics basin_data)
 
 add_library(basin_heat_inverse STATIC
   src/basin/inverse/basin_heat_observation_data.cpp
-  src/basin/inverse/basin_heat_residual_evaluator.cpp
+  src/basin/inverse/basin_objective.cpp
   src/basin/inverse/basin_heat_inverse_solver.cpp
 )
 heat_configure_target(basin_heat_inverse)

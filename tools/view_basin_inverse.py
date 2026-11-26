@@ -70,7 +70,7 @@ def plot_progress(data: pd.DataFrame):
                      color="0.65", label="Evaluated objective")
     axes[0].semilogy(data.evaluation, np.minimum.accumulate(data.objective),
                      ".-", markersize=3, color="tab:blue", label="Minimum evaluated")
-    axes[0].set_ylabel("Sum of squared residuals")
+    axes[0].set_ylabel("Objective")
     axes[0].legend()
     axes[1].plot(data.evaluation, data.max_normalized_residual, ".-", markersize=3, color="tab:blue")
     axes[1].axhline(1.0, color="tab:green", linestyle="--", label="Within measurement errors")

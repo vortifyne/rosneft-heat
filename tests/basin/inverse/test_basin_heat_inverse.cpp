@@ -76,10 +76,13 @@ TEST(BasinHeatObservationData, UsesCelsiusErrorBoundsAndSeparateObservables) {
                                           "temperature,A,500,1000,20,0.4,0.4\n"
                                           "reflectance,A,500,1000,0.5,0.01\n");
     const auto data = BasinHeatObservationData::read(path / "observations.csv");
-    const auto residuals = data.normalized_residuals(Vector{293.55, 0.49});
     ASSERT_EQ(data.size(), 2);
-    EXPECT_NEAR(residuals[0], 1.0, 1e-12);
-    EXPECT_NEAR(residuals[1], -1.0, 1e-12);
+    EXPECT_EQ(data.points()[0].kind, BasinObservable::temperature);
+    EXPECT_DOUBLE_EQ(data.points()[0].value, 293.15);
+    EXPECT_DOUBLE_EQ(data.points()[0].error, 0.4);
+    EXPECT_EQ(data.points()[1].kind, BasinObservable::reflectance);
+    EXPECT_DOUBLE_EQ(data.points()[1].value, 0.5);
+    EXPECT_DOUBLE_EQ(data.points()[1].error, 0.01);
     std::filesystem::remove_all(path);
 }
 
@@ -190,8 +193,8 @@ TEST(BasinHeatInverseSolver, RecoversKnownFluxHistoryFromSyntheticTemperatureAnd
                               .error = 0.02 * Ro});
         }
     });
-    BasinHeatInverseSolver inverse(BasinHeatResidualEvaluator(
-        std::move(forward), BasinHeatObservationData(std::move(points))));
+    BasinHeatInverseSolver inverse(
+        BasinObjective(std::move(forward), BasinHeatObservationData(std::move(points))));
     BasinHeatInverseSolveRequest request{.initial_parameters = Vector{0.075, 0.075}};
     request.optimization = {
         .gatol = 1e-10, .grtol = 1e-10, .gttol = 1e-10, .maxiter = 100, .maxfev = 400};
@@ -202,7 +205,7 @@ TEST(BasinHeatInverseSolver, RecoversKnownFluxHistoryFromSyntheticTemperatureAnd
             EXPECT_GE(iteration, last_iteration);
             last_iteration = iteration;
             EXPECT_EQ(evaluation, ++evaluations);
-            EXPECT_EQ(r.size(), inverse.residual_evaluator().observations().size());
+            EXPECT_EQ(r.size(), inverse.objective().observations().size());
         });
     const auto& result = inverse.optimization_result();
     EXPECT_LT((found - known).infinity_norm(), 5e-4);
@@ -216,7 +219,7 @@ TEST(BasinHeatInverseSolver, RecoversKnownFluxHistoryFromSyntheticTemperatureAnd
     std::filesystem::remove_all(path);
 }
 
-TEST(BasinHeatResidualEvaluator, SamplesTheDeeperSideOfAContactAndStaysWithinPinchingLayers) {
+TEST(BasinObjective, SamplesTheDeeperSideOfAContactAndStaysWithinPinchingLayers) {
     const auto path = small_problem();
     write_file(
         path / "layers.csv",
@@ -253,9 +256,10 @@ TEST(BasinHeatResidualEvaluator, SamplesTheDeeperSideOfAContactAndStaysWithinPin
                   {BasinObservable::reflectance, "cap", 750.0, 100.0,
                    0.5 * (snapshot.Ro[cap_top] + snapshot.Ro[cap_top + 1]), 1.0}};
     });
-    BasinHeatResidualEvaluator evaluator(std::move(forward),
-                                         BasinHeatObservationData(std::move(points)));
-    const auto residual = evaluator.evaluate(evaluator.parameter_space().to_normalized(flux));
+    BasinObjective objective(std::move(forward), BasinHeatObservationData(std::move(points)));
+    const auto [residual, within_errors] =
+        objective.evaluate(objective.parameter_space().to_normalized(flux), 1.0);
+    EXPECT_TRUE(within_errors);
     EXPECT_NEAR(residual[0], 0.0, 1e-12);
     EXPECT_NEAR(residual[1], 0.0, 1e-12);
     std::filesystem::remove_all(path);

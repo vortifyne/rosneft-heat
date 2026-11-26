@@ -2,6 +2,7 @@
 
 #include "basin/forward/basin_forward_settings.hpp"
 #include "basin/forward/basin_statistics.hpp"
+#include "basin/forward/basin_well_sample.hpp"
 #include "basin/inverse/basin_heat_parameter_space.hpp"
 #include "basin/io/basin_input.hpp"
 #include "basin/mesh/col_epoch_grid.hpp"
@@ -40,6 +41,9 @@ public:
     void final_temperature_nodes(std::span<const double> T, std::span<double> node_T) const;
 
     [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe = {}) const;
+    // Optional Jacobian of the sampled T and Ro with respect to normalized flux parameters.
+    [[nodiscard]] Vector solve_at_wells(std::span<const BasinWellSample> samples,
+                                        Eigen::MatrixXd* jacobian = nullptr) const;
     [[nodiscard]] BasinForwardResult solve(const std::filesystem::path& output_directory,
                                            const BasinObserver& observe = {}) const;
 

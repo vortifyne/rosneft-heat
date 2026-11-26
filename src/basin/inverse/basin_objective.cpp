@@ -1,6 +1,5 @@
-#include "basin/inverse/basin_heat_residual_evaluator.hpp"
+#include "basin/inverse/basin_objective.hpp"
 
-#include "basin/basin_snapshot.hpp"
 #include "basin/geometry/basin_geometry.hpp"
 #include "basin/mesh/col_field_transfer.hpp"
 
@@ -29,10 +28,13 @@ double fraction(double value, double first, double second) {
     return first == second ? 0.0 : (value - first) / (second - first);
 }
 
+double residual_scale(const BasinObservation& point) {
+    return point.error; // The current least-squares weight is 1 / measurement error.
+}
+
 } // namespace
 
-BasinHeatResidualEvaluator::BasinHeatResidualEvaluator(BasinForwardSolver forward,
-                                                       BasinHeatObservationData observations)
+BasinObjective::BasinObjective(BasinForwardSolver forward, BasinHeatObservationData observations)
     : forward_(std::move(forward)), observations_(std::move(observations)) {
     forward_.set_intermediate_snapshots(false);
     const auto& grid = forward_.final_grid();
@@ -97,13 +99,16 @@ BasinHeatResidualEvaluator::BasinHeatResidualEvaluator(BasinForwardSolver forwar
             const auto [r0, wr] = sample(right);
             const double wx = std::clamp(fraction(point.x, x(left), x(right)), 0.0, 1.0);
             interpolation_.push_back(
-                {.indices = {l0, l0 + 1, r0, r0 + 1},
+                {.kind = point.kind,
+                 .indices = {l0, l0 + 1, r0, r0 + 1},
                  .weights = {(1.0 - wx) * (1.0 - wl), (1.0 - wx) * wl, wx * (1.0 - wr), wx * wr}});
             continue;
         }
         if (point.z <= geometry.boundary_at(0, point.x)) {
-            interpolation_.push_back(
-                {.indices = {}, .weights = {}, .constant = cfg.T_surf.at(point.x)});
+            interpolation_.push_back({.kind = point.kind,
+                                      .indices = {},
+                                      .weights = {},
+                                      .constant = cfg.T_surf.at(point.x)});
             continue;
         }
         const auto [left, right] = neighboring(columns, point.x, x);
@@ -116,52 +121,51 @@ BasinHeatResidualEvaluator::BasinHeatResidualEvaluator(BasinForwardSolver forwar
         const double wl = fraction(point.z, z(l0), z(l1));
         const double wr = fraction(point.z, z(r0), z(r1));
         interpolation_.push_back(
-            {.indices = {l0, l1, r0, r1},
+            {.kind = point.kind,
+             .indices = {l0, l1, r0, r1},
              .weights = {(1.0 - wx) * (1.0 - wl), (1.0 - wx) * wl, wx * (1.0 - wr), wx * wr}});
     }
 }
 
-const BasinHeatParameterSpace& BasinHeatResidualEvaluator::parameter_space() const noexcept {
+const BasinHeatParameterSpace& BasinObjective::parameter_space() const noexcept {
     return forward_.parameter_space();
 }
 
-const BasinHeatObservationData& BasinHeatResidualEvaluator::observations() const noexcept {
+const BasinHeatObservationData& BasinObjective::observations() const noexcept {
     return observations_;
 }
 
-BasinForwardSolver& BasinHeatResidualEvaluator::forward_solver() noexcept {
+BasinForwardSolver& BasinObjective::forward_solver() noexcept {
     return forward_;
 }
 
-Vector BasinHeatResidualEvaluator::evaluate(const Vector& normalized) {
+Vector BasinObjective::residuals_in_error_units(Vector weighted) const {
+    if (weighted.size() != observations_.size())
+        throw std::invalid_argument("Expected one residual per observation");
+    for (Vector::Index i = 0; i < weighted.size(); ++i) {
+        const auto& point = observations_.points()[static_cast<std::size_t>(i)];
+        weighted[i] *= residual_scale(point) / point.error;
+    }
+    return weighted;
+}
+
+LeastSquaresEvaluation BasinObjective::evaluate(const Vector& normalized, double tolerance,
+                                                Eigen::MatrixXd* jacobian) {
     forward_.set_parameters(parameter_space().to_physical(normalized));
-    Vector calculated(observations_.size());
-    std::vector<double> node_T(forward_.final_grid().cells.size() +
-                               forward_.final_grid().columns.size());
-    (void)forward_.solve([&](const BasinSnapshot& snapshot) {
-        if (snapshot.epoch + 1 != forward_.configs().size())
-            return;
-        forward_.final_temperature_nodes(snapshot.T, node_T);
-        for (Vector::Index i = 0; i < calculated.size(); ++i) {
-            const auto index = static_cast<std::size_t>(i);
-            const bool temperature =
-                observations_.points()[index].kind == BasinObservable::temperature;
-            const auto& interpolation = interpolation_[index];
-            double value = interpolation.constant;
-            if (temperature) {
-                for (std::size_t j = 0; j < interpolation.indices.size(); ++j) {
-                    const auto source = interpolation.indices[j];
-                    const double T = source < snapshot.T.size()
-                                         ? snapshot.T[source]
-                                         : node_T[source - snapshot.T.size()];
-                    value += interpolation.weights[j] * T;
-                }
-            } else {
-                for (std::size_t j = 0; j < interpolation.indices.size(); ++j)
-                    value += interpolation.weights[j] * snapshot.Ro[interpolation.indices[j]];
-            }
-            calculated[i] = value;
-        }
-    });
-    return observations_.normalized_residuals(calculated);
+    Vector residuals = forward_.solve_at_wells(interpolation_, jacobian);
+    if (residuals.size() != observations_.size() ||
+        (jacobian &&
+         (jacobian->rows() != residuals.size() || jacobian->cols() != normalized.size())))
+        throw std::runtime_error("Unexpected basin observation or Jacobian dimensions");
+    bool within_errors = tolerance > 0.0;
+    for (Vector::Index i = 0; i < residuals.size(); ++i) {
+        const auto& point = observations_.points()[static_cast<std::size_t>(i)];
+        const double residual = residuals[i] - point.value;
+        within_errors = within_errors && std::abs(residual) <= tolerance * point.error;
+        const double scale = residual_scale(point);
+        residuals[i] = residual / scale;
+        if (jacobian)
+            jacobian->row(i) /= scale;
+    }
+    return {std::move(residuals), within_errors};
 }

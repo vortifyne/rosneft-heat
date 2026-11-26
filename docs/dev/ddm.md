@@ -2,7 +2,7 @@
 
 ## План реализации
 
-1. `numerics/optimization` — шаг Гаусса–Ньютона с ограничениями. `basin/inverse` — один прямой расчёт, интерполяция в скважины, невязка, якобиан, градиент и оценка гессиана.
+1. `numerics/optimization` — шаг Гаусса–Ньютона с проекцией на границы, градиент и оценка гессиана. `basin/inverse` — один прямой расчёт, интерполяция в скважины, взвешивание невязки и якобиана.
 2. `BasinHeatParameterSpace` — базальный поток и его производные по нормированным параметрам в заданный момент.
 3. `basin/forward` — стационарный старт и чувствительности после каждого принятого шага. `basin/discretization` — правые части DDM. `numerics` — решение с последней матрицей Пикара для всех правых частей, при сходимости за ноль итераций — одна сборка.
 4. `basin/discretization` — чувствительности температуры на гранях. `basin/physics/easy_ro` — накопление производных интегралов реакций. `basin/mesh` — перенос чувствительностей при смене сетки.
@@ -10,16 +10,19 @@
 
 ## Гаусс–Ньютон · один прямой расчёт в точке z
 
+Строки плотного якобиана соответствуют наблюдениям температуры и $R_o$ в порядке входных данных, столбцы — нормированным параметрам $z$.
+
 $$
-z \longmapsto (r,\widetilde J) \longmapsto
-\left(\Phi=\tfrac12 r^\top r,\quad g=\widetilde J^\top r,\quad H=\widetilde J^\top\widetilde J\right),
-\qquad \widetilde J\simeq \partial_z r .
+r=d^{\rm calc}-d^{\rm obs},\qquad J\simeq\partial_z d^{\rm calc},\qquad
+W=\operatorname{diag}(1/\sigma_k),\qquad r_w=Wr,\quad J_w=WJ.
 $$
 
 $$
-p=\arg\min_{0\le z+p\le1}\left(g^\top p+\tfrac12 p^\top H p\right),
-\qquad z^+=z+p .
+\Phi=\tfrac12 r_w^\top r_w,\qquad g=J_w^\top r_w,\qquad H=J_w^\top J_w,
+\qquad H p=-g,\quad z^+=\operatorname{clip}(z+p,0,1).
 $$
+
+В отчёте обоих оптимизаторов сохраняется $\Phi$.
 
 ## Прямой расчёт · один принятый шаг BDF1
 
@@ -70,8 +73,8 @@ S_j^+=P_T S_j^-,\qquad Z_{\ell j}^+=P_I Z_{\ell j}^-,
 $$
 
 $$
-r_k=\frac{d_k^{\rm calc}-d_k^{\rm obs}}{\sigma_k},\qquad
-\widetilde J_{kj}=\frac{1}{\sigma_k}
+r_k=d_k^{\rm calc}-d_k^{\rm obs},\qquad
+J_{kj}=
 \begin{cases}
 B_k^T[S_{j};s_j]_{t_f}, & T,\\
 B_k^R U_j(t_f), & R_o .

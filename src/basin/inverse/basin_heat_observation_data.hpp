@@ -1,16 +1,12 @@
 #pragma once
 
+#include "basin/forward/basin_well_sample.hpp"
 #include "numerics/algebra/vector.hpp"
 
 #include <filesystem>
 #include <span>
 #include <string>
 #include <vector>
-
-enum class BasinObservable {
-    temperature,
-    reflectance
-};
 
 struct BasinObservation {
     BasinObservable kind;
@@ -28,7 +24,6 @@ public:
 
     [[nodiscard]] Vector::Index size() const noexcept;
     [[nodiscard]] std::span<const BasinObservation> points() const noexcept;
-    [[nodiscard]] Vector normalized_residuals(const Vector& calculated) const;
 
 private:
     std::vector<BasinObservation> points_;
