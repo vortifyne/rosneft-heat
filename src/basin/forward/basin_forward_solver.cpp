@@ -248,7 +248,10 @@ BasinForwardSolver::EpochData::materials(const BasinInput& input) const {
 
 void BasinForwardSolver::advance_temperature_step(std::size_t index, double age_begin_ma,
                                                   double age_end_ma, const Vector& eta, Vector& T,
-                                                  Eigen::MatrixXd* jacobian) const {
+                                                  Eigen::MatrixXd* jacobian,
+                                                  Eigen::MatrixXd* face_jacobian) const {
+    if (face_jacobian && (!jacobian || jacobian == face_jacobian))
+        throw std::invalid_argument("Face sensitivities require a separate cell Jacobian");
     const auto& epoch = epochs_.at(index);
     const auto& first = configs()[index];
     const auto& last = configs()[index + 1];
@@ -294,12 +297,20 @@ void BasinForwardSolver::advance_temperature_step(std::size_t index, double age_
     if (jacobian) {
         SparseMatrix matrix(T.size(), T.size(), SparseStorageOrder::csc);
         auto rhs = system.assemble_ddm_step(accepted_T, dt, *jacobian, dq_deta, matrix);
-        *jacobian = UmfpackLinearSolver::solve_columns(matrix, std::move(rhs));
+        auto cell_S = UmfpackLinearSolver::solve_columns(matrix, std::move(rhs));
+        if (face_jacobian) {
+            (void)parameter_space_.at(age_end_ma, eta, dq_deta);
+            *face_jacobian = system.horizontal_face_sensitivities(accepted_T, cell_S, dq_deta);
+        }
+        *jacobian = std::move(cell_S);
     }
     T = accepted_T;
 }
 
-Vector BasinForwardSolver::solve_initial_temperature(Eigen::MatrixXd* jacobian) const {
+Vector BasinForwardSolver::solve_initial_temperature(Eigen::MatrixXd* jacobian,
+                                                     Eigen::MatrixXd* face_jacobian) const {
+    if (face_jacobian && (!jacobian || jacobian == face_jacobian))
+        throw std::invalid_argument("Face sensitivities require a separate cell Jacobian");
     if (jacobian && !use_parameterized_flux_)
         throw std::logic_error(
             "Set basal flux parameters before requesting the stationary Jacobian");
@@ -330,7 +341,10 @@ Vector BasinForwardSolver::solve_initial_temperature(Eigen::MatrixXd* jacobian) 
         SparseMatrix matrix(T.size(), T.size(), SparseStorageOrder::csc);
         const Vector basal = system.assemble_ddm_matrix(T, 0.0, matrix);
         const auto dT_dq = UmfpackLinearSolver::solve_columns(matrix, basal.native());
-        *jacobian = dT_dq * dq_deta.native().transpose();
+        Eigen::MatrixXd cell_S = dT_dq * dq_deta.native().transpose();
+        if (face_jacobian)
+            *face_jacobian = system.horizontal_face_sensitivities(T, cell_S, dq_deta);
+        *jacobian = std::move(cell_S);
     }
     return T;
 }

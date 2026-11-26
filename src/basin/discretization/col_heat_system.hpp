@@ -45,6 +45,10 @@ public:
     void interpolate_horizontal_temperature(const Vector& T, const HeatBoundaryData& boundaries,
                                             std::span<double> node_T) const;
 
+    [[nodiscard]] Eigen::MatrixXd horizontal_face_sensitivities(const Vector& T,
+                                                                const Eigen::MatrixXd& cell_S,
+                                                                const Vector& dq_deta) const;
+
     void assemble_residual(double t, const Vector& T, const Vector& dT_dt,
                            Vector& r) const override;
     void assemble_matrix(NonlinearMethod method, double t, const Vector& T, const Vector& dT_dt,

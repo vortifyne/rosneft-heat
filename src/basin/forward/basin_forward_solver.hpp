@@ -41,14 +41,15 @@ public:
     void final_temperature_nodes(std::span<const double> T, std::span<double> node_T) const;
 
     // Stationary fields on the initial configuration grid. Set flux parameters to request dT/deta.
-    [[nodiscard]] Vector solve_initial_temperature(Eigen::MatrixXd* jacobian = nullptr) const;
+    [[nodiscard]] Vector solve_initial_temperature(Eigen::MatrixXd* jacobian = nullptr,
+                                                   Eigen::MatrixXd* face_jacobian = nullptr) const;
     [[nodiscard]] const ColGrid& epoch_initial_grid(std::size_t epoch) const {
         return epochs_.at(epoch).initial_grid;
     }
     // One BDF1 step within an epoch and flux interval. T and the optional cell Jacobian are in/out.
     void advance_temperature_step(std::size_t epoch, double age_begin_ma, double age_end_ma,
-                                  const Vector& eta, Vector& T,
-                                  Eigen::MatrixXd* jacobian = nullptr) const;
+                                  const Vector& eta, Vector& T, Eigen::MatrixXd* jacobian = nullptr,
+                                  Eigen::MatrixXd* face_jacobian = nullptr) const;
 
     [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe = {}) const;
     // Optional Jacobian of the sampled T and Ro with respect to normalized flux parameters.

@@ -115,11 +115,13 @@ TEST(BasinForwardSolver, StationarySensitivityUsesOnlyFirstFluxKnot) {
     BasinForwardSolver solver(BasinInput::read(path), small_settings());
     std::filesystem::remove_all(path);
     solver.set_parameters(Vector{0.09, 0.08, 0.06});
-    Eigen::MatrixXd S;
-    const Vector T = solver.solve_initial_temperature(&S);
+    Eigen::MatrixXd S, face_S;
+    const Vector T = solver.solve_initial_temperature(&S, &face_S);
     ASSERT_EQ(S.rows(), T.size());
     ASSERT_EQ(S.cols(), 3);
     EXPECT_TRUE(S.rightCols(2).isZero(0.0));
+    ASSERT_EQ(face_S.cols(), 3);
+    EXPECT_TRUE(face_S.rightCols(2).isZero(0.0));
     // With uniform surface temperature and no sources, frozen K gives K*(T-Tsurf) = q*basal.
     for (Vector::Index i = 0; i < T.size(); ++i)
         EXPECT_NEAR(S(i, 0), (T[i] - 283.15) * 0.05 / 0.09, 1e-4);
@@ -137,7 +139,27 @@ TEST(BasinForwardSolver, AdvancesTemperatureAndOptionalCellJacobianWithinEpoch) 
     S.col(2).setOnes(); // This column can only propagate from the previous step.
     for (const double age : {20.0, 17.5}) {
         solver.advance_temperature_step(0, age, age - 2.5, eta, plain);
-        solver.advance_temperature_step(0, age, age - 2.5, eta, T, &S);
+        Eigen::MatrixXd face_S;
+        solver.advance_temperature_step(0, age, age - 2.5, eta, T, &S, &face_S);
+        const auto& grid = solver.epoch_initial_grid(0); // This fixture has fixed geometry.
+        ASSERT_EQ(face_S.rows(), grid.cells.size() + grid.columns.size());
+        ASSERT_EQ(face_S.cols(), eta.size());
+        Vector dq;
+        (void)solver.parameter_space().at(age - 2.5, eta, dq);
+        for (const auto& column : grid.columns) {
+            const auto top = column.front() + grid.cells[column.front()].column;
+            EXPECT_TRUE(face_S.row(top).isZero(0.0));
+            const auto bottom = column.back();
+            const auto delta = face_S.row(top + column.size()) - S.row(bottom);
+            EXPECT_GT(delta[0], 0.0);
+            EXPECT_NEAR(delta[1] * dq[0], delta[0] * dq[1], 1e-12);
+            EXPECT_DOUBLE_EQ(delta[2], 0.0);
+            for (std::size_t i = 1; i < column.size(); ++i) {
+                const double a = S(column[i - 1], 0), b = S(column[i], 0);
+                EXPECT_GE(face_S(top + i, 0), std::min(a, b));
+                EXPECT_LE(face_S(top + i, 0), std::max(a, b));
+            }
+        }
         EXPECT_LT((T - plain).infinity_norm(), 1e-10);
         EXPECT_GT(S.col(0).norm(), 0.0);
         EXPECT_GT(S.col(1).norm(), 0.0);

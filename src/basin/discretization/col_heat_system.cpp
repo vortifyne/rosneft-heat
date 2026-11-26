@@ -60,6 +60,27 @@ void ColHeatSystem::interpolate_horizontal_temperature(const Vector& T,
                                          lambda_, boundaries, node_T);
 }
 
+Eigen::MatrixXd ColHeatSystem::horizontal_face_sensitivities(const Vector& T,
+                                                             const Eigen::MatrixXd& cell_S,
+                                                             const Vector& dq_deta) const {
+    if (cell_S.rows() != size() || cell_S.cols() != dq_deta.size())
+        throw std::invalid_argument("Invalid cell sensitivity dimensions");
+    double seconds = 0.0;
+    update_coefficients(T, seconds);
+    const auto cells = grid_->cells.size();
+    const auto faces = cells + grid_->columns.size();
+    Eigen::MatrixXd face_S(faces, cell_S.cols());
+    // With frozen conductivity, each column uses the ordinary reconstruction with differentiated
+    // BCs.
+    for (Eigen::Index j = 0; j < cell_S.cols(); ++j) {
+        const HeatBoundaryData bc{.T_surf = [](Point2D) { return 0.0; },
+                                  .q_basal = [dq = dq_deta[j]](Point2D) { return dq; }};
+        ::interpolate_horizontal_temperature(*grid_, {cell_S.col(j).data(), cells}, lambda_, bc,
+                                             {face_S.col(j).data(), faces});
+    }
+    return face_S;
+}
+
 Vector::Index ColHeatSystem::size() const noexcept {
     return static_cast<Vector::Index>(grid_->cells.size());
 }
