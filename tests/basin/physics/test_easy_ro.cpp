@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <utility>
 
 namespace {
 
@@ -141,4 +142,46 @@ TEST(EasyRo, UsesCorrectedOrganizerFormulaWithoutNormalization) {
     std::vector<double> fully_reacted(model.reaction_count(), 1000.0);
     model.reflectance(fully_reacted, reflectance);
     EXPECT_NEAR(reflectance[0], std::exp(-1.6 + (3.7 * 0.85)), 1.0e-14);
+}
+
+TEST(EasyRo, IntegralAndReflectanceSensitivitiesMatchPerturbedTemperatureHistories) {
+    const auto model = make_model();
+    const std::array T0{390.0, 410.0, 400.0, 400.0};
+    const std::array T1{415.0, 380.0, 400.000001, 395.0};
+    const std::array deposition{0.0, 50000.0, 0.0, 300000.0};
+    const Eigen::MatrixXd start = Eigen::MatrixXd::Ones(4, 2);
+    Eigen::MatrixXd end = start;
+    end.col(0).setConstant(-0.5);
+    end.col(1).setConstant(2.0);
+    auto I = model.initial_state(4);
+    Eigen::MatrixXd Z = Eigen::MatrixXd::Zero(I.size(), 2);
+    const EasyRoStepSensitivities forward{start, end, Z}, backward{end, start, Z};
+    model.advance(T0, T1, 0.0, 1e5, deposition, I, &forward);
+    model.advance(T1, T0, 1e5, 2e5, deposition, I, &backward);
+    std::array<double, 4> Ro{};
+    model.reflectance(I, Ro);
+    const auto dRo = model.reflectance_sensitivities(I, Ro, Z);
+
+    for (int j = 0; j < 2; ++j) {
+        const auto perturbed = [&](double h) {
+            auto a = T0, b = T1;
+            for (std::size_t p = 0; p < a.size(); ++p) {
+                a[p] += h * start(p, j);
+                b[p] += h * end(p, j);
+            }
+            auto state = model.initial_state(a.size());
+            model.advance(a, b, 0.0, 1e5, deposition, state);
+            model.advance(b, a, 1e5, 2e5, deposition, state);
+            std::array<double, 4> ro{};
+            model.reflectance(state, ro);
+            return std::pair{state, ro};
+        };
+        constexpr double h = 1e-5;
+        const auto [Ip, Rp] = perturbed(h);
+        const auto [Im, Rm] = perturbed(-h);
+        for (std::size_t r = 0; r < I.size(); ++r)
+            EXPECT_NEAR(Z(r, j), (Ip[r] - Im[r]) / (2 * h), 1e-8);
+        for (std::size_t p = 0; p < Ro.size(); ++p)
+            EXPECT_NEAR(dRo(p, j), (Rp[p] - Rm[p]) / (2 * h), 1e-9);
+    }
 }

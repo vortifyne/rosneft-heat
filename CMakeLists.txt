@@ -62,6 +62,7 @@ add_library(basin_physics STATIC
   src/basin/physics/thermal_properties.cpp
 )
 heat_configure_target(basin_physics)
+target_link_libraries(basin_physics PUBLIC Eigen3::Eigen)
 
 add_library(basin_data STATIC
   src/basin/basin_problem.cpp

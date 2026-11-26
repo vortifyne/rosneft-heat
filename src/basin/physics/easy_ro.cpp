@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numeric>
+#include <stdexcept>
 #include <utility>
 
 namespace {
@@ -44,40 +46,63 @@ std::vector<double> EasyRoModel::initial_state(std::size_t point_count) const {
 }
 
 void EasyRoModel::advance(std::span<const double> T0, std::span<const double> T1, double t_old,
-                          double t_new, std::span<const double> t_dep, std::span<double> I) const {
+                          double t_new, std::span<const double> t_dep, std::span<double> I,
+                          const EasyRoStepSensitivities* ddm) const {
+    const auto reactions = reaction_count();
+    if (T1.size() != T0.size() || t_dep.size() != T0.size() || I.size() != T0.size() * reactions)
+        throw std::invalid_argument("Incompatible EasyRo temperature and reaction fields");
+    if (ddm &&
+        (ddm->S0.rows() != static_cast<Eigen::Index>(T0.size()) ||
+         ddm->S1.rows() != ddm->S0.rows() || ddm->Z.rows() != static_cast<Eigen::Index>(I.size()) ||
+         ddm->S1.cols() != ddm->S0.cols() || ddm->Z.cols() != ddm->S0.cols()))
+        throw std::invalid_argument("Incompatible EasyRo sensitivity fields");
+
     const auto& table = scaled_primitive_table();
-    const auto H = [&table](double x) {
+    const auto primitive = [&](double T, double x, double& derivative) {
         const double position = (x - kXMin) * kInverseStep;
         const auto i = static_cast<std::size_t>(position);
-        const double weight = position - static_cast<double>(i);
-        return table[i] + weight * (table[i + 1] - table[i]);
+        const double diff = table[i + 1] - table[i];
+        const double H = table[i] + (position - static_cast<double>(i)) * diff;
+        const double rate = params_.A * std::exp(-x);
+        // Phi(T) = A*T*exp(-x)*H(x)/x, x = beta/T.
+        if (ddm)
+            derivative = rate * ((1.0 + 2.0 / x) * H - diff * kInverseStep);
+        return rate * T / x * H;
     };
-    const std::size_t reactions = reaction_count();
     for (std::size_t P = 0; P < T0.size(); ++P) {
         const double begin = std::max(t_old, t_dep[P]);
         if (begin >= t_new)
             continue;
         const double dt = t_new - begin;
-        const double T_old = std::lerp(T0[P], T1[P], (begin - t_old) / (t_new - t_old));
-        const double T_new = T1[P];
-        const double inverse_T_old = 1.0 / T_old;
-        const double inverse_T_new = 1.0 / T_new;
-        if (T_old == T_new) {
-            for (std::size_t i = 0; i < reactions; ++i) {
-                I[P * reactions + i] += params_.A * dt * std::exp(-beta_[i] * inverse_T_old);
-            }
-            continue;
-        }
-        const double multiplier = params_.A * dt / (T_new - T_old);
-        const double square_old = T_old * T_old;
-        const double square_new = T_new * T_new;
+        const double theta = (begin - t_old) / (t_new - t_old);
+        const double Ta = std::lerp(T0[P], T1[P], theta);
+        const double Tb = T1[P];
+        const double delta = Tb - Ta;
+        const double Tmid = std::midpoint(Ta, Tb);
+        const bool nearly_constant = std::abs(delta) <= 1e-6 * Tmid;
+
         for (std::size_t i = 0; i < reactions; ++i) {
-            const double x_old = beta_[i] * inverse_T_old;
-            const double x_new = beta_[i] * inverse_T_new;
-            // Phi(T) = beta * G(x) = T^2 / beta * exp(-x) * H(x), x = beta / T.
-            const double old_value = square_old * std::exp(-x_old) * H(x_old);
-            const double new_value = square_new * std::exp(-x_new) * H(x_new);
-            I[P * reactions + i] += multiplier / beta_[i] * (new_value - old_value);
+            double increment, ca, cb;
+            if (nearly_constant) {
+                // The midpoint limit avoids subtracting nearly equal primitive values.
+                increment = dt * params_.A * std::exp(-beta_[i] / Tmid);
+                if (ddm)
+                    ca = cb = 0.5 * increment * beta_[i] / (Tmid * Tmid);
+            } else {
+                double da, db;
+                const double pa = primitive(Ta, beta_[i] / Ta, da);
+                const double pb = primitive(Tb, beta_[i] / Tb, db);
+                increment = dt * ((pb - pa) / delta);
+                if (ddm) {
+                    ca = (increment - dt * da) / delta;
+                    cb = (dt * db - increment) / delta;
+                }
+            }
+            const auto row = P * reactions + i;
+            I[row] += increment;
+            if (ddm)
+                ddm->Z.row(row) +=
+                    (ca * (1.0 - theta)) * ddm->S0.row(P) + (cb + ca * theta) * ddm->S1.row(P);
         }
     }
 }
@@ -91,4 +116,20 @@ void EasyRoModel::reflectance(std::span<const double> I, std::span<double> Ro) c
         }
         Ro[P] = std::exp(-1.6 + (3.7 * F));
     }
+}
+
+Eigen::MatrixXd EasyRoModel::reflectance_sensitivities(std::span<const double> I,
+                                                       std::span<const double> Ro,
+                                                       const Eigen::MatrixXd& Z) const {
+    if (I.size() != Ro.size() * reaction_count() || Z.rows() != static_cast<Eigen::Index>(I.size()))
+        throw std::invalid_argument("Incompatible EasyRo reflectance sensitivity fields");
+    Eigen::MatrixXd result = Eigen::MatrixXd::Zero(Ro.size(), Z.cols());
+    for (std::size_t P = 0; P < Ro.size(); ++P) {
+        for (std::size_t i = 0; i < reaction_count(); ++i) {
+            const auto row = P * reaction_count() + i;
+            result.row(P) += (params_.f[i] * std::exp(-I[row])) * Z.row(row);
+        }
+        result.row(P) *= 3.7 * Ro[P];
+    }
+    return result;
 }
