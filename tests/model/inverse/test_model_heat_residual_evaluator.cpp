@@ -92,7 +92,7 @@ TEST(ModelHeatResidualEvaluatorTest, EvaluatesNormalizedParametersAndReturnsResi
     ASSERT_TRUE(result.completed());
     expect_vector_near(result.calculated_temperatures, direct_result.calculated_temperature);
     expect_vector_near(result.normalized_residuals, expected_residuals);
-    EXPECT_NEAR(result.objective, expected_residuals.squared_norm(), 1e-12);
+    EXPECT_NEAR(result.objective, 0.5 * expected_residuals.squared_norm(), 1e-12);
     EXPECT_EQ(result.time_integration.accepted_steps, direct_result.integration.accepted_steps);
     EXPECT_EQ(result.time_integration.nonlinear_iterations,
               direct_result.integration.nonlinear_iterations);

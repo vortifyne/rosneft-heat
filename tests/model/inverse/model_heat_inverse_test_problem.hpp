@@ -20,7 +20,7 @@ inline constexpr LinearSolveRequest kDirectLinearRequest{
     .maxiter = 1,
 };
 
-inline constexpr PoundersSolveRequest kOptimizationRequest{
+inline constexpr LeastSquaresSolveRequest kOptimizationRequest{
     .gatol = 1e-8,
     .grtol = 1e-8,
     .gttol = 1e-8,

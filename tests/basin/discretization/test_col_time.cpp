@@ -228,6 +228,41 @@ TEST(ColHeatSystem, AccumulationUsesCurrentMovingCellAndPicardCapacity) {
     }
 }
 
+TEST(ColHeatSystem, DdmRightHandSideMatchesBoundaryAndHistoryDerivatives) {
+    const std::vector<double> x{0.0, 1.0, 2.0};
+    const BasinGeometry geometry{
+        .x = x, .z = {{0.0, 0.4, 0.8}, {2.0, 2.3, 2.6}}, .layers = {{1, 0.0, 2.0}}};
+    const auto grid = make_col_grid(geometry, x, 0.45);
+    const auto n = grid.cells.size();
+    const std::vector<double> lambda(n, 1.3), source(n, 0.0), capacity(n, 2.0);
+    Vector T(n);
+    for (const auto& cell : grid.cells)
+        T[cell.index] = 3.0 + 0.2 * cell.center().x + 0.4 * cell.center().z;
+    constexpr double dt = 0.4;
+    constexpr double h = 1e-5;
+    double q = 0.3;
+    ColHeatSystem system(
+        grid, lambda, source,
+        {.T_surf = [](Point2D) { return 3.0; }, .q_basal = [&q](Point2D) { return q; }}, capacity);
+    const Eigen::MatrixXd previous = T.native(); // One parameter changes both T_old and q.
+    for (const auto scheme :
+         {MultipointFluxScheme::linear, MultipointFluxScheme::nonlinear_conservative}) {
+        system.set_flux_scheme(scheme);
+        q = 0.3;
+        SparseMatrix matrix(n, n, SparseStorageOrder::csc);
+        const auto rhs = system.assemble_ddm_step(T, dt, previous, Vector{0.7}, matrix);
+        const auto residual = [&](double delta) {
+            q = 0.3 + delta * 0.7;
+            Vector r;
+            system.assemble_residual(dt, T, T * (-delta / dt), r);
+            return r;
+        };
+        const Vector plus = residual(h);
+        const Vector minus = residual(-h);
+        EXPECT_LT((rhs.col(0) + (plus.native() - minus.native()) / (2 * h)).norm(), 1e-8);
+    }
+}
+
 TEST(ColHeatSystem, AdvancesAffineFieldOnIndependentColumns) {
     const std::vector<double> x{0.0, 1.0, 2.0};
     const BasinGeometry source{

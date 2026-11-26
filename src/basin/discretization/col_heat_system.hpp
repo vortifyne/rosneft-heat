@@ -34,8 +34,20 @@ public:
     void assemble_residual(const Vector& T, Vector& r) const override;
     void assemble_matrix(const Vector& T, SparseMatrix& M) const;
 
+    // Assemble K + alpha*M at T and return the basal forcing -dR/dq.
+    [[nodiscard]] Vector assemble_ddm_matrix(const Vector& T, double alpha,
+                                             SparseMatrix& matrix) const;
+    [[nodiscard]] Eigen::MatrixXd assemble_ddm_step(const Vector& T, double dt,
+                                                    const Eigen::MatrixXd& previous,
+                                                    const Vector& dq_deta,
+                                                    SparseMatrix& matrix) const;
+
     void interpolate_horizontal_temperature(const Vector& T, const HeatBoundaryData& boundaries,
                                             std::span<double> node_T) const;
+
+    [[nodiscard]] Eigen::MatrixXd horizontal_face_sensitivities(const Vector& T,
+                                                                const Eigen::MatrixXd& cell_S,
+                                                                const Vector& dq_deta) const;
 
     void assemble_residual(double t, const Vector& T, const Vector& dT_dt,
                            Vector& r) const override;

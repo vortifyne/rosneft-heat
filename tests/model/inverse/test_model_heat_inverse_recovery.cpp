@@ -78,7 +78,7 @@ TEST(ModelHeatInverseRecoveryTest, RecoversHiddenParametersFromMultipleInitialGu
                      << "initial surface temperature=" << initial_parameters.surface_temperature
                      << ", initial basal heat flux=" << initial_parameters.basal_heat_flux);
         const double initial_objective =
-            evaluate_normalized_residuals(observations, initial_parameters).squared_norm();
+            0.5 * evaluate_normalized_residuals(observations, initial_parameters).squared_norm();
         ModelHeatInverseSolver solver = make_inverse_solver(observations);
 
         const ModelHeatInverseResult result = solver.solve({

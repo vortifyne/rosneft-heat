@@ -8,7 +8,7 @@
 
 namespace {
 
-constexpr PoundersSolveRequest kSolveRequest{
+constexpr LeastSquaresSolveRequest kSolveRequest{
     .gatol = 1e-8,
     .grtol = 1e-8,
     .gttol = 1e-8,
@@ -35,13 +35,13 @@ TEST(PoundersOptimizerTest, SolvesBoundedLeastSquaresProblem) {
             },
     };
 
-    const PoundersSolveResult result =
+    const LeastSquaresSolveResult result =
         PoundersOptimizer{}.solve(problem, Vector{0.0, 0.0}, kSolveRequest);
 
     EXPECT_TRUE(result.converged());
     expect_vector_near(result.parameters, Vector{1.0, 2.0});
     expect_vector_near(result.residuals, Vector{0.0, 0.0, 0.0});
-    EXPECT_NEAR(result.objective, result.residuals.squared_norm(), 1e-14);
+    EXPECT_NEAR(result.objective, 0.5 * result.residuals.squared_norm(), 1e-14);
     EXPECT_GE(result.iterations, 0);
     EXPECT_GE(result.function_evaluations, 1);
 }
@@ -54,13 +54,13 @@ TEST(PoundersOptimizerTest, RespectsActiveParameterBound) {
         .residual_function = [](const Vector& parameters) { return Vector{parameters[0] - 2.0}; },
     };
 
-    const PoundersSolveResult result =
+    const LeastSquaresSolveResult result =
         PoundersOptimizer{}.solve(problem, Vector{0.0}, kSolveRequest);
 
     EXPECT_TRUE(result.converged());
     expect_vector_near(result.parameters, Vector{1.0});
     expect_vector_near(result.residuals, Vector{-1.0});
-    EXPECT_NEAR(result.objective, 1.0, 1e-5);
+    EXPECT_NEAR(result.objective, 0.5, 1e-5);
 }
 
 TEST(PoundersOptimizerTest, ClipsInitialGuessUsingPetscStepAndStopsWithinResidualBounds) {
@@ -82,7 +82,7 @@ TEST(PoundersOptimizerTest, ClipsInitialGuessUsingPetscStepAndStopsWithinResidua
     EXPECT_EQ(PetscOptionsClearValue(nullptr, "-tao_pounders_delta"), PETSC_SUCCESS);
     ASSERT_FALSE(evaluated.empty());
     EXPECT_DOUBLE_EQ(evaluated.front(), 0.8);
-    EXPECT_EQ(result.status, PoundersStatus::user_converged);
+    EXPECT_EQ(result.status, LeastSquaresStatus::within_errors);
     EXPECT_LE(result.residuals.infinity_norm(), request.residual_tolerance);
     EXPECT_DOUBLE_EQ(result.residuals[0], result.parameters[0] - 0.9);
     EXPECT_EQ(result.function_evaluations, static_cast<int>(evaluated.size()));
@@ -99,7 +99,7 @@ TEST(PoundersOptimizerTest, SupportsNonUnitBounds) {
             },
     };
 
-    const PoundersSolveResult result =
+    const LeastSquaresSolveResult result =
         PoundersOptimizer{}.solve(problem, Vector{3.0, -1.0}, kSolveRequest);
 
     EXPECT_TRUE(result.converged());
@@ -108,7 +108,7 @@ TEST(PoundersOptimizerTest, SupportsNonUnitBounds) {
 }
 
 TEST(PoundersOptimizerTest, ReportsFunctionEvaluationLimit) {
-    PoundersSolveRequest limited_request = kSolveRequest;
+    LeastSquaresSolveRequest limited_request = kSolveRequest;
     limited_request.maxfev = 3;
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = Vector{-5.0, -5.0},
@@ -120,16 +120,16 @@ TEST(PoundersOptimizerTest, ReportsFunctionEvaluationLimit) {
             },
     };
 
-    const PoundersSolveResult result =
+    const LeastSquaresSolveResult result =
         PoundersOptimizer{}.solve(problem, Vector{0.0, 0.0}, limited_request);
 
-    EXPECT_EQ(result.status, PoundersStatus::maxfev);
+    EXPECT_EQ(result.status, LeastSquaresStatus::limit_reached);
     EXPECT_FALSE(result.converged());
     EXPECT_EQ(result.parameters.size(), 2);
     EXPECT_EQ(result.residuals.size(), 2);
     expect_vector_near(result.residuals,
                        Vector{result.parameters[0] - 4.0, result.parameters[1] - 4.0});
-    EXPECT_NEAR(result.objective, result.residuals.squared_norm(), 1e-14);
+    EXPECT_NEAR(result.objective, 0.5 * result.residuals.squared_norm(), 1e-14);
     EXPECT_TRUE(std::isfinite(result.objective));
 }
 
@@ -176,7 +176,7 @@ TEST(PoundersOptimizerTest, ValidatesProblemAndRequest) {
                                                              Vector{0.0}, kSolveRequest)),
                  std::invalid_argument);
 
-    PoundersSolveRequest invalid_request = kSolveRequest;
+    LeastSquaresSolveRequest invalid_request = kSolveRequest;
     invalid_request.gatol = std::numeric_limits<double>::quiet_NaN();
     EXPECT_THROW(
         static_cast<void>(PoundersOptimizer{}.solve(valid_problem, Vector{0.0}, invalid_request)),

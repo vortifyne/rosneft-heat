@@ -4,6 +4,7 @@
 #include <cmath>
 #include <functional>
 #include <stdexcept>
+#include <utility>
 
 namespace {
 constexpr double kMinimumFlux = 0.05; // W/m².
@@ -17,6 +18,32 @@ void validate_flux(const Vector& flux, std::size_t count) {
             throw std::invalid_argument("Basal flux must be nonincreasing within [50, 100] mW/m2");
         previous = flux[i];
     }
+}
+
+Vector prefix_products(const Vector& eta, Vector::Index count) {
+    if (eta.size() != count || !eta.all_finite() || (eta.native().array() < 0.0).any() ||
+        (eta.native().array() > 1.0).any())
+        throw std::invalid_argument("Normalized basal flux parameters must lie in [0, 1]");
+    Vector prefix(count);
+    double product = 1.0;
+    for (Vector::Index i = 0; i < count; ++i) {
+        product *= eta[i];
+        prefix[i] = product;
+    }
+    return prefix;
+}
+
+double knot_flux(double product) {
+    return kMinimumFlux + (kMaximumFlux - kMinimumFlux) * product;
+}
+
+std::pair<Vector::Index, double> flux_interval(const std::vector<double>& ages, double age) {
+    if (!(age >= ages.back() && age <= ages.front()))
+        throw std::out_of_range("Age outside the basal flux history");
+    const auto younger = std::lower_bound(ages.begin() + 1, ages.end(), age, std::greater<>{});
+    const auto older = younger - ages.begin() - 1;
+    const double fraction = age == *younger ? 1.0 : (ages[older] - age) / (ages[older] - *younger);
+    return {older, fraction};
 }
 } // namespace
 
@@ -36,41 +63,45 @@ void BasinHeatParameterSpace::set_values(Vector flux) {
 }
 
 double BasinHeatParameterSpace::at(double age_ma) const {
-    if (!(age_ma >= ages_ma_.back() && age_ma <= ages_ma_.front()))
-        throw std::out_of_range("Age outside the basal flux history");
-    const auto younger =
-        std::lower_bound(ages_ma_.begin(), ages_ma_.end(), age_ma, std::greater<>{});
-    const auto i = younger - ages_ma_.begin();
-    if (*younger == age_ma)
-        return flux_[i];
-    const double theta = (ages_ma_[i - 1] - age_ma) / (ages_ma_[i - 1] - *younger);
-    return std::lerp(flux_[i - 1], flux_[i], theta);
+    const auto [i, theta] = flux_interval(ages_ma_, age_ma);
+    return std::lerp(flux_[i], flux_[i + 1], theta);
+}
+
+double BasinHeatParameterSpace::at(double age_ma, const Vector& eta, Vector& dq_deta) const {
+    const auto [i, theta] = flux_interval(ages_ma_, age_ma);
+    const Vector prefix = prefix_products(eta, flux_.size());
+    Vector gradient(eta.size());
+    gradient.set_zero();
+    constexpr double range = kMaximumFlux - kMinimumFlux;
+    gradient[i + 1] = range * theta * prefix[i];
+    // Exclude eta[j] by multiplying the factors on either side, including at eta[j] = 0.
+    double suffix = std::lerp(1.0, eta[i + 1], theta);
+    for (auto j = i; j >= 0; --j) {
+        gradient[j] = range * (j == 0 ? 1.0 : prefix[j - 1]) * suffix;
+        suffix *= eta[j];
+    }
+    dq_deta = std::move(gradient);
+    return std::lerp(knot_flux(prefix[i]), knot_flux(prefix[i + 1]), theta);
 }
 
 Vector BasinHeatParameterSpace::to_normalized(const Vector& parameters) const {
     validate_flux(parameters, ages_ma_.size());
-    Vector normalized(flux_.size());
+    Vector eta(flux_.size());
     double previous = kMaximumFlux;
     for (Vector::Index i = 0; i < flux_.size(); ++i) {
-        normalized[i] = previous == kMinimumFlux
-                            ? 1.0
-                            : (parameters[i] - kMinimumFlux) / (previous - kMinimumFlux);
+        eta[i] = previous == kMinimumFlux
+                     ? 1.0
+                     : (parameters[i] - kMinimumFlux) / (previous - kMinimumFlux);
         previous = parameters[i];
     }
-    return normalized;
+    return eta;
 }
 
-Vector BasinHeatParameterSpace::to_physical(const Vector& normalized) const {
-    if (normalized.size() != flux_.size() || !normalized.all_finite() ||
-        (normalized.native().array() < 0.0).any() || (normalized.native().array() > 1.0).any())
-        throw std::invalid_argument("Normalized basal flux parameters must lie in [0, 1]");
-    Vector parameters(flux_.size());
-    double previous = kMaximumFlux;
-    for (Vector::Index i = 0; i < flux_.size(); ++i) {
-        parameters[i] = std::lerp(kMinimumFlux, previous, normalized[i]);
-        previous = parameters[i];
-    }
-    return parameters;
+Vector BasinHeatParameterSpace::to_physical(const Vector& eta) const {
+    Vector flux = prefix_products(eta, flux_.size());
+    for (Vector::Index i = 0; i < flux.size(); ++i)
+        flux[i] = knot_flux(flux[i]);
+    return flux;
 }
 
 Vector BasinHeatParameterSpace::normalized_lower_bounds() const {

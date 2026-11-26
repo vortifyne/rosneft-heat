@@ -15,9 +15,11 @@ public:
     }
     void set_values(Vector flux);
     [[nodiscard]] double at(double age_ma) const;
+    // Evaluate at the supplied eta and return their flux derivatives in dq_deta.
+    [[nodiscard]] double at(double age_ma, const Vector& eta, Vector& dq_deta) const;
 
     [[nodiscard]] Vector to_normalized(const Vector& parameters) const;
-    [[nodiscard]] Vector to_physical(const Vector& normalized) const;
+    [[nodiscard]] Vector to_physical(const Vector& eta) const;
     [[nodiscard]] Vector normalized_lower_bounds() const;
     [[nodiscard]] Vector normalized_upper_bounds() const;
 

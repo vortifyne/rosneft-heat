@@ -2,6 +2,7 @@
 
 #include "basin/forward/basin_forward_settings.hpp"
 #include "basin/forward/basin_statistics.hpp"
+#include "basin/forward/basin_well_sample.hpp"
 #include "basin/inverse/basin_heat_parameter_space.hpp"
 #include "basin/io/basin_input.hpp"
 #include "basin/mesh/col_epoch_grid.hpp"
@@ -39,14 +40,34 @@ public:
     [[nodiscard]] const ColGrid& final_grid() const noexcept;
     void final_temperature_nodes(std::span<const double> T, std::span<double> node_T) const;
 
+    // Stationary fields on the initial configuration grid. Set flux parameters to request dT/deta.
+    [[nodiscard]] Vector solve_initial_temperature(Eigen::MatrixXd* jacobian = nullptr,
+                                                   Eigen::MatrixXd* face_jacobian = nullptr) const;
+    [[nodiscard]] const ColGrid& epoch_initial_grid(std::size_t epoch) const {
+        return epochs_.at(epoch).initial_grid;
+    }
+    // One BDF1 step within an epoch and flux interval. T and the optional cell Jacobian are in/out.
+    void advance_temperature_step(std::size_t epoch, double age_begin_ma, double age_end_ma,
+                                  const Vector& eta, Vector& T, Eigen::MatrixXd* jacobian = nullptr,
+                                  Eigen::MatrixXd* face_jacobian = nullptr) const;
+
     [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe = {}) const;
+    // Optional Jacobian of the sampled T and Ro with respect to normalized flux parameters.
+    [[nodiscard]] Vector solve_at_wells(std::span<const BasinWellSample> samples,
+                                        Eigen::MatrixXd* jacobian = nullptr,
+                                        const Vector* eta = nullptr) const;
     [[nodiscard]] BasinForwardResult solve(const std::filesystem::path& output_directory,
                                            const BasinObserver& observe = {}) const;
 
 private:
-    [[nodiscard]] Vector solve_initial_temperature() const;
-    [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe,
-                                           bool configuration_output) const;
+    struct DdmFields {
+        Vector eta;
+        Eigen::MatrixXd S, Z, face_S;
+    };
+    void final_temperature_nodes(std::span<const double> T, std::span<double> node_T,
+                                 DdmFields* ddm) const;
+    [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe, bool configuration_output,
+                                           DdmFields* ddm = nullptr) const;
 
     struct EpochData {
         ColEpochGrid mesh;
@@ -55,6 +76,9 @@ private:
         std::vector<std::array<double, 2>> phi0;
         std::vector<std::array<double, 2>> phi1;
         std::vector<double> deposition_times;
+
+        void update_porosity(const ColGrid& grid, double theta, std::span<double> phi) const;
+        std::vector<const LithotypeProperties*> materials(const BasinInput& input) const;
     };
 
     BasinInput input_;

@@ -45,7 +45,7 @@ ModelHeatInverseResult ModelHeatInverseSolver::solve(const ModelHeatInverseSolve
             },
     };
 
-    PoundersSolveResult optimization =
+    LeastSquaresSolveResult optimization =
         optimizer_.solve(problem, initial_parameters, request.optimization);
 
     ModelHeatResidualResult final_evaluation =

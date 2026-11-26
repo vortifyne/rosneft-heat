@@ -1,5 +1,7 @@
 #include "model/inverse/model_heat_residual_evaluator.hpp"
 
+#include "numerics/optimization/bounded_least_squares_problem.hpp"
+
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -46,7 +48,7 @@ ModelHeatResidualResult ModelHeatResidualEvaluator::evaluate(const Vector& norma
     }
 
     Vector residuals = observations_.normalized_residuals(forward_result.calculated_temperature);
-    const double objective = residuals.squared_norm();
+    const double objective = least_squares_objective(residuals);
     return {
         .time_integration = forward_result.integration,
         .calculated_temperatures = std::move(forward_result.calculated_temperature),

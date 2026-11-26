@@ -62,12 +62,3 @@ Vector::Index BasinHeatObservationData::size() const noexcept {
 std::span<const BasinObservation> BasinHeatObservationData::points() const noexcept {
     return points_;
 }
-
-Vector BasinHeatObservationData::normalized_residuals(const Vector& calculated) const {
-    Vector residuals(size());
-    for (Vector::Index i = 0; i < size(); ++i) {
-        const auto& point = points_[static_cast<std::size_t>(i)];
-        residuals[i] = (calculated[i] - point.value) / point.error;
-    }
-    return residuals;
-}

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <exception>
 #include <limits>
+#include <numbers>
 #include <petsctao.h>
 #include <petscvec.h>
 #include <stdexcept>
@@ -53,58 +54,6 @@ PetscInt to_petsc_size(Vector::Index size, const char* name) {
     return static_cast<PetscInt>(size);
 }
 
-void validate_request(const PoundersSolveRequest& request) {
-    if (!std::isfinite(request.gatol) || request.gatol < 0.0) {
-        throw std::invalid_argument("Absolute gradient tolerance must be finite and non-negative");
-    }
-    if (!std::isfinite(request.grtol) || request.grtol < 0.0) {
-        throw std::invalid_argument("Relative gradient tolerance must be finite and non-negative");
-    }
-    if (!std::isfinite(request.gttol) || request.gttol < 0.0) {
-        throw std::invalid_argument("Gradient reduction tolerance must be finite and non-negative");
-    }
-    if (request.maxiter <= 0) {
-        throw std::invalid_argument("Maximum iteration count must be positive");
-    }
-    if (request.maxfev <= 0) {
-        throw std::invalid_argument("Maximum function evaluation count must be positive");
-    }
-    if (!std::isfinite(request.residual_tolerance) || request.residual_tolerance < 0.0)
-        throw std::invalid_argument("Residual tolerance must be finite and non-negative");
-}
-
-void validate_problem(const BoundedLeastSquaresProblem& problem, const Vector& x0) {
-    if (!problem.residual_function) {
-        throw std::invalid_argument("Least-squares residual function must be set");
-    }
-    if (problem.lower_bounds.empty()) {
-        throw std::invalid_argument("Least-squares problem must have at least one parameter");
-    }
-    if (problem.lower_bounds.size() != problem.upper_bounds.size() ||
-        problem.lower_bounds.size() != x0.size()) {
-        throw std::invalid_argument("Parameter vectors and bound vectors must have the same size");
-    }
-    if (!problem.lower_bounds.all_finite() || !problem.upper_bounds.all_finite() ||
-        !x0.all_finite()) {
-        throw std::invalid_argument("Parameters and bounds must be finite");
-    }
-    if (problem.residual_count <= 0) {
-        throw std::invalid_argument("Least-squares problem must have at least one residual");
-    }
-
-    for (Vector::Index index = 0; index < x0.size(); ++index) {
-        if (!(problem.lower_bounds[index] < problem.upper_bounds[index])) {
-            throw std::invalid_argument("Parameter bounds must be strictly increasing");
-        }
-        if (x0[index] < problem.lower_bounds[index] || x0[index] > problem.upper_bounds[index]) {
-            throw std::invalid_argument("Initial parameters must lie within their bounds");
-        }
-    }
-
-    static_cast<void>(to_petsc_size(problem.lower_bounds.size(), "Parameter count"));
-    static_cast<void>(to_petsc_size(problem.residual_count, "Residual count"));
-}
-
 void ensure_petsc_is_active() {
     PetscBool initialized = PETSC_FALSE;
     PetscBool finalized = PETSC_FALSE;
@@ -138,7 +87,7 @@ Vector copy_from_petsc(Vec source, Vector::Index size) {
 
 struct ResidualCallbackContext {
     const BoundedLeastSquaresProblem* problem;
-    const PoundersObserver* observer;
+    const LeastSquaresObserver* observer;
     std::exception_ptr exception;
     int evaluations = 0;
     double residual_tolerance = 0.0;
@@ -159,7 +108,7 @@ PetscErrorCode evaluate_residual(Tao tao, Vec px, Vec pr, void* raw_context) {
         x.native() = x.native()
                          .cwiseMax(context->problem->lower_bounds.native())
                          .cwiseMin(context->problem->upper_bounds.native());
-        Vector r = context->problem->residual_function(x);
+        auto [r, within_errors] = context->problem->evaluate(x, context->residual_tolerance);
         if (r.size() != context->problem->residual_count) {
             throw std::runtime_error("Residual function returned a vector with an invalid size");
         }
@@ -167,15 +116,15 @@ PetscErrorCode evaluate_residual(Tao tao, Vec px, Vec pr, void* raw_context) {
             throw std::runtime_error("Residual function returned non-finite values");
         }
         copy_to_petsc(r, pr);
+        // TAO POUNDERS sums squared residuals, so scale its private copy to obtain half the sum.
+        check_petsc(VecScale(pr, 1.0 / std::numbers::sqrt2), "Failed to scale POUNDERS residuals");
         ++context->evaluations;
         if (*context->observer) {
             PetscInt iteration = 0;
             check_petsc(TaoGetIterationNumber(tao, &iteration), "Failed to get POUNDERS iteration");
             (*context->observer)(static_cast<int>(iteration), context->evaluations, x, r);
         }
-        const double objective = r.squared_norm();
-        const bool within_errors =
-            context->residual_tolerance > 0.0 && r.infinity_norm() <= context->residual_tolerance;
+        const double objective = least_squares_objective(r);
         if ((within_errors && !context->within_errors) ||
             (within_errors == context->within_errors && objective < context->objective)) {
             context->parameters = std::move(x);
@@ -199,36 +148,12 @@ PetscErrorCode check_residual_tolerance(Tao tao, void* raw_context) {
     PetscFunctionReturn(PETSC_SUCCESS);
 }
 
-PoundersStatus to_status(TaoConvergedReason reason) {
-    switch (reason) {
-    case TAO_CONVERGED_GATOL:
-        return PoundersStatus::gatol;
-    case TAO_CONVERGED_GRTOL:
-        return PoundersStatus::grtol;
-    case TAO_CONVERGED_GTTOL:
-        return PoundersStatus::gttol;
-    case TAO_CONVERGED_STEPTOL:
-        return PoundersStatus::step_tol;
-    case TAO_CONVERGED_MINF:
-        return PoundersStatus::min_objective;
-    case TAO_CONVERGED_USER:
-        return PoundersStatus::user_converged;
-    case TAO_DIVERGED_MAXITS:
-        return PoundersStatus::maxiter;
-    case TAO_DIVERGED_MAXFCN:
-        return PoundersStatus::maxfev;
-    case TAO_DIVERGED_NAN:
-        return PoundersStatus::nonfinite;
-    case TAO_DIVERGED_LS_FAILURE:
-        return PoundersStatus::ls_failed;
-    case TAO_DIVERGED_TR_REDUCTION:
-        return PoundersStatus::tr_failed;
-    case TAO_DIVERGED_USER:
-        return PoundersStatus::user_diverged;
-    case TAO_CONTINUE_ITERATING:
-    default:
-        return PoundersStatus::unknown;
-    }
+LeastSquaresStatus to_status(TaoConvergedReason reason) {
+    if (reason == TAO_CONVERGED_USER)
+        return LeastSquaresStatus::within_errors;
+    if (reason == TAO_DIVERGED_MAXITS || reason == TAO_DIVERGED_MAXFCN)
+        return LeastSquaresStatus::limit_reached;
+    return reason > 0 ? LeastSquaresStatus::converged : LeastSquaresStatus::failed;
 }
 
 int to_int(PetscInt value, const char* name) {
@@ -241,11 +166,14 @@ int to_int(PetscInt value, const char* name) {
 
 } // namespace
 
-PoundersSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& problem,
-                                             const Vector& x0, const PoundersSolveRequest& request,
-                                             const PoundersObserver& observe) const {
-    validate_problem(problem, x0);
-    validate_request(request);
+LeastSquaresSolveResult PoundersOptimizer::solve(const BoundedLeastSquaresProblem& problem,
+                                                 const Vector& x0,
+                                                 const LeastSquaresSolveRequest& request,
+                                                 const LeastSquaresObserver& observe) const {
+    if (!problem.residual_function && !problem.objective)
+        throw std::invalid_argument("Least-squares residual function must be set");
+    problem.validate(x0);
+    request.validate();
     ensure_petsc_is_active();
 
     const PetscInt n = to_petsc_size(x0.size(), "Parameter count");

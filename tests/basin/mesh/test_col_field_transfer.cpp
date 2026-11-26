@@ -52,6 +52,25 @@ TEST(ColFieldTransfer, BilinearFieldAndNewLayerHistory) {
                     1.0e-12);
     }
 
+    const auto P_T = temperature_transfer(old_grid, new_grid, 1);
+    Eigen::MatrixXd S(old_T.size(), 2);
+    S.col(0) = old_T.native();
+    S.col(1) = 2.0 * old_T.native();
+    const Eigen::MatrixXd next_S = P_T * S;
+    EXPECT_TRUE(next_S.row(0).isZero()); // New cells get prescribed surface temperature.
+    EXPECT_NEAR(next_S(1, 0), T[1], 1e-12);
+    EXPECT_NEAR(next_S(1, 1), 2.0 * T[1], 1e-12);
+
+    Eigen::MatrixXd Z(old_I.size(), 2);
+    Z.col(0) = Eigen::Map<const Eigen::VectorXd>(old_I.data(), old_I.size());
+    Z.col(1) = Z.col(0).array() + 5.0;
+    const auto next_Z =
+        apply_maturity_transfer(maturity_transfer(old_grid, new_grid, 1), Z, reactions);
+    for (std::size_t row = 0; row < I.size(); ++row) {
+        EXPECT_NEAR(next_Z(row, 0), I[row], 1e-12);
+        EXPECT_NEAR(next_Z(row, 1), row < 2 * reactions ? 0.0 : I[row] + 5.0, 1e-12);
+    }
+
     const ColGrid edge_grid = make_col_grid(new_geometry, {0.0, 0.5}, 2.0);
     const auto edge_temperature = interpolate_temperature(old_grid, edge_grid, old_T);
     EXPECT_NEAR(edge_temperature[0], 301.5, 1.0e-12);
