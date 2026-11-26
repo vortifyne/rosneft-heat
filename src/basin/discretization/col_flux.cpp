@@ -265,3 +265,23 @@ void interpolate_horizontal_temperature(const ColGrid& grid, std::span<const dou
                                   bottom.height() / lambda[bottom.index];
     }
 }
+
+Eigen::MatrixXd horizontal_face_sensitivities(const ColGrid& grid, std::span<const double> lambda,
+                                              const Eigen::MatrixXd& cell_S,
+                                              const Vector& dq_deta) {
+    if (cell_S.rows() != static_cast<Eigen::Index>(grid.cells.size()) ||
+        cell_S.cols() != dq_deta.size())
+        throw std::invalid_argument("Invalid cell sensitivity dimensions");
+    const auto cells = grid.cells.size();
+    const auto faces = cells + grid.columns.size();
+    Eigen::MatrixXd face_S(faces, cell_S.cols());
+    // With frozen conductivity, each column uses the ordinary reconstruction with differentiated
+    // BCs.
+    for (Eigen::Index j = 0; j < cell_S.cols(); ++j) {
+        const HeatBoundaryData bc{.T_surf = [](Point2D) { return 0.0; },
+                                  .q_basal = [dq = dq_deta[j]](Point2D) { return dq; }};
+        ::interpolate_horizontal_temperature(grid, {cell_S.col(j).data(), cells}, lambda, bc,
+                                             {face_S.col(j).data(), faces});
+    }
+    return face_S;
+}

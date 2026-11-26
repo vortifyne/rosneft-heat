@@ -170,6 +170,20 @@ TimeIntegrationResult advance_bdf1(TimeIntegrator& integrator, const ColHeatSyst
     return step;
 }
 
+Eigen::MatrixXd advance_cell_sensitivities(const ColHeatSystem& system, const Vector& T, double dt,
+                                           const Eigen::MatrixXd& previous, const Vector& dq) {
+    SparseMatrix matrix(T.size(), T.size(), SparseStorageOrder::csc);
+    auto rhs = system.assemble_ddm_step(T, dt, previous, dq, matrix);
+    return UmfpackLinearSolver::solve_columns(matrix, std::move(rhs));
+}
+
+Eigen::MatrixXd material_sensitivities(const ColGrid& grid, const Eigen::MatrixXd& face_S) {
+    Eigen::MatrixXd node_S(grid.maturity_node_count, face_S.cols());
+    for (const auto& cell : grid.cells)
+        node_S.middleRows(cell.maturity_top, 2) = face_S.middleRows(cell.index + cell.column, 2);
+    return node_S;
+}
+
 } // namespace
 
 BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings options)
@@ -229,7 +243,7 @@ BasinForwardSolver::BasinForwardSolver(BasinInput input, BasinForwardSettings op
 }
 
 void BasinForwardSolver::EpochData::update_porosity(const ColGrid& grid, double theta,
-                                                   std::span<double> phi) const {
+                                                    std::span<double> phi) const {
     for_each_layer_cell(grid, [&](const ColCell& cell, double depth) {
         const auto i = cell.index;
         const double top = std::lerp(phi0[i][0], phi1[i][0], theta);
@@ -295,9 +309,7 @@ void BasinForwardSolver::advance_temperature_step(std::size_t index, double age_
     (void)advance_bdf1(integrator, system, dt, dt, age_end_ma, settings_);
     const Vector& accepted_T = integrator.current_snapshot().u;
     if (jacobian) {
-        SparseMatrix matrix(T.size(), T.size(), SparseStorageOrder::csc);
-        auto rhs = system.assemble_ddm_step(accepted_T, dt, *jacobian, dq_deta, matrix);
-        auto cell_S = UmfpackLinearSolver::solve_columns(matrix, std::move(rhs));
+        auto cell_S = advance_cell_sensitivities(system, accepted_T, dt, *jacobian, dq_deta);
         if (face_jacobian) {
             (void)parameter_space_.at(age_end_ma, eta, dq_deta);
             *face_jacobian = system.horizontal_face_sensitivities(accepted_T, cell_S, dq_deta);
@@ -376,6 +388,11 @@ const ColGrid& BasinForwardSolver::final_grid() const noexcept {
 
 void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
                                                  std::span<double> node_T) const {
+    final_temperature_nodes(T, node_T, nullptr);
+}
+
+void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
+                                                 std::span<double> node_T, DdmFields* ddm) const {
     const auto& cfg = input_.configs().back();
     std::vector<double> lambda(T.size());
     for_each_layer_cell(final_grid_, [&](const ColCell& cell, double depth) {
@@ -388,38 +405,61 @@ void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
     const auto boundaries =
         bc(cfg, cfg, 0.0, use_parameterized_flux_ ? &parameter_space_ : nullptr, cfg.age_ma);
     interpolate_horizontal_temperature(final_grid_, T, lambda, boundaries, node_T);
+    if (ddm) {
+        Vector dq;
+        (void)parameter_space_.at(cfg.age_ma, ddm->eta, dq);
+        ddm->face_S = horizontal_face_sensitivities(final_grid_, lambda, ddm->S, dq);
+    }
 }
 
 Vector BasinForwardSolver::solve_at_wells(std::span<const BasinWellSample> samples,
-                                          Eigen::MatrixXd* jacobian) const {
-    if (jacobian)
-        throw std::logic_error(
-            "The full well temperature and reflectance Jacobian is not available yet");
+                                          Eigen::MatrixXd* jacobian, const Vector* eta) const {
+    DdmFields fields;
+    if (jacobian) {
+        fields.eta = eta ? *eta : parameter_space_.to_normalized(parameter_space_.values());
+        jacobian->setZero(samples.size(), fields.eta.size());
+    }
+    auto* ddm = jacobian ? &fields : nullptr;
     Vector calculated(static_cast<Vector::Index>(samples.size()));
-    (void)solve([&](const BasinSnapshot& snapshot) {
-        if (snapshot.epoch + 1 != configs().size())
-            return;
-        std::vector<double> node_T(final_grid_.cells.size() + final_grid_.columns.size());
-        final_temperature_nodes(snapshot.T, node_T);
-        for (std::size_t i = 0; i < samples.size(); ++i) {
-            const auto& sample = samples[i];
-            double value = sample.constant;
-            for (std::size_t j = 0; j < sample.indices.size(); ++j) {
-                const auto source = sample.indices[j];
-                double field;
-                if (sample.kind == BasinObservable::reflectance) {
-                    if (source >= snapshot.Ro.size())
-                        throw std::out_of_range("Invalid well reflectance index");
-                    field = snapshot.Ro[source];
-                } else {
-                    field = source < snapshot.T.size() ? snapshot.T[source]
-                                                       : node_T.at(source - snapshot.T.size());
+    (void)solve(
+        [&](const BasinSnapshot& snapshot) {
+            if (snapshot.epoch + 1 != configs().size())
+                return;
+            std::vector<double> node_T(final_grid_.cells.size() + final_grid_.columns.size());
+            final_temperature_nodes(snapshot.T, node_T, ddm);
+            Eigen::MatrixXd dRo;
+            if (ddm)
+                dRo = easy_ro_.reflectance_sensitivities(snapshot.I, snapshot.Ro, ddm->Z);
+            for (std::size_t i = 0; i < samples.size(); ++i) {
+                const auto& sample = samples[i];
+                double value = sample.constant;
+                for (std::size_t j = 0; j < sample.indices.size(); ++j) {
+                    const auto source = sample.indices[j];
+                    double field;
+                    if (sample.kind == BasinObservable::reflectance) {
+                        if (source >= snapshot.Ro.size())
+                            throw std::out_of_range("Invalid well reflectance index");
+                        field = snapshot.Ro[source];
+                    } else {
+                        field = source < snapshot.T.size() ? snapshot.T[source]
+                                                           : node_T.at(source - snapshot.T.size());
+                    }
+                    if (ddm) {
+                        const bool face = sample.kind == BasinObservable::temperature &&
+                                          source >= snapshot.T.size();
+                        const auto& derivatives = sample.kind == BasinObservable::reflectance
+                                                      ? dRo
+                                                      : (face ? ddm->face_S : ddm->S);
+                        jacobian->row(i) +=
+                            sample.weights[j] *
+                            derivatives.row(face ? source - snapshot.T.size() : source);
+                    }
+                    value += sample.weights[j] * field;
                 }
-                value += sample.weights[j] * field;
+                calculated[static_cast<Vector::Index>(i)] = value;
             }
-            calculated[static_cast<Vector::Index>(i)] = value;
-        }
-    });
+        },
+        false, ddm);
     return calculated;
 }
 
@@ -428,7 +468,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe) const
 }
 
 BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
-                                             bool configuration_output) const {
+                                             bool configuration_output, DdmFields* ddm) const {
     const auto solve_start = Clock::now();
     BasinForwardResult result;
     const auto& input = input_;
@@ -436,7 +476,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
     const auto configs = input.configs();
     const auto& easy_ro = easy_ro_;
     const auto initial_start = Clock::now();
-    Vector T = solve_initial_temperature();
+    Vector T = solve_initial_temperature(ddm ? &ddm->S : nullptr);
     result.timings.initial_s = elapsed_seconds(initial_start);
     if (settings.intermediate_snapshots || configuration_output) {
         const auto initial_I = easy_ro.initial_state(initial_grid_.maturity_node_count);
@@ -446,13 +486,19 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
     auto grid_start = Clock::now();
     ColGrid grid = epochs_.front().initial_grid;
     const int born = epochs_.front().mesh.born_layer_id.value_or(-1);
-    if (born != -1 || !same_transfer_grid(initial_grid_, grid))
-        T = Vector(temperature_transfer(initial_grid_, grid, born) * T.native());
+    if (born != -1 || !same_transfer_grid(initial_grid_, grid)) {
+        const auto P_T = temperature_transfer(initial_grid_, grid, born);
+        T = Vector(P_T * T.native());
+        if (ddm)
+            ddm->S = (P_T * ddm->S).eval();
+    }
     for (const auto& cell : grid.cells) {
         if (cell.layer_id == born)
             T[static_cast<Vector::Index>(cell.index)] = configs.front().T_surf.at(cell.center().x);
     }
     auto I = easy_ro.initial_state(epochs_.front().deposition_times.size());
+    if (ddm)
+        ddm->Z.setZero(I.size(), ddm->eta.size());
     result.epochs.reserve(configs.size() - 1);
     TimeIntegrator integrator;
     integrator.set_linear_solver(settings.linear_solver);
@@ -472,6 +518,8 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
         const auto& epoch = epochs_[epoch_index];
         std::vector<double> face_T(grid.cells.size() + grid.columns.size());
         std::vector<double> node_T0(epoch.deposition_times.size()), node_T1(node_T0.size());
+        Eigen::MatrixXd node_S0, node_S1;
+        Vector dq;
         const auto copy_face_temperatures = [&](std::span<double> material_T) {
             for (const auto& cell : grid.cells) {
                 const auto face = cell.index + cell.column;
@@ -492,6 +540,11 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             interpolate_horizontal_temperature(grid, values(T), lambda,
                                                bc(cfg0, cfg1, 0.0, flux, cfg0.age_ma), face_T);
             copy_face_temperatures(node_T0);
+            if (ddm) {
+                (void)flux->at(cfg0.age_ma, ddm->eta, dq);
+                node_S0 = material_sensitivities(
+                    grid, horizontal_face_sensitivities(grid, lambda, ddm->S, dq));
+            }
         }
         double t = 0.0;
         integrator.set_initial_solution(t, T);
@@ -540,8 +593,19 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             const auto easy_ro_start = Clock::now();
             system.interpolate_horizontal_temperature(T1, end_bc, face_T);
             copy_face_temperatures(node_T1);
+            std::optional<EasyRoStepSensitivities> ro_ddm;
+            if (ddm) {
+                (void)flux->at(std::midpoint(age, end_age), ddm->eta, dq);
+                ddm->S = advance_cell_sensitivities(system, T1, dt, ddm->S, dq);
+                (void)flux->at(end_age, ddm->eta, dq);
+                node_S1 = material_sensitivities(
+                    grid, system.horizontal_face_sensitivities(T1, ddm->S, dq));
+                ro_ddm.emplace(node_S0, node_S1, ddm->Z);
+            }
             easy_ro.advance(node_T0, node_T1, epoch_begin + t, epoch_begin + t_next,
-                            epoch.deposition_times, I);
+                            epoch.deposition_times, I, ro_ddm ? &*ro_ddm : nullptr);
+            if (ddm)
+                node_S0.swap(node_S1);
             node_T0.swap(node_T1);
             step_stats.timings.easy_ro_s += elapsed_seconds(easy_ro_start);
             step_stats.timesteps = step.accepted_steps;
@@ -577,6 +641,10 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
         const auto P_I = maturity_transfer(grid, next_grid, born);
         T = Vector(P_T * integrator.current_snapshot().u.native());
         I = apply_maturity_transfer(P_I, I, easy_ro.reaction_count());
+        if (ddm) {
+            ddm->S = (P_T * ddm->S).eval();
+            ddm->Z = apply_maturity_transfer(P_I, ddm->Z, easy_ro.reaction_count());
+        }
         if (!last && born != -1) {
             for (const auto& cell : next_grid.cells) {
                 if (cell.layer_id == born)

@@ -54,13 +54,20 @@ public:
     [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe = {}) const;
     // Optional Jacobian of the sampled T and Ro with respect to normalized flux parameters.
     [[nodiscard]] Vector solve_at_wells(std::span<const BasinWellSample> samples,
-                                        Eigen::MatrixXd* jacobian = nullptr) const;
+                                        Eigen::MatrixXd* jacobian = nullptr,
+                                        const Vector* eta = nullptr) const;
     [[nodiscard]] BasinForwardResult solve(const std::filesystem::path& output_directory,
                                            const BasinObserver& observe = {}) const;
 
 private:
-    [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe,
-                                           bool configuration_output) const;
+    struct DdmFields {
+        Vector eta;
+        Eigen::MatrixXd S, Z, face_S;
+    };
+    void final_temperature_nodes(std::span<const double> T, std::span<double> node_T,
+                                 DdmFields* ddm) const;
+    [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe, bool configuration_output,
+                                           DdmFields* ddm = nullptr) const;
 
     struct EpochData {
         ColEpochGrid mesh;

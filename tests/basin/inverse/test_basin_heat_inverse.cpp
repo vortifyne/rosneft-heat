@@ -339,8 +339,13 @@ TEST(BasinObjective, SamplesTheDeeperSideOfAContactAndStaysWithinPinchingLayers)
                    0.5 * (snapshot.Ro[cap_top] + snapshot.Ro[cap_top + 1]), 1.0}};
     });
     BasinObjective objective(std::move(forward), BasinHeatObservationData(std::move(points)));
+    Eigen::MatrixXd J;
     const auto [residual, within_errors] =
-        objective.evaluate(objective.parameter_space().to_normalized(flux), 1.0);
+        objective.evaluate(objective.parameter_space().to_normalized(flux), 1.0, &J);
+    ASSERT_EQ(J.rows(), 2);
+    ASSERT_EQ(J.cols(), flux.size());
+    EXPECT_TRUE(J.allFinite());
+    EXPECT_GT(J.norm(), 0.0);
     EXPECT_TRUE(within_errors);
     EXPECT_NEAR(residual[0], 0.0, 1e-12);
     EXPECT_NEAR(residual[1], 0.0, 1e-12);

@@ -2,6 +2,7 @@
 
 #include "basin/discretization/multipoint_flux_types.hpp"
 #include "basin/mesh/col_grid.hpp"
+#include "numerics/algebra/vector.hpp"
 
 #include <array>
 #include <cstddef>
@@ -19,6 +20,11 @@ struct HeatBoundaryData {
 void interpolate_horizontal_temperature(const ColGrid& grid, std::span<const double> T,
                                         std::span<const double> lambda, const HeatBoundaryData& bc,
                                         std::span<double> node_T);
+
+[[nodiscard]] Eigen::MatrixXd horizontal_face_sensitivities(const ColGrid& grid,
+                                                            std::span<const double> lambda,
+                                                            const Eigen::MatrixXd& cell_S,
+                                                            const Vector& dq_deta);
 
 // sum(a[i] * T[cells[i]]) + b; at most four cells for MPFA and NMPFA.
 struct FluxStencil {
@@ -41,7 +47,8 @@ void compute_mpfa_flux(const ColGrid& grid, const VerticalSubface& face,
 
 void compute_nmpfa_flux(const ColGrid& grid, const VerticalSubface& face,
                         std::span<const double> lambda, std::span<const double> T,
-                        const HeatBoundaryData& bc, FluxStencil& stencil, double* dflux_dq = nullptr);
+                        const HeatBoundaryData& bc, FluxStencil& stencil,
+                        double* dflux_dq = nullptr);
 
 void compute_surface_flux(const ColGrid& grid, const VerticalBoundaryFace& face,
                           std::span<const double> lambda, const HeatBoundaryData& bc,

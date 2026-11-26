@@ -152,7 +152,7 @@ Vector BasinObjective::residuals_in_error_units(Vector weighted) const {
 LeastSquaresEvaluation BasinObjective::evaluate(const Vector& eta, double tolerance,
                                                 Eigen::MatrixXd* jacobian) {
     forward_.set_parameters(parameter_space().to_physical(eta));
-    Vector residuals = forward_.solve_at_wells(interpolation_, jacobian);
+    Vector residuals = forward_.solve_at_wells(interpolation_, jacobian, &eta);
     if (residuals.size() != observations_.size() ||
         (jacobian && (jacobian->rows() != residuals.size() || jacobian->cols() != eta.size())))
         throw std::runtime_error("Unexpected basin observation or Jacobian dimensions");
