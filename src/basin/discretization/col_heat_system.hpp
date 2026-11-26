@@ -34,6 +34,9 @@ public:
     void assemble_residual(const Vector& T, Vector& r) const override;
     void assemble_matrix(const Vector& T, SparseMatrix& M) const;
 
+    // Assemble K + alpha*M at T and return the basal forcing -dR/dq.
+    [[nodiscard]] Vector assemble_ddm_matrix(const Vector& T, double alpha,
+                                             SparseMatrix& matrix) const;
     [[nodiscard]] Eigen::MatrixXd assemble_ddm_step(const Vector& T, double dt,
                                                     const Eigen::MatrixXd& previous,
                                                     const Vector& dq_deta,

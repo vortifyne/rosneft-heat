@@ -110,6 +110,21 @@ TEST(BasinHeatObservationData, UsesCelsiusErrorBoundsAndSeparateObservables) {
     std::filesystem::remove_all(path);
 }
 
+TEST(BasinForwardSolver, StationarySensitivityUsesOnlyFirstFluxKnot) {
+    const auto path = small_problem();
+    BasinForwardSolver solver(BasinInput::read(path), small_settings());
+    std::filesystem::remove_all(path);
+    solver.set_parameters(Vector{0.09, 0.08, 0.06});
+    Eigen::MatrixXd S;
+    const Vector T = solver.solve_initial_temperature(&S);
+    ASSERT_EQ(S.rows(), T.size());
+    ASSERT_EQ(S.cols(), 3);
+    EXPECT_TRUE(S.rightCols(2).isZero(0.0));
+    // With uniform surface temperature and no sources, frozen K gives K*(T-Tsurf) = q*basal.
+    for (Vector::Index i = 0; i < T.size(); ++i)
+        EXPECT_NEAR(S(i, 0), (T[i] - 283.15) * 0.05 / 0.09, 1e-4);
+}
+
 TEST(BasinForwardSolver, AdvancesTemperatureAndOptionalCellJacobianWithinEpoch) {
     const auto path = small_problem();
     BasinForwardSolver solver(BasinInput::read(path), small_settings());

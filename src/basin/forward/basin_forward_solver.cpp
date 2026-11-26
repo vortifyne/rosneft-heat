@@ -299,7 +299,10 @@ void BasinForwardSolver::advance_temperature_step(std::size_t index, double age_
     T = accepted_T;
 }
 
-Vector BasinForwardSolver::solve_initial_temperature() const {
+Vector BasinForwardSolver::solve_initial_temperature(Eigen::MatrixXd* jacobian) const {
+    if (jacobian && !use_parameterized_flux_)
+        throw std::logic_error(
+            "Set basal flux parameters before requesting the stationary Jacobian");
     const auto& cfg = input_.configs().front();
     Vector T(static_cast<Vector::Index>(initial_grid_.cells.size()));
     std::vector<double> phi(initial_grid_.cells.size());
@@ -320,6 +323,15 @@ Vector BasinForwardSolver::solve_initial_temperature() const {
     const auto result = solver.solve(system, T, settings_.nonlinear, settings_.linear);
     if (!result.converged())
         throw std::runtime_error("Initial stationary heat solve failed");
+    if (jacobian) {
+        Vector dq_deta;
+        const Vector eta = parameter_space_.to_normalized(parameter_space_.values());
+        (void)parameter_space_.at(cfg.age_ma, eta, dq_deta);
+        SparseMatrix matrix(T.size(), T.size(), SparseStorageOrder::csc);
+        const Vector basal = system.assemble_ddm_matrix(T, 0.0, matrix);
+        const auto dT_dq = UmfpackLinearSolver::solve_columns(matrix, basal.native());
+        *jacobian = dT_dq * dq_deta.native().transpose();
+    }
     return T;
 }
 

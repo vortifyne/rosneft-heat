@@ -40,6 +40,8 @@ public:
     [[nodiscard]] const ColGrid& final_grid() const noexcept;
     void final_temperature_nodes(std::span<const double> T, std::span<double> node_T) const;
 
+    // Stationary fields on the initial configuration grid. Set flux parameters to request dT/deta.
+    [[nodiscard]] Vector solve_initial_temperature(Eigen::MatrixXd* jacobian = nullptr) const;
     [[nodiscard]] const ColGrid& epoch_initial_grid(std::size_t epoch) const {
         return epochs_.at(epoch).initial_grid;
     }
@@ -56,7 +58,6 @@ public:
                                            const BasinObserver& observe = {}) const;
 
 private:
-    [[nodiscard]] Vector solve_initial_temperature() const;
     [[nodiscard]] BasinForwardResult solve(const BasinObserver& observe,
                                            bool configuration_output) const;
 

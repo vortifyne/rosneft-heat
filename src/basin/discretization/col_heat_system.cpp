@@ -148,7 +148,18 @@ Eigen::MatrixXd ColHeatSystem::assemble_ddm_step(const Vector& T, double dt,
         previous.cols() != dq_deta.size() || dq_deta.empty() || rho_c_.empty())
         throw std::invalid_argument("Invalid BDF1 sensitivity dimensions, capacity or timestep");
     const double alpha = 1.0 / dt;
-    // shortcut: the Picard matrix freezes coefficients at T; use the full tangent for exact sensitivities.
+    const Vector basal = assemble_ddm_matrix(T, alpha, matrix);
+    Eigen::MatrixXd rhs(size(), previous.cols());
+    for (const auto& cell : grid_->cells) {
+        const auto i = cell.index;
+        rhs.row(i) = alpha * cell.area() * rho_c_[i] * previous.row(i) +
+                     basal[i] * dq_deta.native().transpose();
+    }
+    return rhs;
+}
+
+Vector ColHeatSystem::assemble_ddm_matrix(const Vector& T, double alpha, SparseMatrix& matrix) const {
+    // Picard matrix freezes coefficients at T; use Newton matrix for exact derivatives.
     assemble_matrix(T, alpha, matrix);
 
     Vector basal(size());
@@ -180,14 +191,7 @@ Eigen::MatrixXd ColHeatSystem::assemble_ddm_step(const Vector& T, double dt,
             basal[face.cell] -= stencil.b;
         }
     }
-
-    Eigen::MatrixXd rhs(size(), previous.cols());
-    for (const auto& cell : grid_->cells) {
-        const auto i = cell.index;
-        rhs.row(i) = alpha * cell.area() * rho_c_[i] * previous.row(i) +
-                     basal[i] * dq_deta.native().transpose();
-    }
-    return rhs;
+    return basal;
 }
 
 void ColHeatSystem::add_mpfa_residual(const Vector& T, Vector& r) const {
