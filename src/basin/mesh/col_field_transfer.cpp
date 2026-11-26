@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <stdexcept>
 #include <utility>
 
 namespace {
@@ -27,7 +28,30 @@ double fraction(double value, double left, double right) {
     return left == right ? 0.0 : (value - left) / (right - left);
 }
 
+using Weights = std::vector<Eigen::Triplet<double>>;
+
+void add_weights(Weights& entries, std::size_t target, std::size_t l0, std::size_t l1,
+                 std::size_t r0, std::size_t r1, double wl, double wr, double wx) {
+    const auto add = [&](std::size_t source, double weight) {
+        if (weight != 0.0)
+            entries.emplace_back(target, source, weight);
+    };
+    add(l0, (1.0 - wx) * (1.0 - wl));
+    add(l1, (1.0 - wx) * wl);
+    add(r0, wx * (1.0 - wr));
+    add(r1, wx * wr);
+}
+
 } // namespace
+
+bool same_transfer_grid(const ColGrid& a, const ColGrid& b) {
+    return a.x == b.x && a.columns == b.columns && a.maturity_node_count == b.maturity_node_count &&
+           std::equal(a.cells.begin(), a.cells.end(), b.cells.begin(), b.cells.end(),
+                      [](const ColCell& p, const ColCell& q) {
+                          return p.z_top == q.z_top && p.z_bottom == q.z_bottom &&
+                                 p.layer_id == q.layer_id && p.maturity_top == q.maturity_top;
+                      });
+}
 
 std::vector<double> horizontal_node_depths(const ColGrid& grid) {
     std::vector<double> z(grid.cells.size() + grid.columns.size());
@@ -42,9 +66,14 @@ std::vector<double> horizontal_node_depths(const ColGrid& grid) {
     return z;
 }
 
-Vector interpolate_temperature(const ColGrid& old_grid, const ColGrid& new_grid,
-                               const Vector& old_T) {
-    Vector T(static_cast<Vector::Index>(new_grid.cells.size()));
+ColTransferOperator temperature_transfer(const ColGrid& old_grid, const ColGrid& new_grid,
+                                         int prescribed_layer_id) {
+    ColTransferOperator P(new_grid.cells.size(), old_grid.cells.size());
+    if (prescribed_layer_id == -1 && same_transfer_grid(old_grid, new_grid)) {
+        P.setIdentity();
+        return P;
+    }
+    Weights entries;
     std::vector<std::size_t> columns(old_grid.columns.size());
     std::iota(columns.begin(), columns.end(), 0);
     const auto x = [&](std::size_t column) {
@@ -58,6 +87,8 @@ Vector interpolate_temperature(const ColGrid& old_grid, const ColGrid& new_grid,
         const double wx = fraction(target_x, x(left), x(right));
         std::size_t left_upper = 0, right_upper = 0;
         for (const std::size_t cell : new_grid.columns[column]) {
+            if (new_grid.cells[cell].layer_id == prescribed_layer_id)
+                continue;
             const double target_z = new_grid.cells[cell].center().z;
             const auto [l0, l1] =
                 neighboring_indices(old_grid.columns[left], target_z, left_upper, true, z);
@@ -65,20 +96,21 @@ Vector interpolate_temperature(const ColGrid& old_grid, const ColGrid& new_grid,
                 neighboring_indices(old_grid.columns[right], target_z, right_upper, true, z);
             const double wl = fraction(target_z, z(l0), z(l1));
             const double wr = fraction(target_z, z(r0), z(r1));
-            const double left_T = std::lerp(old_T[static_cast<Vector::Index>(l0)],
-                                            old_T[static_cast<Vector::Index>(l1)], wl);
-            const double right_T = std::lerp(old_T[static_cast<Vector::Index>(r0)],
-                                             old_T[static_cast<Vector::Index>(r1)], wr);
-            T[static_cast<Vector::Index>(cell)] = std::lerp(left_T, right_T, wx);
+            add_weights(entries, cell, l0, l1, r0, r1, wl, wr, wx);
         }
     }
-    return T;
+    P.setFromTriplets(entries.begin(), entries.end());
+    return P;
 }
 
-std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, const ColGrid& new_grid,
-                                                   std::span<const double> old_I,
-                                                   std::size_t reaction_count, int born_layer_id) {
-    std::vector<double> I(new_grid.maturity_node_count * reaction_count, 0.0);
+ColTransferOperator maturity_transfer(const ColGrid& old_grid, const ColGrid& new_grid,
+                                      int born_layer_id) {
+    ColTransferOperator P(new_grid.maturity_node_count, old_grid.maturity_node_count);
+    if (born_layer_id == -1 && same_transfer_grid(old_grid, new_grid)) {
+        P.setIdentity();
+        return P;
+    }
+    Weights entries;
     std::vector<double> old_z(old_grid.maturity_node_count);
     for (const auto& cell : old_grid.cells) {
         old_z[cell.maturity_top] = cell.z_top;
@@ -145,15 +177,53 @@ std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, cons
                 const auto [r0, r1] = neighbors(rows[right], right_upper);
                 const double wl = fraction(target_z, z(l0), z(l1));
                 const double wr = fraction(target_z, z(r0), z(r1));
-                for (std::size_t reaction = 0; reaction < reaction_count; ++reaction) {
-                    const double left_I = std::lerp(old_I[l0 * reaction_count + reaction],
-                                                    old_I[l1 * reaction_count + reaction], wl);
-                    const double right_I = std::lerp(old_I[r0 * reaction_count + reaction],
-                                                     old_I[r1 * reaction_count + reaction], wr);
-                    I[node * reaction_count + reaction] = std::lerp(left_I, right_I, wx);
-                }
+                add_weights(entries, node, l0, l1, r0, r1, wl, wr, wx);
             }
         }
     }
-    return I;
+    P.setFromTriplets(entries.begin(), entries.end());
+    return P;
+}
+
+namespace {
+// A column of Z has the same node-major layout as I. Each reaction is one field.
+void apply_reactions(const ColTransferOperator& P, const double* source, double* target,
+                     std::size_t reactions) {
+    using Fields = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    Eigen::Map<Fields> out(target, P.rows(), reactions);
+    out.noalias() = P * Eigen::Map<const Fields>(source, P.cols(), reactions);
+}
+} // namespace
+
+std::vector<double> apply_maturity_transfer(const ColTransferOperator& P, std::span<const double> I,
+                                            std::size_t reactions) {
+    if (I.size() != static_cast<std::size_t>(P.cols()) * reactions)
+        throw std::invalid_argument("Maturity field does not match source grid");
+    std::vector<double> result(static_cast<std::size_t>(P.rows()) * reactions);
+    apply_reactions(P, I.data(), result.data(), reactions);
+    return result;
+}
+
+Eigen::MatrixXd apply_maturity_transfer(const ColTransferOperator& P, const Eigen::MatrixXd& Z,
+                                        std::size_t reactions) {
+    if (static_cast<std::size_t>(Z.rows()) != static_cast<std::size_t>(P.cols()) * reactions)
+        throw std::invalid_argument("Maturity sensitivities do not match source grid");
+    Eigen::MatrixXd result(P.rows() * static_cast<Eigen::Index>(reactions), Z.cols());
+    for (Eigen::Index j = 0; j < Z.cols(); ++j)
+        apply_reactions(P, Z.col(j).data(), result.col(j).data(), reactions);
+    return result;
+}
+
+Vector interpolate_temperature(const ColGrid& old_grid, const ColGrid& new_grid,
+                               const Vector& old_T) {
+    if (static_cast<std::size_t>(old_T.size()) != old_grid.cells.size())
+        throw std::invalid_argument("Temperature field does not match source grid");
+    return Vector(temperature_transfer(old_grid, new_grid) * old_T.native());
+}
+
+std::vector<double> interpolate_reaction_integrals(const ColGrid& old_grid, const ColGrid& new_grid,
+                                                   std::span<const double> old_I,
+                                                   std::size_t reaction_count, int born_layer_id) {
+    return apply_maturity_transfer(maturity_transfer(old_grid, new_grid, born_layer_id), old_I,
+                                   reaction_count);
 }

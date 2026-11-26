@@ -445,8 +445,9 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
     }
     auto grid_start = Clock::now();
     ColGrid grid = epochs_.front().initial_grid;
-    T = interpolate_temperature(initial_grid_, grid, T);
     const int born = epochs_.front().mesh.born_layer_id.value_or(-1);
+    if (born != -1 || !same_transfer_grid(initial_grid_, grid))
+        T = Vector(temperature_transfer(initial_grid_, grid, born) * T.native());
     for (const auto& cell : grid.cells) {
         if (cell.layer_id == born)
             T[static_cast<Vector::Index>(cell.index)] = configs.front().T_surf.at(cell.center().x);
@@ -572,8 +573,10 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
         ColGrid next_grid = last ? final_grid_ : epochs_[epoch_index + 1].initial_grid;
         epoch_stats.timings.grid_s += elapsed_seconds(grid_start);
         const auto transfer_start = Clock::now();
-        T = interpolate_temperature(grid, next_grid, integrator.current_snapshot().u);
-        I = interpolate_reaction_integrals(grid, next_grid, I, easy_ro.reaction_count(), born);
+        const auto P_T = temperature_transfer(grid, next_grid, last ? -1 : born);
+        const auto P_I = maturity_transfer(grid, next_grid, born);
+        T = Vector(P_T * integrator.current_snapshot().u.native());
+        I = apply_maturity_transfer(P_I, I, easy_ro.reaction_count());
         if (!last && born != -1) {
             for (const auto& cell : next_grid.cells) {
                 if (cell.layer_id == born)
