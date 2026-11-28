@@ -19,9 +19,11 @@ struct BasinHeatInverseSolveRequest {
                                           .maxfev = 100,
                                           .residual_tolerance = 1.0};
     BasinInverseMethod method = BasinInverseMethod::pounders;
+    double regularization = 0.0;
 };
 
-// Optimizer iteration, forward evaluation, physical parameters, normalized residuals.
+// Optimizer iteration, forward evaluation, physical parameters, weighted data and penalty
+// residuals.
 using BasinInverseObserver = std::function<void(int, int, const Vector&, const Vector&)>;
 
 class BasinHeatInverseSolver {

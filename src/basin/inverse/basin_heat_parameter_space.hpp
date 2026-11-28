@@ -19,7 +19,10 @@ public:
     [[nodiscard]] double at(double age_ma, const Vector& eta, Vector& dq_deta) const;
 
     [[nodiscard]] Vector to_normalized(const Vector& parameters) const;
-    [[nodiscard]] Vector to_physical(const Vector& eta) const;
+    [[nodiscard]] Vector to_physical(const Vector& eta, Eigen::MatrixXd* jacobian = nullptr) const;
+    [[nodiscard]] Vector::Index gradient_penalty_size(double regularization) const;
+    void append_gradient_penalty(double regularization, const Vector& eta, Vector& residuals,
+                                 Eigen::MatrixXd* jacobian) const;
     [[nodiscard]] Vector normalized_lower_bounds() const;
     [[nodiscard]] Vector normalized_upper_bounds() const;
 

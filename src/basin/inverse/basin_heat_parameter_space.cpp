@@ -97,11 +97,48 @@ Vector BasinHeatParameterSpace::to_normalized(const Vector& parameters) const {
     return eta;
 }
 
-Vector BasinHeatParameterSpace::to_physical(const Vector& eta) const {
+Vector BasinHeatParameterSpace::to_physical(const Vector& eta, Eigen::MatrixXd* jacobian) const {
     Vector flux = prefix_products(eta, flux_.size());
+    if (jacobian) {
+        jacobian->setZero(eta.size(), eta.size());
+        for (Vector::Index i = 0; i < eta.size(); ++i) {
+            if (i > 0)
+                jacobian->row(i) = eta[i] * jacobian->row(i - 1);
+            (*jacobian)(i, i) = (kMaximumFlux - kMinimumFlux) * (i == 0 ? 1.0 : flux[i - 1]);
+        }
+    }
     for (Vector::Index i = 0; i < flux.size(); ++i)
         flux[i] = knot_flux(flux[i]);
     return flux;
+}
+
+Vector::Index BasinHeatParameterSpace::gradient_penalty_size(double regularization) const {
+    if (!std::isfinite(regularization) || regularization < 0.0)
+        throw std::invalid_argument("Flux gradient regularization must be finite and non-negative");
+    return regularization == 0.0 ? 0 : flux_.size() - 1;
+}
+
+void BasinHeatParameterSpace::append_gradient_penalty(double regularization, const Vector& eta,
+                                                      Vector& residuals,
+                                                      Eigen::MatrixXd* jacobian) const {
+    const auto intervals = gradient_penalty_size(regularization);
+    if (intervals == 0)
+        return;
+    Eigen::MatrixXd dq;
+    const Vector q = to_physical(eta, jacobian ? &dq : nullptr);
+    const auto offset = residuals.size();
+    residuals.native().conservativeResize(offset + intervals);
+    if (jacobian)
+        jacobian->conservativeResize(offset + intervals, Eigen::NoChange);
+    const double span = ages_ma_.front() - ages_ma_.back();
+    const double normalization = std::sqrt(regularization) / (kMaximumFlux - kMinimumFlux);
+    for (Vector::Index i = 0; i < intervals; ++i) {
+        const double dt = ages_ma_[i] - ages_ma_[i + 1];
+        const double scale = normalization * std::sqrt(span / dt);
+        residuals[offset + i] = scale * (q[i + 1] - q[i]);
+        if (jacobian)
+            jacobian->row(offset + i) = scale * (dq.row(i + 1) - dq.row(i));
+    }
 }
 
 Vector BasinHeatParameterSpace::normalized_lower_bounds() const {

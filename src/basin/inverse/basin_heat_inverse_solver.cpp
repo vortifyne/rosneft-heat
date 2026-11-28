@@ -14,10 +14,11 @@ Vector BasinHeatInverseSolver::solve(const BasinHeatInverseSolveRequest& request
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = space.normalized_lower_bounds(),
         .upper_bounds = space.normalized_upper_bounds(),
-        .residual_count = objective_.observations().size(),
+        .residual_count =
+            objective_.observations().size() + space.gradient_penalty_size(request.regularization),
         .objective =
             [&](const Vector& eta, double tolerance, Eigen::MatrixXd* jacobian) {
-                return objective_.evaluate(eta, tolerance, jacobian);
+                return objective_.evaluate(eta, tolerance, jacobian, request.regularization);
             },
     };
     const Vector initial = space.to_normalized(request.initial_parameters);

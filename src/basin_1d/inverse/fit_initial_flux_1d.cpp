@@ -10,7 +10,8 @@ Vector fit_initial_flux_1d(const BasinForwardSolver1D& section,
                            const BasinHeatParameterSpace& space,
                            const BasinHeatObservationData& observations,
                            std::span<const std::string> wells,
-                           const LeastSquaresSolveRequest& options, std::ostream& log) {
+                           const LeastSquaresSolveRequest& options, std::ostream& log,
+                           double regularization) {
     auto points = select_section_observations(section.section(), observations.points(), wells, log);
     if (points.empty()) {
         log << "1D: no observations in section; using constant initial flux for 2D\n";
@@ -20,11 +21,14 @@ Vector fit_initial_flux_1d(const BasinForwardSolver1D& section,
     const BoundedLeastSquaresProblem problem{
         .lower_bounds = space.normalized_lower_bounds(),
         .upper_bounds = space.normalized_upper_bounds(),
-        .residual_count = selected.size(),
+        .residual_count = selected.size() + space.gradient_penalty_size(regularization),
         .objective =
             [&](const Vector& eta, double tolerance, Eigen::MatrixXd* jacobian) {
                 auto predictions = section.solve_at_wells(selected.points(), space, eta, jacobian);
-                return selected.evaluate_predictions(std::move(predictions), tolerance, jacobian);
+                auto evaluation =
+                    selected.evaluate_predictions(std::move(predictions), tolerance, jacobian);
+                space.append_gradient_penalty(regularization, eta, evaluation.residuals, jacobian);
+                return evaluation;
             },
     };
     Vector best = space.to_normalized(space.values());

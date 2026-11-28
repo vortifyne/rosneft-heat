@@ -140,10 +140,12 @@ Vector BasinObjective::residuals_in_error_units(Vector weighted) const {
 }
 
 LeastSquaresEvaluation BasinObjective::evaluate(const Vector& eta, double tolerance,
-                                                Eigen::MatrixXd* jacobian) {
+                                                Eigen::MatrixXd* jacobian, double regularization) {
     forward_.set_parameters(parameter_space().to_physical(eta));
     Vector residuals = forward_.solve_at_wells(interpolation_, jacobian, &eta);
     if (jacobian && jacobian->cols() != eta.size())
         throw std::runtime_error("Unexpected basin Jacobian column count");
-    return observations_.evaluate_predictions(std::move(residuals), tolerance, jacobian);
+    auto evaluation = observations_.evaluate_predictions(std::move(residuals), tolerance, jacobian);
+    parameter_space().append_gradient_penalty(regularization, eta, evaluation.residuals, jacobian);
+    return evaluation;
 }

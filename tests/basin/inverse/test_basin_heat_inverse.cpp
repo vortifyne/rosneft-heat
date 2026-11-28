@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -111,6 +112,47 @@ TEST(BasinHeatObservationData, UsesCelsiusErrorBoundsAndSeparateObservables) {
     EXPECT_DOUBLE_EQ(data.points()[1].value, 0.5);
     EXPECT_DOUBLE_EQ(data.points()[1].error, 0.01);
     std::filesystem::remove_all(path);
+}
+
+TEST(BasinObjective, BalancesObservationGroupsAndDifferentiatesTheFluxPenalty) {
+    const auto path = small_problem();
+    BasinForwardSolver forward(BasinInput::read(path), small_settings());
+    std::filesystem::remove_all(path);
+    const BasinHeatParameterSpace space({20, 15, 0}, {0.09, 0.08, 0.06});
+    forward.set_parameters(space);
+    using enum BasinObservable;
+    const BasinHeatObservationData data({{temperature, "A", 500, 0, 281.15, 1},
+                                         {temperature, "B", 500, 0, 281.15, 1},
+                                         {reflectance, "A", 500, 100, 0.5, 0.1}});
+    Eigen::MatrixXd J = Eigen::MatrixXd::Ones(3, 1);
+    const auto measured = data.evaluate_predictions({283.15, 283.15, 0.8}, 2.5, &J);
+    EXPECT_FALSE(measured.within_errors);
+    EXPECT_NEAR(least_squares_objective(measured.residuals), (4. + 9.) / 2., 1e-12);
+    EXPECT_NEAR(J(0, 0), 1. / std::sqrt(2.), 1e-14);
+    EXPECT_DOUBLE_EQ(J(2, 0), 10.);
+
+    BasinObjective objective(std::move(forward), data);
+    const Vector eta = space.to_normalized(space.values());
+    const auto plain = objective.evaluate(eta, 0., &J);
+    ASSERT_EQ(J.rows(), 3);
+    const auto regularized = objective.evaluate(eta, 0., &J, 4.);
+    ASSERT_EQ(J.rows(), 5);
+    ASSERT_EQ(regularized.residuals.size(), 5);
+    EXPECT_TRUE(regularized.residuals.native().head(3).isApprox(plain.residuals.native()));
+    EXPECT_EQ(data.residuals_in_error_units(regularized.residuals).size(), 3);
+    EXPECT_NEAR(data.residuals_in_error_units(regularized.residuals)[0], 2., 1e-10);
+    // The two slopes are -0.8 and -8/15 in characteristic-gradient units.
+    const double penalty = 2. * (0.25 * 0.8 * 0.8 + 0.75 * std::pow(8. / 15., 2));
+    EXPECT_NEAR(0.5 * regularized.residuals.native().tail(2).squaredNorm(), penalty, 1e-12);
+    for (Vector::Index j = 0; j < eta.size(); ++j) {
+        Vector low = eta, high = eta;
+        low[j] -= 1e-5;
+        high[j] += 1e-5;
+        const auto difference = (objective.evaluate(high, 0., nullptr, 4.).residuals -
+                                 objective.evaluate(low, 0., nullptr, 4.).residuals) /
+                                2e-5;
+        EXPECT_TRUE(J.col(j).tail(2).isApprox(difference.native().tail(2), 1e-9));
+    }
 }
 
 TEST(BasinForwardSolver, StationarySensitivityUsesOnlyFirstFluxKnot) {
@@ -381,8 +423,10 @@ TEST(BasinForwardSolver1D, MatchesLayeredBasinAtWellsAcrossDepositionAndFluxKnot
     BasinObjective reference(std::move(forward), BasinHeatObservationData(points));
     Eigen::MatrixXd J, expected_J;
     const auto expected = reference.evaluate(eta, 1., &expected_J).residuals;
-    const auto actual = section.solve_at_wells(points, space, eta, &J);
-    EXPECT_LT((section.solve_at_wells(points, space, eta) - actual).infinity_norm(), 1e-9);
+    const auto predictions = section.solve_at_wells(points, space, eta, &J);
+    EXPECT_LT((section.solve_at_wells(points, space, eta) - predictions).infinity_norm(), 1e-9);
+    const auto actual =
+        reference.observations().evaluate_predictions(predictions, 1., &J).residuals;
     for (Eigen::Index i = 0; i < actual.size(); ++i) {
         EXPECT_NEAR(actual[i], expected[i], 1.e-7 * std::max(1., std::abs(expected[i])));
         EXPECT_LT((J.row(i) - expected_J.row(i)).norm(),

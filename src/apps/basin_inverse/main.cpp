@@ -40,6 +40,7 @@ int main(int argc, char* argv[]) {
         const BasinHeatInverseSolveRequest request;
         write_basin_forward_settings(std::cout, BasinForwardSettings{});
         std::cout << "initial_q=" << default_initial_flux
+                  << "\nregularization=" << request.regularization
                   << "\nmaxiter=" << request.optimization.maxiter
                   << "\nmaxfev=" << request.optimization.maxfev
                   << "\nresidual_tol=" << request.optimization.residual_tolerance << '\n';
@@ -50,7 +51,8 @@ int main(int argc, char* argv[]) {
             << "Usage: basin_inverse_solver <input-dir> <output-dir> "
                "[--method pounders|gauss-newton] [--initial-q mW/m2] [--initial-parameters csv] "
                "[--section-x m --section-well name ...] [--maxiter n] [--maxfev n] "
-               "[--residual-tol value] [--save-forward] [forward options...] [PETSc -options...]\n";
+               "[--regularization alpha] [--residual-tol value] [--save-forward] "
+               "[forward options...] [PETSc -options...]\n";
         return 1;
     }
     std::vector<char*> petsc_arguments{argv[0]};
@@ -92,6 +94,8 @@ int main(int argc, char* argv[]) {
                 request.optimization.maxiter = std::stoi(value);
             else if (option == "--maxfev")
                 request.optimization.maxfev = std::stoi(value);
+            else if (option == "--regularization")
+                request.regularization = std::stod(value);
             else if (option == "--residual-tol")
                 request.optimization.residual_tolerance = std::stod(value);
             else
@@ -134,9 +138,9 @@ int main(int argc, char* argv[]) {
                 forward.set_parameters(std::move(initial));
             }
             if (section) {
-                forward.set_parameters(fit_initial_flux_1d(*section, forward.parameter_space(),
-                                                           observations, section_wells,
-                                                           request.optimization, std::cout));
+                forward.set_parameters(fit_initial_flux_1d(
+                    *section, forward.parameter_space(), observations, section_wells,
+                    request.optimization, std::cout, request.regularization));
                 section.reset();
             }
             request.initial_parameters = forward.parameter_space().values();
@@ -215,8 +219,8 @@ int main(int argc, char* argv[]) {
             std::ofstream summary(output / "summary.txt");
             write_basin_forward_settings(summary, settings);
             summary << std::setprecision(17) << "termination=" << termination(result.status)
-                    << "\nparameters=" << parameters.size()
-                    << "\nobservations=" << result.residuals.size()
+                    << "\nparameters=" << parameters.size() << "\nobservations=" << points.size()
+                    << "\nregularization=" << request.regularization
                     << "\nobjective=" << result.objective
                     << "\nmax_normalized_residual=" << normalized.infinity_norm()
                     << "\ntemperature_in_tolerance=" << temperature_inside

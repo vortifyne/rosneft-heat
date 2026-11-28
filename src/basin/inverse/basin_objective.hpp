@@ -13,7 +13,8 @@ public:
     [[nodiscard]] BasinForwardSolver& forward_solver() noexcept;
     [[nodiscard]] Vector residuals_in_error_units(Vector weighted) const;
     [[nodiscard]] LeastSquaresEvaluation evaluate(const Vector& eta, double tolerance,
-                                                  Eigen::MatrixXd* jacobian = nullptr);
+                                                  Eigen::MatrixXd* jacobian = nullptr,
+                                                  double regularization = 0.0);
 
 private:
     BasinForwardSolver forward_;

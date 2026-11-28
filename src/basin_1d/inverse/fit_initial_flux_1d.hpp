@@ -10,5 +10,5 @@
                                          const BasinHeatParameterSpace& space,
                                          const BasinHeatObservationData& observations,
                                          std::span<const std::string> wells,
-                                         const LeastSquaresSolveRequest& options,
-                                         std::ostream& log);
+                                         const LeastSquaresSolveRequest& options, std::ostream& log,
+                                         double regularization = 0.0);

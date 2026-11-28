@@ -30,5 +30,8 @@ public:
     [[nodiscard]] Vector residuals_in_error_units(Vector weighted) const;
 
 private:
+    [[nodiscard]] double group_scale(BasinObservable kind) const noexcept;
     std::vector<BasinObservation> points_;
+    double temperature_scale_;
+    double reflectance_scale_;
 };
