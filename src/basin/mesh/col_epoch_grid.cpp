@@ -1,6 +1,7 @@
 #include "basin/mesh/col_epoch_grid.hpp"
 
 #include "basin/geometry/basin_geometry_rdp.hpp"
+#include "basin/mesh/vertical_grid.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -47,15 +48,7 @@ ColEpochGrid make_col_epoch_grid(const BasinGeometry& first, const BasinGeometry
         auto end = second.mean_boundaries(left, right);
         if (birth)
             start.insert(start.begin(), start.front());
-        std::vector<std::size_t> rows;
-        for (std::size_t layer = 0; layer < result.layer_ids.size(); ++layer) {
-            const double thickness =
-                std::max(start[layer + 1] - start[layer], end[layer + 1] - end[layer]);
-            rows.push_back(
-                thickness > 1.0e-12
-                    ? std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(thickness / dz)))
-                    : 0);
-        }
+        auto rows = vertical_epoch_rows(start, end, dz);
         result.z0.push_back(std::move(start));
         result.z1.push_back(std::move(end));
         result.rows.push_back(std::move(rows));
@@ -70,29 +63,9 @@ ColGrid ColEpochGrid::at(double theta) const {
     result.x = x;
     result.columns.resize(rows.size());
     for (std::size_t column = 0; column < rows.size(); ++column) {
-        std::vector<double> boundaries(layer_ids.size() + 1);
-        for (std::size_t i = 0; i < boundaries.size(); ++i)
-            boundaries[i] = std::lerp(z0[column][i], z1[column][i], theta);
-        if (born_layer_id && rows[column].front() > 0) {
-            // Unfold the new layer from bottom to top. A node reaches the surface
-            // at theta = 1 - a, where a is its final relative depth in the layer.
-            const auto count = rows[column].front();
-            const double height = z1[column][1] - z1[column][0];
-            std::vector<double> depths{boundaries.front()};
-            std::vector<int> ids(count, *born_layer_id);
-            std::vector<std::size_t> counts(count, 1);
-            for (std::size_t row = 1; row <= count; ++row) {
-                const double a = static_cast<double>(row) / static_cast<double>(count);
-                depths.push_back(boundaries.front() + height * std::max(0.0, theta + a - 1.0));
-            }
-            ids.insert(ids.end(), layer_ids.begin() + 1, layer_ids.end());
-            counts.insert(counts.end(), rows[column].begin() + 1, rows[column].end());
-            depths.insert(depths.end(), boundaries.begin() + 2, boundaries.end());
-            basin_detail::append_column_cells(result, column, ids, depths, counts, dz_min);
-        } else {
-            basin_detail::append_column_cells(result, column, layer_ids, boundaries, rows[column],
-                                              dz_min);
-        }
+        const auto faces = vertical_epoch_faces(z0[column], z1[column], rows[column],
+                                                born_layer_id.has_value(), theta, dz_min);
+        basin_detail::append_column_cells(result, column, layer_ids, faces, rows[column]);
     }
     rebuild_col_faces(result);
     return result;

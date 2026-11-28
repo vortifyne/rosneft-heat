@@ -1,6 +1,7 @@
 #include "basin/mesh/col_grid.hpp"
 
 #include "basin/geometry/basin_geometry.hpp"
+#include "basin/mesh/vertical_grid.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -161,52 +162,25 @@ void rebuild_col_faces(ColGrid& result) {
 
 void basin_detail::append_column_cells(ColGrid& grid, std::size_t column,
                                        std::span<const int> layer_ids,
-                                       std::span<const double> boundaries,
-                                       std::span<const std::size_t> rows, double dz_min) {
-    std::vector<double> thickness(rows.size(), 0.0);
-    double required = 0.0, available = 0.0;
-    for (std::size_t layer = 0; layer < rows.size(); ++layer) {
-        if (rows[layer] == 0)
-            continue;
-        thickness[layer] = std::max(0.0, boundaries[layer + 1] - boundaries[layer]);
-        const double floor = static_cast<double>(rows[layer]) * dz_min;
-        required += std::max(0.0, floor - thickness[layer]);
-        available += std::max(0.0, thickness[layer] - floor);
-    }
-    if (required > available + 1.0e-9)
-        throw std::runtime_error("Minimum cell height exceeds column height");
-    if (required > 0.0) {
-        for (std::size_t layer = 0; layer < rows.size(); ++layer) {
-            if (rows[layer] == 0)
-                continue;
-            const double floor = static_cast<double>(rows[layer]) * dz_min;
-            if (thickness[layer] < floor)
-                thickness[layer] = floor;
-            else if (available > 0.0)
-                thickness[layer] -= required * (thickness[layer] - floor) / available;
-        }
-    }
-    double cursor = boundaries.front();
+                                       std::span<const double> faces,
+                                       std::span<const std::size_t> rows) {
+    std::size_t face = 0;
     for (std::size_t layer = 0; layer < rows.size(); ++layer) {
         const std::size_t count = rows[layer];
         for (std::size_t row = 0; row < count; ++row) {
-            const double top =
-                cursor + thickness[layer] * static_cast<double>(row) / static_cast<double>(count);
-            const double bottom = cursor + thickness[layer] * static_cast<double>(row + 1) /
-                                               static_cast<double>(count);
             const std::size_t index = grid.cells.size();
             grid.cells.push_back({.index = index,
                                   .column = column,
                                   .layer_id = layer_ids[layer],
                                   .x_left = grid.x[column],
                                   .x_right = grid.x[column + 1],
-                                  .z_top = top,
-                                  .z_bottom = bottom,
+                                  .z_top = faces[face],
+                                  .z_bottom = faces[face + 1],
                                   .upward = std::nullopt,
                                   .downward = std::nullopt});
             grid.columns[column].push_back(index);
+            ++face;
         }
-        cursor += thickness[layer];
     }
 }
 
@@ -238,7 +212,8 @@ ColGrid make_col_grid(const BasinGeometry& geometry, std::vector<double> x, doub
                 rows[layer] =
                     std::max<std::size_t>(1, static_cast<std::size_t>(std::ceil(thickness / dz)));
         }
-        basin_detail::append_column_cells(result, column, layer_ids, boundaries, rows, 0.0);
+        basin_detail::append_column_cells(result, column, layer_ids,
+                                          vertical_faces(boundaries, rows, 0.0), rows);
         if (result.columns[column].empty())
             throw std::runtime_error("Nonmatching column contains no material");
     }

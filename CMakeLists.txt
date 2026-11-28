@@ -71,6 +71,7 @@ add_library(basin_data STATIC
   src/basin/io/basin_parameters.cpp
   src/basin/geometry/basin_geometry.cpp
   src/basin/geometry/basin_geometry_rdp.cpp
+  src/basin/mesh/vertical_grid.cpp
   src/basin/mesh/col_epoch_grid.cpp
   src/basin/mesh/col_field_transfer.cpp
   src/basin/mesh/col_grid.cpp
@@ -78,6 +79,10 @@ add_library(basin_data STATIC
 )
 heat_configure_target(basin_data)
 target_link_libraries(basin_data PUBLIC basin_physics Eigen3::Eigen)
+
+add_library(basin_1d STATIC src/basin_1d/geometry/basin_section_1d.cpp)
+heat_configure_target(basin_1d)
+target_link_libraries(basin_1d PUBLIC basin_data)
 
 add_library(basin_heat_forward STATIC
   src/basin/forward/basin_forward_solver.cpp
@@ -152,6 +157,7 @@ if(BUILD_TESTING)
 
   add_executable(basin_heat_tests
     tests/main.cpp
+    tests/basin_1d/geometry/test_basin_section_1d.cpp
     tests/basin/geometry/test_basin_geometry.cpp
     tests/basin/mesh/test_col_epoch_grid.cpp
     tests/basin/mesh/test_col_field_transfer.cpp
@@ -170,7 +176,7 @@ if(BUILD_TESTING)
   heat_configure_target(basin_heat_tests)
   target_include_directories(basin_heat_tests PRIVATE ${PROJECT_SOURCE_DIR}/tests)
   target_link_libraries(basin_heat_tests PRIVATE
-    basin_heat_inverse
+    basin_heat_inverse basin_1d
     GTest::gtest PkgConfig::PETSc MPI::MPI_CXX
   )
   gtest_discover_tests(basin_heat_tests PROPERTIES LABELS basin)

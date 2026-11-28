@@ -84,7 +84,6 @@ namespace basin_detail {
 
 // Shared cell construction for epoch grids and static geometry snapshots.
 void append_column_cells(ColGrid& grid, std::size_t column, std::span<const int> layer_ids,
-                         std::span<const double> boundaries, std::span<const std::size_t> rows,
-                         double dz_min);
+                         std::span<const double> faces, std::span<const std::size_t> rows);
 
 } // namespace basin_detail
