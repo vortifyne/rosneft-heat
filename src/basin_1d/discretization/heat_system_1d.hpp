@@ -22,6 +22,11 @@ public:
     void assemble_matrix(NonlinearMethod method, double t, const Vector& T, const Vector& dT_dt,
                          double alpha, SparseMatrix& A) const override;
 
+    Eigen::MatrixXd assemble_ddm(const Vector& T, double alpha, const Eigen::MatrixXd& previous,
+                                 const Vector& dq, SparseMatrix& A) const;
+    Vector face_temperatures(const Vector& T, double end_flux, const Eigen::MatrixXd& S,
+                             const Vector& dq, Eigen::MatrixXd* face_S) const;
+
 private:
     void assemble_picard_matrix(const Vector& T, SparseMatrix& A) const override;
     void assemble_newton_matrix(const Vector&, SparseMatrix&) const override;
@@ -34,5 +39,5 @@ private:
     FluidProperties fluid_;
     double surface_temperature_, basal_flux_;
     std::vector<double> dz_;
-    mutable std::vector<double> conductance_, mass_, source_;
+    mutable std::vector<double> conductance_, mass_, source_, resistance_;
 };

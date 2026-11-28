@@ -16,6 +16,8 @@ struct FluidProperties {
     double c;      // Specific heat [J/(kg*K)].
 };
 
+inline constexpr FluidProperties kBasinFluid{.lambda = 0.7, .rho = 1040.0, .c = 4184.0};
+
 struct ThermalProperties {
     double lambda; // Thermal conductivity [W/(m*K)].
     double rho_c;  // Volumetric heat capacity [J/(m^3*K)].

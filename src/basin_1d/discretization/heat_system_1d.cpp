@@ -8,7 +8,7 @@ HeatSystem1D::HeatSystem1D(std::span<const double> faces, std::span<const double
                            FluidProperties fluid, double surface_temperature, double basal_flux)
     : porosity_(porosity), lithotypes_(lithotypes), fluid_(fluid),
       surface_temperature_(surface_temperature), basal_flux_(basal_flux), dz_(porosity.size()),
-      conductance_(dz_.size()), mass_(dz_.size()), source_(dz_.size()) {
+      conductance_(dz_.size()), mass_(dz_.size()), source_(dz_.size()), resistance_(dz_.size()) {
     if (dz_.empty() || faces.size() != dz_.size() + 1 || lithotypes.size() != dz_.size())
         throw std::invalid_argument("Expected one material and porosity per 1D cell");
     for (std::size_t i = 0; i < dz_.size(); ++i) {
@@ -26,7 +26,7 @@ void HeatSystem1D::update_coefficients(const Vector& T) const {
         const auto p = thermal_properties(T[i], porosity_[i], *lithotypes_[i], fluid_);
         const double resistance = 0.5 * dz_[i] / p.lambda;
         conductance_[i] = 1. / (previous_resistance + resistance);
-        previous_resistance = resistance;
+        previous_resistance = resistance_[i] = resistance;
         mass_[i] = dz_[i] * p.rho_c;
         source_[i] = dz_[i] * p.A;
     }
@@ -86,4 +86,37 @@ void HeatSystem1D::assemble_matrix(NonlinearMethod method, double, const Vector&
     if (method != NonlinearMethod::picard)
         throw std::invalid_argument("1D heat system supports Picard only");
     assemble_bands(T, alpha, A);
+}
+
+Eigen::MatrixXd HeatSystem1D::assemble_ddm(const Vector& T, double alpha,
+                                           const Eigen::MatrixXd& previous, const Vector& dq,
+                                           SparseMatrix& A) const {
+    assemble_bands(T, alpha, A);
+    Eigen::MatrixXd rhs = Eigen::MatrixXd::Zero(T.size(), dq.size());
+    if (alpha != 0.)
+        for (Eigen::Index i = 0; i < T.size(); ++i)
+            rhs.row(i) = alpha * mass_[i] * previous.row(i);
+    rhs.bottomRows(1) += dq.native().transpose();
+    return rhs;
+}
+
+Vector HeatSystem1D::face_temperatures(const Vector& T, double end_flux, const Eigen::MatrixXd& S,
+                                       const Vector& dq, Eigen::MatrixXd* face_S) const {
+    update_coefficients(T);
+    Vector faces(T.size() + 1);
+    faces[0] = surface_temperature_;
+    if (face_S) {
+        face_S->resize(faces.size(), S.cols());
+        face_S->row(0).setZero();
+    }
+    for (Eigen::Index i = 1; i < T.size(); ++i) {
+        const double w = resistance_[i - 1] * conductance_[i];
+        faces[i] = std::lerp(T[i - 1], T[i], w);
+        if (face_S)
+            face_S->row(i) = (1. - w) * S.row(i - 1) + w * S.row(i);
+    }
+    faces[T.size()] = T[T.size() - 1] + resistance_.back() * end_flux;
+    if (face_S)
+        face_S->bottomRows(1) = S.bottomRows(1) + resistance_.back() * dq.native().transpose();
+    return faces;
 }

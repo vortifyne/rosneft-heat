@@ -2,6 +2,7 @@
 
 #include "basin/basin_snapshot.hpp"
 #include "basin/discretization/col_heat_system.hpp"
+#include "basin/forward/basin_time_step.hpp"
 #include "basin/geometry/basin_geometry_rdp.hpp"
 #include "basin/mesh/col_epoch_grid.hpp"
 #include "basin/mesh/col_field_transfer.hpp"
@@ -21,9 +22,6 @@
 #include <vector>
 
 namespace {
-
-constexpr double kSecondsPerMa = 1.0e6 * 365.25 * 24.0 * 3600.0;
-constexpr FluidProperties kFluid{.lambda = 0.7, .rho = 1040.0, .c = 4184.0};
 
 std::vector<double> lithotype_breakpoints(const BasinConfig& cfg0,
                                           const BasinConfig* cfg1 = nullptr) {
@@ -299,7 +297,7 @@ void BasinForwardSolver::advance_temperature_step(std::size_t index, double age_
         q = flux.at(mid_age);
     }
     boundaries.q_basal = [q](Point2D) { return q; };
-    ColHeatSystem system(grid, phi, lithotypes, kFluid, std::move(boundaries));
+    ColHeatSystem system(grid, phi, lithotypes, kBasinFluid, std::move(boundaries));
     system.set_flux_scheme(settings_.scheme);
     TimeIntegrator integrator;
     integrator.set_linear_solver(settings_.linear_solver);
@@ -339,7 +337,7 @@ Vector BasinForwardSolver::solve_initial_temperature(Eigen::MatrixXd* jacobian,
     });
     const auto boundaries =
         bc(cfg, cfg, 0.0, use_parameterized_flux_ ? &parameter_space_ : nullptr, cfg.age_ma);
-    ColHeatSystem system(initial_grid_, phi, lithotypes, kFluid, boundaries);
+    ColHeatSystem system(initial_grid_, phi, lithotypes, kBasinFluid, boundaries);
     system.set_flux_scheme(settings_.scheme);
     NonlinearSolver solver;
     solver.set_linear_solver(settings_.linear_solver);
@@ -398,9 +396,10 @@ void BasinForwardSolver::final_temperature_nodes(std::span<const double> T,
     for_each_layer_cell(final_grid_, [&](const ColCell& cell, double depth) {
         const auto& layer = cfg.layer(cell.layer_id);
         const double x = cell.center().x;
-        lambda[cell.index] = thermal_properties(T[cell.index], layer.phi_at(x, depth),
-                                                input_.lithotype(layer.lithotype_at(x)), kFluid)
-                                 .lambda;
+        lambda[cell.index] =
+            thermal_properties(T[cell.index], layer.phi_at(x, depth),
+                               input_.lithotype(layer.lithotype_at(x)), kBasinFluid)
+                .lambda;
     });
     const auto boundaries =
         bc(cfg, cfg, 0.0, use_parameterized_flux_ ? &parameter_space_ : nullptr, cfg.age_ma);
@@ -535,7 +534,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             std::vector<double> lambda(grid.cells.size());
             for (const auto& cell : grid.cells)
                 lambda[cell.index] = thermal_properties(T[cell.index], phi[cell.index],
-                                                        *lithotypes[cell.index], kFluid)
+                                                        *lithotypes[cell.index], kBasinFluid)
                                          .lambda;
             interpolate_horizontal_temperature(grid, values(T), lambda,
                                                bc(cfg0, cfg1, 0.0, flux, cfg0.age_ma), face_T);
@@ -560,17 +559,9 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             grid_start = step_start;
             const bool interior_knot = flux && knot != ages.end() && *knot > cfg1.age_ma;
             const double stop_age = interior_knot ? *knot : cfg1.age_ma;
-            const double stop_time = (cfg0.age_ma - stop_age) * kSecondsPerMa;
-            const double proposed = t + dt_max;
-            // Snap roundoff-sized gaps to the knot instead of taking an extra tiny BDF step.
-            const double time_tol = 8.0 * std::numeric_limits<double>::epsilon() * stop_time;
-            const double t_next = stop_time - proposed <= time_tol ? stop_time : proposed;
-            if (!(t_next > t))
-                throw std::runtime_error("Basal flux knot or timestep is below time resolution");
-            const double theta = t_next / duration;
-            const double end_age =
-                t_next == stop_time ? stop_age : std::lerp(cfg0.age_ma, cfg1.age_ma, theta);
-            if (interior_knot && t_next == stop_time)
+            const auto [t_next, theta, end_age, at_stop] =
+                next_basin_step(t, dt_max, cfg0.age_ma, cfg1.age_ma, duration, stop_age);
+            if (interior_knot && at_stop)
                 ++knot;
             const double dt = t_next - t;
             BasinIntervalStats step_stats{
@@ -582,7 +573,7 @@ BasinForwardResult BasinForwardSolver::solve(const BasinObserver& observe,
             // Steps end at flux knots, so the midpoint gives the exact mean basal flux.
             step_bc.q_basal = basal_flux(cfg0, cfg1, std::midpoint(t / duration, theta), flux,
                                          std::midpoint(age, end_age));
-            ColHeatSystem system(grid, phi, lithotypes, kFluid, std::move(step_bc));
+            ColHeatSystem system(grid, phi, lithotypes, kBasinFluid, std::move(step_bc));
             system.set_flux_scheme(settings.scheme);
             step_stats.timings.grid_s += elapsed_seconds(grid_start);
             const TimeIntegrationResult step =

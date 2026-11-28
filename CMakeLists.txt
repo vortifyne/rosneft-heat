@@ -83,6 +83,8 @@ target_link_libraries(basin_data PUBLIC basin_physics Eigen3::Eigen)
 
 add_library(basin_1d STATIC
   src/basin_1d/discretization/heat_system_1d.cpp
+  src/basin_1d/forward/basin_forward_solver_1d.cpp
+  src/basin_1d/mesh/section_transfer.cpp
   src/basin_1d/geometry/basin_section_1d.cpp
   src/basin_1d/inverse/section_observations.cpp
 )

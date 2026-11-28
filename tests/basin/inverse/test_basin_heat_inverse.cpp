@@ -1,6 +1,7 @@
 #include "basin/basin_snapshot.hpp"
 #include "basin/inverse/basin_heat_inverse_solver.hpp"
 #include "basin/io/basin_parameters.hpp"
+#include "basin_1d/forward/basin_forward_solver_1d.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -350,4 +351,39 @@ TEST(BasinObjective, SamplesTheDeeperSideOfAContactAndStaysWithinPinchingLayers)
     EXPECT_NEAR(residual[0], 0.0, 1e-12);
     EXPECT_NEAR(residual[1], 0.0, 1e-12);
     std::filesystem::remove_all(path);
+}
+
+TEST(BasinForwardSolver1D, MatchesLayeredBasinAtWellsAcrossDepositionAndFluxKnot) {
+    const auto path = small_problem();
+    write_file(
+        path / "layers.csv",
+        "age_ma,layer_id,layer_name,x,z_top,z_bottom,lithotype,porosity_top,porosity_bottom\n"
+        "20,1,old,0,0,2000,1,0.2,0.1\n20,1,old,2000,0,2000,1,0.2,0.1\n"
+        "10,2,new,0,0,500,1,0.3,0.2\n10,2,new,2000,0,500,1,0.3,0.2\n"
+        "10,1,old,0,500,2500,1,0.2,0.1\n10,1,old,2000,500,2500,1,0.2,0.1\n"
+        "0,2,new,0,0,350,1,0.2,0.1\n0,2,new,2000,0,350,1,0.2,0.1\n"
+        "0,1,old,0,350,2150,1,0.1,0.05\n0,1,old,2000,350,2150,1,0.1,0.05\n");
+    const auto input = BasinInput::read(path);
+    std::filesystem::remove_all(path);
+    const BasinHeatParameterSpace space({20, 14, 0}, {0.09, 0.08, 0.06});
+    const auto eta = space.to_normalized(space.values());
+    const BasinForwardSolver1D section(input, 500, small_settings());
+    BasinForwardSolver forward(input, small_settings());
+    forward.set_parameters(space);
+    using enum BasinObservable;
+    const std::vector<BasinObservation> points{{temperature, "A", 500, 0, 0, 1},
+                                               {temperature, "A", 500, 2150, 0, 1},
+                                               {reflectance, "A", 500, 310, 0, 1},
+                                               {reflectance, "A", 500, 350, 0, 1},
+                                               {reflectance, "A", 500, 1800, 0, 1}};
+    BasinObjective reference(std::move(forward), BasinHeatObservationData(points));
+    Eigen::MatrixXd J, expected_J;
+    const auto expected = reference.evaluate(eta, 1., &expected_J).residuals;
+    const auto actual = section.solve_at_wells(points, space, eta, &J);
+    EXPECT_LT((section.solve_at_wells(points, space, eta) - actual).infinity_norm(), 1e-9);
+    for (Eigen::Index i = 0; i < actual.size(); ++i) {
+        EXPECT_NEAR(actual[i], expected[i], 1.e-7 * std::max(1., std::abs(expected[i])));
+        EXPECT_LT((J.row(i) - expected_J.row(i)).norm(),
+                  1.e-6 * std::max(1., expected_J.row(i).norm()));
+    }
 }
