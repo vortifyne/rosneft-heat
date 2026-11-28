@@ -31,6 +31,7 @@ struct SectionEpoch1D {
 };
 
 struct BasinSection1D {
+    double x;
     std::vector<SectionConfig1D> configs;
     std::vector<SectionEpoch1D> epochs;
 };

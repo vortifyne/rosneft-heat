@@ -80,7 +80,10 @@ add_library(basin_data STATIC
 heat_configure_target(basin_data)
 target_link_libraries(basin_data PUBLIC basin_physics Eigen3::Eigen)
 
-add_library(basin_1d STATIC src/basin_1d/geometry/basin_section_1d.cpp)
+add_library(basin_1d STATIC
+  src/basin_1d/geometry/basin_section_1d.cpp
+  src/basin_1d/inverse/section_observations.cpp
+)
 heat_configure_target(basin_1d)
 target_link_libraries(basin_1d PUBLIC basin_data)
 
@@ -158,6 +161,7 @@ if(BUILD_TESTING)
   add_executable(basin_heat_tests
     tests/main.cpp
     tests/basin_1d/geometry/test_basin_section_1d.cpp
+    tests/basin_1d/inverse/test_section_observations.cpp
     tests/basin/geometry/test_basin_geometry.cpp
     tests/basin/mesh/test_col_epoch_grid.cpp
     tests/basin/mesh/test_col_field_transfer.cpp

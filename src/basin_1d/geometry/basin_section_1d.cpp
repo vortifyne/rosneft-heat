@@ -21,7 +21,7 @@ BasinSection1D make_basin_section_1d(std::span<const BasinConfig> configs, doubl
         throw std::invalid_argument(
             "Section requires two or more configurations and positive vertical steps");
 
-    BasinSection1D result;
+    BasinSection1D result{x, {}, {}};
     for (const auto& cfg : configs) {
         const auto present = [x](const BasinLayerProfile& layer) {
             return !layer.x.empty() && layer.x.front() <= x && x <= layer.x.back() &&
