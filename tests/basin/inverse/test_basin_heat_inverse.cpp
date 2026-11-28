@@ -2,12 +2,14 @@
 #include "basin/inverse/basin_heat_inverse_solver.hpp"
 #include "basin/io/basin_parameters.hpp"
 #include "basin_1d/forward/basin_forward_solver_1d.hpp"
+#include "basin_1d/inverse/fit_initial_flux_1d.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -386,4 +388,29 @@ TEST(BasinForwardSolver1D, MatchesLayeredBasinAtWellsAcrossDepositionAndFluxKnot
         EXPECT_LT((J.row(i) - expected_J.row(i)).norm(),
                   1.e-6 * std::max(1., expected_J.row(i).norm()));
     }
+}
+
+TEST(BasinForwardSolver1D, FitsSectionStartAndKeepsConstantFluxForEmptySelection) {
+    const auto path = small_problem();
+    const auto input = BasinInput::read(path);
+    std::filesystem::remove_all(path);
+    const BasinForwardSolver1D section(input, 500, small_settings());
+    const BasinHeatParameterSpace space({20, 14, 0}, {0.075, 0.075, 0.075});
+    std::vector<BasinObservation> points{{BasinObservable::temperature, "A", 500, 1800, 0, 0.01},
+                                         {BasinObservable::temperature, "B", 1500, 2200, 300, 1}};
+    const Vector initial = space.to_normalized(space.values());
+    points.front().value =
+        section.solve_at_wells(std::span(points).first(1), space, initial)[0] - 1.;
+    const BasinHeatObservationData observations(points);
+    const std::vector<std::string> wells{"A", "B"}, outside{"B"};
+    const auto options = BasinHeatInverseSolveRequest{}.optimization;
+    std::ostringstream log;
+    const auto fit = fit_initial_flux_1d(section, space, observations, wells, options, log);
+    const auto prediction =
+        section.solve_at_wells(std::span(points).first(1), space, space.to_normalized(fit));
+    EXPECT_LT(std::abs(prediction[0] - points.front().value), 1.);
+    EXPECT_TRUE(
+        (fit_initial_flux_1d(section, space, observations, outside, options, log) - space.values())
+            .native()
+            .isZero());
 }

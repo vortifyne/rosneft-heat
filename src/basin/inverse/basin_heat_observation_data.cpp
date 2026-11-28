@@ -62,3 +62,38 @@ Vector::Index BasinHeatObservationData::size() const noexcept {
 std::span<const BasinObservation> BasinHeatObservationData::points() const noexcept {
     return points_;
 }
+
+namespace {
+double residual_scale(const BasinObservation& point) {
+    return point.error; // The current least-squares weight is 1 / measurement error.
+}
+
+} // namespace
+
+Vector BasinHeatObservationData::residuals_in_error_units(Vector weighted) const {
+    if (weighted.size() != size())
+        throw std::invalid_argument("Expected one residual per observation");
+    for (Vector::Index i = 0; i < weighted.size(); ++i) {
+        const auto& point = points()[static_cast<std::size_t>(i)];
+        weighted[i] *= residual_scale(point) / point.error;
+    }
+    return weighted;
+}
+
+LeastSquaresEvaluation
+BasinHeatObservationData::evaluate_predictions(Vector residuals, double tolerance,
+                                               Eigen::MatrixXd* jacobian) const {
+    if (residuals.size() != size() || (jacobian && jacobian->rows() != residuals.size()))
+        throw std::runtime_error("Unexpected basin observation or Jacobian dimensions");
+    bool within_errors = tolerance > 0.0;
+    for (Vector::Index i = 0; i < residuals.size(); ++i) {
+        const auto& point = points()[static_cast<std::size_t>(i)];
+        const double residual = residuals[i] - point.value;
+        within_errors = within_errors && std::abs(residual) <= tolerance * point.error;
+        const double scale = residual_scale(point);
+        residuals[i] = residual / scale;
+        if (jacobian)
+            jacobian->row(i) /= scale;
+    }
+    return {std::move(residuals), within_errors};
+}

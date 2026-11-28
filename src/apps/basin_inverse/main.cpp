@@ -1,6 +1,7 @@
 #include "basin/inverse/basin_heat_inverse_solver.hpp"
 #include "basin/io/basin_forward_options.hpp"
 #include "basin/io/basin_parameters.hpp"
+#include "basin_1d/inverse/fit_initial_flux_1d.hpp"
 #include "numerics/timing.hpp"
 
 #include <cmath>
@@ -9,6 +10,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <petscsys.h>
 #include <stdexcept>
 #include <string>
@@ -47,7 +49,7 @@ int main(int argc, char* argv[]) {
         std::cerr
             << "Usage: basin_inverse_solver <input-dir> <output-dir> "
                "[--method pounders|gauss-newton] [--initial-q mW/m2] [--initial-parameters csv] "
-               "[--maxiter n] [--maxfev n] "
+               "[--section-x m --section-well name ...] [--maxiter n] [--maxfev n] "
                "[--residual-tol value] [--save-forward] [forward options...] [PETSc -options...]\n";
         return 1;
     }
@@ -57,6 +59,8 @@ int main(int argc, char* argv[]) {
         BasinForwardSettings settings;
         BasinHeatInverseSolveRequest request;
         double initial_flux = default_initial_flux;
+        std::optional<double> section_x;
+        std::vector<std::string> section_wells;
         bool save_forward = false;
         std::filesystem::path initial_path;
         int index = 3;
@@ -73,6 +77,10 @@ int main(int argc, char* argv[]) {
                 initial_flux = std::stod(value);
             else if (option == "--initial-parameters")
                 initial_path = value;
+            else if (option == "--section-x")
+                section_x = std::stod(value);
+            else if (option == "--section-well")
+                section_wells.push_back(value);
             else if (option == "--method") {
                 if (value == "gauss-newton")
                     request.method = BasinInverseMethod::gauss_newton;
@@ -89,6 +97,9 @@ int main(int argc, char* argv[]) {
             else
                 set_basin_forward_option(settings, option, value);
         }
+        if ((section_x && section_wells.empty()) || (!section_x && !section_wells.empty()))
+            throw std::invalid_argument(
+                "1D initialization requires --section-x and at least one --section-well");
         const auto& linear = settings.linear_solver;
         const bool forward_uses_petsc = linear.method != LinearMethod::lu &&
                                         !(linear.method == LinearMethod::fgmres &&
@@ -109,19 +120,29 @@ int main(int argc, char* argv[]) {
             std::cout << "Reading prepared input data...\n" << std::flush;
             auto basin_input = BasinInput::read(input);
             std::cout << "Prepared input read; building epoch grids...\n" << std::flush;
+            auto observations = BasinHeatObservationData::read(input / "observations.csv");
+            std::optional<BasinForwardSolver1D> section;
+            if (section_x)
+                section.emplace(basin_input, *section_x, settings);
             BasinForwardSolver forward(std::move(basin_input), settings);
             std::cout << "Epoch grids ready; starting inverse problem...\n" << std::flush;
-            if (initial_path.empty()) {
-                Vector initial(static_cast<Vector::Index>(forward.configs().size()));
-                initial.set_constant(initial_flux / 1000.0);
-                forward.set_parameters(initial);
-            } else {
+            if (!initial_path.empty())
                 forward.set_parameters(read_basin_parameters(initial_path));
+            if (initial_path.empty() || section) {
+                Vector initial(forward.parameter_space().values().size());
+                initial.set_constant(initial_flux / 1000.0);
+                forward.set_parameters(std::move(initial));
+            }
+            if (section) {
+                forward.set_parameters(fit_initial_flux_1d(*section, forward.parameter_space(),
+                                                           observations, section_wells,
+                                                           request.optimization, std::cout));
+                section.reset();
             }
             request.initial_parameters = forward.parameter_space().values();
             write_basin_parameters(output / "initial_parameters.csv", forward.parameter_space());
-            BasinHeatInverseSolver solver(BasinObjective(
-                std::move(forward), BasinHeatObservationData::read(input / "observations.csv")));
+            BasinHeatInverseSolver solver(
+                BasinObjective(std::move(forward), std::move(observations)));
             auto& objective = solver.objective();
             const auto points = objective.observations().points();
             int temperature_count = 0, reflectance_count = 0;

@@ -28,10 +28,6 @@ double fraction(double value, double first, double second) {
     return first == second ? 0.0 : (value - first) / (second - first);
 }
 
-double residual_scale(const BasinObservation& point) {
-    return point.error; // The current least-squares weight is 1 / measurement error.
-}
-
 } // namespace
 
 BasinObjective::BasinObjective(BasinForwardSolver forward, BasinHeatObservationData observations)
@@ -140,31 +136,14 @@ BasinForwardSolver& BasinObjective::forward_solver() noexcept {
 }
 
 Vector BasinObjective::residuals_in_error_units(Vector weighted) const {
-    if (weighted.size() != observations_.size())
-        throw std::invalid_argument("Expected one residual per observation");
-    for (Vector::Index i = 0; i < weighted.size(); ++i) {
-        const auto& point = observations_.points()[static_cast<std::size_t>(i)];
-        weighted[i] *= residual_scale(point) / point.error;
-    }
-    return weighted;
+    return observations_.residuals_in_error_units(std::move(weighted));
 }
 
 LeastSquaresEvaluation BasinObjective::evaluate(const Vector& eta, double tolerance,
                                                 Eigen::MatrixXd* jacobian) {
     forward_.set_parameters(parameter_space().to_physical(eta));
     Vector residuals = forward_.solve_at_wells(interpolation_, jacobian, &eta);
-    if (residuals.size() != observations_.size() ||
-        (jacobian && (jacobian->rows() != residuals.size() || jacobian->cols() != eta.size())))
-        throw std::runtime_error("Unexpected basin observation or Jacobian dimensions");
-    bool within_errors = tolerance > 0.0;
-    for (Vector::Index i = 0; i < residuals.size(); ++i) {
-        const auto& point = observations_.points()[static_cast<std::size_t>(i)];
-        const double residual = residuals[i] - point.value;
-        within_errors = within_errors && std::abs(residual) <= tolerance * point.error;
-        const double scale = residual_scale(point);
-        residuals[i] = residual / scale;
-        if (jacobian)
-            jacobian->row(i) /= scale;
-    }
-    return {std::move(residuals), within_errors};
+    if (jacobian && jacobian->cols() != eta.size())
+        throw std::runtime_error("Unexpected basin Jacobian column count");
+    return observations_.evaluate_predictions(std::move(residuals), tolerance, jacobian);
 }

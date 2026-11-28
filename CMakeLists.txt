@@ -68,6 +68,7 @@ target_link_libraries(basin_physics PUBLIC Eigen3::Eigen)
 add_library(basin_data STATIC
   src/basin/basin_problem.cpp
   src/basin/io/basin_input.cpp
+  src/basin/inverse/basin_heat_observation_data.cpp
   src/basin/inverse/basin_heat_parameter_space.cpp
   src/basin/io/basin_parameters.cpp
   src/basin/geometry/basin_geometry.cpp
@@ -86,10 +87,11 @@ add_library(basin_1d STATIC
   src/basin_1d/forward/basin_forward_solver_1d.cpp
   src/basin_1d/mesh/section_transfer.cpp
   src/basin_1d/geometry/basin_section_1d.cpp
+  src/basin_1d/inverse/fit_initial_flux_1d.cpp
   src/basin_1d/inverse/section_observations.cpp
 )
 heat_configure_target(basin_1d)
-target_link_libraries(basin_1d PUBLIC basin_data heat_numerics)
+target_link_libraries(basin_1d PUBLIC basin_data heat_numerics heat_opt)
 
 add_library(basin_heat_forward STATIC
   src/basin/forward/basin_forward_solver.cpp
@@ -104,7 +106,6 @@ heat_configure_target(basin_heat_forward)
 target_link_libraries(basin_heat_forward PUBLIC heat_numerics basin_data)
 
 add_library(basin_heat_inverse STATIC
-  src/basin/inverse/basin_heat_observation_data.cpp
   src/basin/inverse/basin_objective.cpp
   src/basin/inverse/basin_heat_inverse_solver.cpp
 )
@@ -119,7 +120,7 @@ target_link_libraries(basin_forward_app PRIVATE basin_heat_forward PkgConfig::PE
 add_executable(basin_inverse_app src/apps/basin_inverse/main.cpp)
 set_target_properties(basin_inverse_app PROPERTIES OUTPUT_NAME basin_inverse_solver)
 heat_configure_target(basin_inverse_app)
-target_link_libraries(basin_inverse_app PRIVATE basin_heat_inverse PkgConfig::PETSc MPI::MPI_CXX)
+target_link_libraries(basin_inverse_app PRIVATE basin_heat_inverse basin_1d PkgConfig::PETSc MPI::MPI_CXX)
 
 if(HEAT_BUILD_MODEL)
   add_library(model_heat_forward STATIC
