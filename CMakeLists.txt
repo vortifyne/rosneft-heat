@@ -36,6 +36,7 @@ endfunction()
 
 add_library(heat_numerics STATIC
   src/numerics/linear/fgmres.cpp
+  src/numerics/linear/tdma_linear_solver.cpp
   src/numerics/linear/umfpack_linear_solver.cpp
   src/numerics/linear/petsc_krylov_linear_solver.cpp
   src/numerics/linear/petsc_preconditioner.cpp
@@ -46,7 +47,7 @@ add_library(heat_numerics STATIC
 heat_configure_target(heat_numerics)
 target_link_libraries(heat_numerics
   PUBLIC Eigen3::Eigen
-  PRIVATE SuiteSparse::UMFPACK_static PkgConfig::PETSc MPI::MPI_CXX
+  PRIVATE tdma::tdma SuiteSparse::UMFPACK_static PkgConfig::PETSc MPI::MPI_CXX
 )
 
 add_library(heat_opt STATIC EXCLUDE_FROM_ALL
@@ -81,11 +82,12 @@ heat_configure_target(basin_data)
 target_link_libraries(basin_data PUBLIC basin_physics Eigen3::Eigen)
 
 add_library(basin_1d STATIC
+  src/basin_1d/discretization/heat_system_1d.cpp
   src/basin_1d/geometry/basin_section_1d.cpp
   src/basin_1d/inverse/section_observations.cpp
 )
 heat_configure_target(basin_1d)
-target_link_libraries(basin_1d PUBLIC basin_data)
+target_link_libraries(basin_1d PUBLIC basin_data heat_numerics)
 
 add_library(basin_heat_forward STATIC
   src/basin/forward/basin_forward_solver.cpp
@@ -160,6 +162,7 @@ if(BUILD_TESTING)
 
   add_executable(basin_heat_tests
     tests/main.cpp
+    tests/basin_1d/discretization/test_heat_system_1d.cpp
     tests/basin_1d/geometry/test_basin_section_1d.cpp
     tests/basin_1d/inverse/test_section_observations.cpp
     tests/basin/geometry/test_basin_geometry.cpp

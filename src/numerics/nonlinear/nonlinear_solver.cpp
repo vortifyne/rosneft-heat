@@ -3,6 +3,7 @@
 #include "numerics/linear/fgmres.hpp"
 #include "numerics/linear/petsc_krylov_linear_solver.hpp"
 #include "numerics/linear/petsc_preconditioner.hpp"
+#include "numerics/linear/tdma_linear_solver.hpp"
 #include "numerics/linear/umfpack_linear_solver.hpp"
 
 #include <cmath>
@@ -118,6 +119,8 @@ std::unique_ptr<LinearSolver> NonlinearSolver::make_linear_solver(LinearSolverOp
             return std::make_unique<FGMRES>(std::make_unique<PetscPreconditioner>(
                 options.preconditioner == PreconditionerType::ilu2 ? 2 : 0));
         throw std::invalid_argument("FGMRES supports --pc none, ilu or ilu2");
+    case LinearMethod::tdma:
+        return std::make_unique<TdmaLinearSolver>();
     case LinearMethod::lu:
         return std::make_unique<UmfpackLinearSolver>();
     case LinearMethod::gmres:

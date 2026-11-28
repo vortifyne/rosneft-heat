@@ -37,6 +37,7 @@ enum class LinearSolverType {
 
 enum class LinearMethod {
     lu,
+    tdma,
     gmres,
     bicgstab,
     fgmres
@@ -64,7 +65,7 @@ public:
         return type_;
     }
 
-    virtual SparseStorageOrder required_storage_order() const noexcept = 0;
+    virtual MatrixStorageFormat required_storage_order() const noexcept = 0;
 
     // Affects iterative preconditioners; direct solvers ignore this setting.
     virtual void set_preconditioner_reuse(bool) noexcept {}
